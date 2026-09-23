@@ -13,9 +13,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  ProjectStatusPill,
   formatReportDate,
-  modeLabel,
   projectStateSubCaption,
 } from "@/components/growth-intelligence/research-project-row";
 import type {
@@ -24,20 +22,22 @@ import type {
 } from "@/modules/growth-intelligence/application/market-watch";
 
 /**
- * Read-only overview for one research project: its state, its full question
- * and its report history, newest first. Project controls (pause, stop) are
- * shown disabled with their reason until the backend update ships them; this
- * dialog never starts, pauses or stops anything.
+ * Read-only history for one research project: its update and report rows,
+ * newest first. Project controls (pause, stop) are shown disabled with their
+ * reason until the backend update ships them; this dialog never starts,
+ * pauses or stops anything. There is no brief viewer yet, so the update row
+ * names the live brief with its state while its button stays disabled with
+ * its reason; finished reports open in the report reader.
  *
  * While the update is queued or researching, the body follows the approved
- * progress mockup: the live status pill, the full question, a four-step
- * timeline (step one names the live position — queued brief vs saved brief),
- * and the close-later caption. Report history below it is unchanged live
- * data; presentation only, no binding changed.
+ * progress mockup: a four-step timeline (step one names the live position —
+ * queued brief vs saved brief) and the close-later caption. Report history
+ * below it is unchanged live data; presentation only, no binding changed.
  */
 export function ProjectOverviewDialog({
   project,
   reports,
+  briefNumbers,
   timeZone,
   open,
   onOpenChange,
@@ -45,6 +45,11 @@ export function ProjectOverviewDialog({
 }: {
   project: MarketWatchProjectListItem;
   reports: readonly MarketWatchProjectReportSummary[];
+  /**
+   * Brief revision numbers keyed by revision id for the history sublines.
+   * Absent by default: sublines render numberless rather than failing.
+   */
+  briefNumbers?: ReadonlyMap<string, number>;
   timeZone: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -63,6 +68,11 @@ export function ProjectOverviewDialog({
   const started = project.displayState === "researching";
   const historyRef = useRef<HTMLDivElement>(null);
 
+  function briefSubline(revisionId: string, state: string): string {
+    const number = briefNumbers?.get(revisionId);
+    return number === undefined ? `Brief · ${state}` : `Brief ${number} · ${state}`;
+  }
+
   function showHistory() {
     const node = historyRef.current;
     if (!node) return;
@@ -80,27 +90,33 @@ export function ProjectOverviewDialog({
           <p className="text-[11px] font-bold tracking-[0.08em] text-emerald-700 uppercase dark:text-emerald-300">
             Market Watch
           </p>
-          <DialogTitle className="mt-2 text-xl font-semibold tracking-tight">
-            {project.title}
+          <DialogTitle className="mt-2 text-[22px] font-bold tracking-tight">
+            Project history
           </DialogTitle>
-          <DialogDescription className="mt-1 text-[13px]">
-            {project.branchName} · {modeLabel(project.mode)}
+          <DialogDescription className="mt-2 min-w-0 text-[13px] break-words">
+            {project.title} · {project.branchName}
           </DialogDescription>
         </DialogHeader>
 
         <div className="px-7 py-6">
-          <ProjectStatusPill displayState={project.displayState} />
-          <p className="mt-4 min-w-0 text-[13px] leading-relaxed text-muted-foreground break-words">
-            {project.question}
+          <p className="min-w-0 text-sm text-muted-foreground break-words">
+            Each report keeps the question and evidence used for that update.
           </p>
-          {latestReport ? (
-            <div className="mt-4">
+          {!isProgress && project.latestRevision ? (
+            <div className="mt-2 flex min-w-0 items-center justify-between gap-3 border-b py-5">
+              <div className="min-w-0">
+                <p className="min-w-0 text-sm font-bold break-words">Current update</p>
+                <p className="mt-0.5 min-w-0 text-[13px] text-muted-foreground break-words">
+                  {briefSubline(project.latestRevision.revisionId, project.stateLabel)}
+                </p>
+              </div>
               <Button
-                disabled={!readerReady}
-                title={readerReady ? undefined : "Report review is unavailable in this view."}
-                onClick={() => onReviewReport?.(latestReport.reportVersionId)}
+                variant="outline"
+                className="h-10 shrink-0"
+                disabled
+                title="Viewing a brief is not available yet — finished reports open in the report reader below."
               >
-                Review report
+                View update
               </Button>
             </div>
           ) : null}
@@ -201,31 +217,28 @@ export function ProjectOverviewDialog({
                     return (
                       <li
                         key={report.reportVersionId}
-                        className="flex min-w-0 flex-col gap-1 border-b py-3 first:pt-0 last:border-b-0 last:pb-0"
+                        className="flex min-w-0 items-center justify-between gap-3 border-b py-5 last:border-b-0 last:pb-0"
                       >
-                        <p className="min-w-0 text-sm font-semibold break-words">
-                          Report · {dateLabel}
-                        </p>
-                        {report.takeaway ? (
-                          <p className="min-w-0 text-sm leading-relaxed text-muted-foreground break-words">
-                            {report.takeaway}
+                        <div className="min-w-0">
+                          <p className="min-w-0 text-sm font-bold break-words">
+                            Report · {dateLabel}
                           </p>
-                        ) : null}
-                        <div>
-                          <Button
-                            variant="link"
-                            size="sm"
-                            className="h-auto px-0"
-                            disabled={!readerReady}
-                            title={
-                              readerReady ? undefined : "Report review is unavailable in this view."
-                            }
-                            aria-label={`Review report · ${dateLabel}`}
-                            onClick={() => onReviewReport?.(report.reportVersionId)}
-                          >
-                            Review
-                          </Button>
+                          <p className="mt-0.5 min-w-0 text-[13px] text-muted-foreground break-words">
+                            {briefSubline(report.briefRevisionId, "Saved report")}
+                          </p>
                         </div>
+                        <Button
+                          variant="outline"
+                          className="h-10 shrink-0"
+                          disabled={!readerReady}
+                          title={
+                            readerReady ? undefined : "Report review is unavailable in this view."
+                          }
+                          aria-label={`Read report · ${dateLabel}`}
+                          onClick={() => onReviewReport?.(report.reportVersionId)}
+                        >
+                          Read report
+                        </Button>
                       </li>
                     );
                   })}
@@ -237,9 +250,14 @@ export function ProjectOverviewDialog({
 
         <DialogFooter className="mx-0 mb-0 justify-between gap-3 rounded-b-2xl bg-background px-7 py-4 max-sm:flex-col max-sm:items-stretch">
           <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" className="h-10" onClick={() => onOpenChange(false)}>
+              Close
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 max-sm:justify-end">
             <Button
               variant="outline"
-              size="sm"
+              className="h-10"
               disabled
               title="Pausing is not available yet — project controls arrive with the backend update."
             >
@@ -247,19 +265,14 @@ export function ProjectOverviewDialog({
             </Button>
             <Button
               variant="outline"
-              size="sm"
+              className="h-10"
               disabled
               title="Stopping is not available yet — project controls arrive with the backend update."
             >
               Stop this research
             </Button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 max-sm:justify-end">
-            <Button variant="outline" size="sm" onClick={showHistory}>
+            <Button variant="outline" className="h-10" onClick={showHistory}>
               History
-            </Button>
-            <Button size="sm" onClick={() => onOpenChange(false)}>
-              Close
             </Button>
           </div>
         </DialogFooter>

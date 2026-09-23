@@ -132,6 +132,9 @@ function dialogProps(overrides: Record<string, unknown> = {}) {
   return {
     project: readyProject(),
     reports: [NEWEST_REPORT, OLDER_REPORT],
+    briefNumbers: new Map([
+      ["61000000-0000-4000-8000-000000000061", 1],
+    ]),
     timeZone: TIME_ZONE,
     open: true,
     onOpenChange: vi.fn(),
@@ -144,26 +147,26 @@ afterEach(() => {
 });
 
 describe("ProjectOverviewDialog", () => {
-  it("renders the title, question, pill and report history newest-first", () => {
+  it("renders the prototype header, current update row and report rows newest-first", () => {
     render(<ProjectOverviewDialog {...dialogProps()} />);
 
-    expect(screen.getByText("Market Watch")).toBeTruthy();
-    expect(screen.getByText("Prepare for National Day")).toBeTruthy();
-    expect(screen.getByText("Downtown · One-time research")).toBeTruthy();
-    expect(screen.getByText("How should we prepare for National Day?")).toBeTruthy();
-    expect(screen.getByText("Ready to review")).toBeTruthy();
-    expect(screen.getByText(`Report · ${reportDate("2026-09-12T10:00:00Z")}`)).toBeTruthy();
-    expect(screen.getByText(`Report · ${reportDate("2026-09-08T10:00:00Z")}`)).toBeTruthy();
-    expect(screen.getByText(/Compare family offers and check delivery capacity/)).toBeTruthy();
-  });
-
-  it("skips the takeaway line when a report has none", () => {
-    render(<ProjectOverviewDialog {...dialogProps({ reports: [OLDER_REPORT] })} />);
-
-    expect(screen.getByText(`Report · ${reportDate("2026-09-08T10:00:00Z")}`)).toBeTruthy();
+    expect(screen.getByText("Project history")).toBeTruthy();
+    expect(screen.getByText(/Prepare for National Day · Downtown/)).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: `Review report · ${reportDate("2026-09-08T10:00:00Z")}` }),
+      screen.getByText("Each report keeps the question and evidence used for that update."),
     ).toBeTruthy();
+    expect(screen.getByText("Current update")).toBeTruthy();
+    expect(screen.getByText("Brief 1 · Ready to review")).toBeTruthy();
+    const viewUpdate = screen.getByRole("button", { name: "View update" });
+    expect(viewUpdate).toHaveProperty("disabled", true);
+    expect(viewUpdate.getAttribute("title")).toMatch(/brief.*not available yet/i);
+    expect(screen.getByText(`Report · ${reportDate("2026-09-12T10:00:00Z")}`)).toBeTruthy();
+    expect(screen.getByText("Brief 1 · Saved report")).toBeTruthy();
+    expect(screen.getByText(`Report · ${reportDate("2026-09-08T10:00:00Z")}`)).toBeTruthy();
+    // Unknown revision ids stay numberless rather than failing or guessing.
+    expect(screen.getByText("Brief · Saved report")).toBeTruthy();
+    // Takeaways live in the reader, never in the history rows.
+    expect(screen.queryByText(/Compare family offers and check delivery capacity/)).toBeNull();
   });
 
   it("shows the queued progress timeline instead of an empty history when no reports exist", () => {
@@ -188,14 +191,13 @@ describe("ProjectOverviewDialog", () => {
     expect(screen.queryByRole("button", { name: "Review report" })).toBeNull();
   });
 
-  it("names the saved brief and live pill for researching projects", () => {
+  it("names the saved brief timeline for researching projects without a top pill", () => {
     render(
       <ProjectOverviewDialog {...dialogProps({ project: researchingProject(), reports: [] })} />,
     );
 
-    expect(screen.getByText("National Day opportunity")).toBeTruthy();
-    expect(screen.getByText("Downtown · Recurring research")).toBeTruthy();
-    expect(screen.getByText("Researching")).toBeTruthy();
+    expect(screen.getByText(/National Day opportunity · Downtown/)).toBeTruthy();
+    expect(screen.queryByText("Researching", { exact: true })).toBeNull();
     expect(screen.getByText("Brief saved")).toBeTruthy();
     expect(
       screen.getByText("The exact question and scope are saved for this update."),
@@ -221,7 +223,7 @@ describe("ProjectOverviewDialog", () => {
 
     // History only moves focus within the dialog; it never navigates.
     fireEvent.click(within(footer as HTMLElement).getByRole("button", { name: "History" }));
-    expect(screen.getByText("National Day opportunity")).toBeTruthy();
+    expect(screen.getByText(/National Day opportunity/)).toBeTruthy();
   });
 
   it("keeps pause and stop disabled with honest backend-update reasons", () => {
@@ -239,32 +241,26 @@ describe("ProjectOverviewDialog", () => {
   it("keeps review controls disabled with their reason without onReviewReport", () => {
     render(<ProjectOverviewDialog {...dialogProps()} />);
 
-    const review = screen.getByRole("button", { name: "Review report" });
-    expect(review).toHaveProperty("disabled", true);
-    expect(review.getAttribute("title")).toMatch(/unavailable in this view/i);
-
-    const historyReview = screen.getByRole("button", {
-      name: `Review report · ${reportDate("2026-09-12T10:00:00Z")}`,
+    const historyRead = screen.getByRole("button", {
+      name: `Read report · ${reportDate("2026-09-12T10:00:00Z")}`,
     });
-    expect(historyReview).toHaveProperty("disabled", true);
-    expect(historyReview.getAttribute("title")).toMatch(/unavailable in this view/i);
+    expect(historyRead).toHaveProperty("disabled", true);
+    expect(historyRead.getAttribute("title")).toMatch(/unavailable in this view/i);
   });
 
-  it("routes the latest Review report through onReviewReport with its id", () => {
-    const onReviewReport = vi.fn();
-    render(<ProjectOverviewDialog {...dialogProps({ onReviewReport })} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Review report" }));
-    expect(onReviewReport).toHaveBeenCalledWith("60000000-0000-4000-8000-000000000006");
-  });
-
-  it("routes each history Review link through onReviewReport with its id", () => {
+  it("routes each history Read report through onReviewReport with its id", () => {
     const onReviewReport = vi.fn();
     render(<ProjectOverviewDialog {...dialogProps({ onReviewReport })} />);
 
     fireEvent.click(
       screen.getByRole("button", {
-        name: `Review report · ${reportDate("2026-09-08T10:00:00Z")}`,
+        name: `Read report · ${reportDate("2026-09-12T10:00:00Z")}`,
+      }),
+    );
+    expect(onReviewReport).toHaveBeenCalledWith("60000000-0000-4000-8000-000000000006");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: `Read report · ${reportDate("2026-09-08T10:00:00Z")}`,
       }),
     );
     expect(onReviewReport).toHaveBeenCalledWith("62000000-0000-4000-8000-000000000062");
@@ -284,6 +280,6 @@ describe("ProjectOverviewDialog", () => {
   it("mounts through the open prop only", () => {
     render(<ProjectOverviewDialog {...dialogProps({ open: false })} />);
 
-    expect(screen.queryByText("Prepare for National Day")).toBeNull();
+    expect(screen.queryByText(/Prepare for National Day/)).toBeNull();
   });
 });

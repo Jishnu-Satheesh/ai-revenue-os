@@ -530,12 +530,18 @@ describe("MarketWatchProjectsSection", () => {
       expect(await screen.findByText("Prepare for National Day")).toBeTruthy();
 
       fireEvent.click(screen.getByRole("button", { name: /project history/i }));
-      // P7: the featured Ready-to-review card shows the brief question, so the
-      // overview dialog duplicates it while open. Assert on the dialog scope.
+      // The history dialog owns its heading; the question stays on the
+      // featured card only. Assert on the dialog scope.
       const dialog = await screen.findByRole("dialog");
       expect(dialog).toBeTruthy();
+      expect(
+        within(dialog as HTMLElement).getByRole("heading", { name: "Project history" }),
+      ).toBeTruthy();
+      expect(
+        within(dialog as HTMLElement).getByText(/Each report keeps the question/),
+      ).toBeTruthy();
       const questions = await screen.findAllByText("How should we prepare for National Day?");
-      expect(questions.length).toBeGreaterThanOrEqual(2);
+      expect(questions.length).toBe(1);
       const pause = screen.getByRole("button", { name: /pause monitoring/i });
       expect(pause).toHaveProperty("disabled", true);
 

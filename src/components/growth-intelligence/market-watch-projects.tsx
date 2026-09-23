@@ -646,6 +646,13 @@ export function MarketWatchProjectsSection({
     overviewProjectId === null
       ? []
       : (projects?.reportsByProject[overviewProjectId] ?? []);
+  // Brief numbers for the dialog's history sublines, keyed by revision id.
+  const overviewBriefNumbers = new Map<string, number>();
+  if (overviewProjectId !== null) {
+    for (const revision of projects?.revisionsByProject[overviewProjectId] ?? []) {
+      overviewBriefNumbers.set(revision.revisionId, revision.revisionNumber);
+    }
+  }
 
   return (
     <>
@@ -663,6 +670,7 @@ export function MarketWatchProjectsSection({
         <ProjectOverviewDialog
           project={overviewItem}
           reports={overviewReports}
+          briefNumbers={overviewBriefNumbers}
           timeZone={timeZone}
           open={overviewProjectId !== null}
           onOpenChange={(next) => {
