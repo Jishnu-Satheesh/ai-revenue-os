@@ -3590,6 +3590,17 @@ export type Database = {
           schedule_origin_date: string;
         }[];
       };
+      /**
+       * Public lead capture. Records a validated signup or reports a replay;
+       * the unique (email, intent) pair is the idempotency guard. Granted to
+       * service_role only; the route calls it after strict Zod validation.
+       */
+      record_public_lead: {
+        Args: {
+          input_lead: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
     };
     Enums: {
       organization_status: "draft_onboarding" | "active" | "archived";

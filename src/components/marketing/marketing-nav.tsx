@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 import { nav, WALKTHROUGH_MAILTO } from "@/components/marketing/content";
 import { Button } from "@/components/ui/button";
 
@@ -6,13 +8,14 @@ export function MarketingNav() {
     <header className="sticky top-0 z-40 w-full border-b border-border bg-background/70 backdrop-blur-xl">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
         <span className="flex items-center gap-2.5">
-          <span
-            aria-hidden="true"
-            className="flex size-6 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground"
-          >
-            L
-          </span>
-          <span className="text-sm font-semibold tracking-tight">{nav.productName}</span>
+          <Image
+            src="/assets/logo/dark-theme.png"
+            alt={nav.productName}
+            width={160}
+            height={90}
+            className="h-7 w-auto"
+          />
+          <span className="sr-only">{nav.productName}</span>
         </span>
         <div className="flex items-center gap-6">
           <a

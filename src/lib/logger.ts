@@ -9,6 +9,8 @@ type LogContext = {
   /** The user a member change acted on. Opaque UUID, like the other ids here. */
   userId?: string;
   invitationId?: string;
+  /** A captured public lead row. Opaque UUID, like the other ids here. */
+  leadId?: string;
   /** A stable reason code. Never the message shown to the caller. */
   refusalCode?: string;
   branchId?: string;

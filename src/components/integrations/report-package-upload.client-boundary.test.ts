@@ -21,7 +21,9 @@ describe("ReportPackageUpload client boundary", () => {
 
   it("names failed projection actions as retries and recognises a failed run", () => {
     expect(componentSource).toContain('latestProjection?.status === "failed"');
-    expect(componentSource).toContain('reportPackage.status === "projection_failed"');
+    // Optional chaining: the drawer derives above its early return so the
+    // hook count never changes between open and closed renders.
+    expect(componentSource).toContain('reportPackage?.status === "projection_failed"');
     expect(componentSource).toContain('"Retry projection"');
   });
 

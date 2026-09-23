@@ -2,12 +2,19 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { footer, WALKTHROUGH_MAILTO } from "@/components/marketing/content";
+import { footer, nav, WALKTHROUGH_MAILTO } from "@/components/marketing/content";
 import { MarketingFooter } from "@/components/marketing/marketing-footer";
 
 afterEach(cleanup);
 
 describe("MarketingFooter", () => {
+  it("shows the dark-theme brand lockup", () => {
+    render(<MarketingFooter />);
+
+    const logo = screen.getByRole("img", { name: nav.productName });
+    expect(logo.getAttribute("src")).toContain("dark-theme");
+  });
+
   it("shows the tagline", () => {
     render(<MarketingFooter />);
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Building2, CircleAlert, Mail, ShieldCheck, UserCheck } from "lucide-react";
+import { ArrowRight, Building2, CircleAlert, Mail, ShieldCheck } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -32,8 +33,14 @@ function Shell({ children }: { children: React.ReactNode }) {
     <main className="flex min-h-dvh items-center justify-center bg-background px-6 py-12">
       <div className="w-full max-w-md">
         <div className="mb-8">
-          <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-foreground text-background">
-            <UserCheck />
+          <div className="mb-6 flex size-11 items-center justify-center overflow-hidden rounded-xl">
+            <Image
+              src="/assets/logo/logo.png"
+              alt="Lunes AI"
+              width={44}
+              height={44}
+              className="size-11 object-contain"
+            />
           </div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             The Revenue Intelligence

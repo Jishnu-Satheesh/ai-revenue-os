@@ -8,6 +8,22 @@ const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 
 vi.mock("sonner", () => ({ toast: toastMocks }));
 
+// Slice 3 mirrors the drawer in `?package=` + `?focus=`. The params object is
+// replaced per test before render; push/replace stay plain spies because the
+// sync effect only acts when the params it reads actually moved.
+const navigationMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  params: new URLSearchParams(),
+  pathname: "/organizations/11111111-1111-4111-8111-111111111111/integrations",
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: navigationMocks.push, replace: navigationMocks.replace }),
+  useSearchParams: () => navigationMocks.params,
+  usePathname: () => navigationMocks.pathname,
+}));
+
 import { ReportPackageUpload } from "@/components/integrations/report-package-upload";
 import type { ReportPackageSnapshot } from "@/modules/reports/application/ports";
 
@@ -138,6 +154,7 @@ async function openDetailsDrawer() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  navigationMocks.params = new URLSearchParams();
   vi.stubGlobal("crypto", { ...globalThis.crypto, randomUUID: () => "fixed-operation-key" });
   vi.stubGlobal(
     "fetch",
@@ -816,6 +833,11 @@ describe("ReportPackageUpload reached by an operator", () => {
     ]);
     renderAsOperator();
 
+    // Slice 2 moved the mapping box into the drawer; the package row opens it.
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Open details for Marketplace performance/i }),
+    );
+
     fireEvent.click(await screen.findByRole("combobox", { name: /which upload are you mapping/i }));
     fireEvent.click(
       await screen.findByRole("option", { name: /marketplace performance · 2026-03-01/i }),
@@ -832,6 +854,11 @@ describe("ReportPackageUpload reached by an operator", () => {
   it("tells an operator an owner or admin still needs to map an unrecognised upload, rather than showing the guided form", async () => {
     stubFetchWithRecognition([]);
     renderAsOperator();
+
+    // Slice 2 moved the mapping box into the drawer; the package row opens it.
+    fireEvent.click(
+      await screen.findByRole("button", { name: /Open details for Marketplace performance/i }),
+    );
 
     fireEvent.click(await screen.findByRole("combobox", { name: /which upload are you mapping/i }));
     fireEvent.click(
@@ -1171,5 +1198,150 @@ describe("ReportPackageUpload governed form", () => {
       dataTransfer: { files: [new File(["a,b"], "settlement.csv", { type: "text/csv" })] },
     });
     expect(await screen.findByText(/settlement\.csv/)).toBeInTheDocument();
+  });
+});
+
+describe("ReportPackageUpload explainer popover", () => {
+  it("moves the file-journey bullets behind a How it works trigger by the card title", async () => {
+    renderUpload();
+
+    const trigger = await screen.findByRole("button", { name: "How it works" });
+    expect(trigger.closest('[data-slot="card-title"]')).not.toBeNull();
+    expect(screen.queryByText("What happens to your file")).not.toBeInTheDocument();
+
+    fireEvent.click(trigger);
+
+    const bullets = await screen.findAllByRole("listitem");
+    expect(bullets).toHaveLength(4);
+    expect(
+      screen.getByText(/stays in private storage.*nobody outside your organization/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/column headings only.*never at a customer/i)).toBeInTheDocument();
+    expect(screen.getByText(/approves twice before any figure is recorded/i)).toBeInTheDocument();
+    expect(screen.getByText(/rows have to add up to it/i)).toBeInTheDocument();
+    expect(screen.queryByText("What happens to your file")).not.toBeInTheDocument();
+  });
+});
+
+describe("ReportPackageUpload deep-linking", () => {
+  function stubSnapshot(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify(body), { status: 200 })),
+    );
+  }
+
+  function undecidedContractSnapshot(packageId: string) {
+    return {
+      ...snapshot,
+      contractVersions: [
+        {
+          id: CONTRACT_VERSION_ID,
+          organization_id: ORGANIZATION_ID,
+          report_package_id: packageId,
+          version: 1,
+          schema_fingerprint: "e".repeat(64),
+          mapping_digest: "f".repeat(64),
+          mapping_document: null,
+          provider_definition_key: null,
+          created_at: "2026-02-01T00:00:00.000Z",
+        },
+      ],
+      contractDecisions: [],
+    } as unknown as ReportPackageSnapshot;
+  }
+
+  it("pushes the package id without focus when a package row opens the drawer", async () => {
+    stubSnapshot(undecidedContractSnapshot(PACKAGE_ID));
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Open details for Performance/i }));
+
+    expect(navigationMocks.push).toHaveBeenCalledTimes(1);
+    const packageUrl = navigationMocks.push.mock.calls[0][0] as string;
+    expect(packageUrl).toContain(`package=${PACKAGE_ID}`);
+    expect(packageUrl).not.toContain("focus=");
+  });
+
+  it("pushes the package id with focus=mapping for a mapping decision row", async () => {
+    stubSnapshot(undecidedContractSnapshot(PACKAGE_ID));
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Review mapping v1 for/i }));
+
+    expect(navigationMocks.push).toHaveBeenCalledTimes(1);
+    const decisionUrl = navigationMocks.push.mock.calls[0][0] as string;
+    expect(decisionUrl).toContain(`package=${PACKAGE_ID}`);
+    expect(decisionUrl).toContain("focus=mapping");
+  });
+
+  it("opens the drawer on the linked package and lands on the figures anchor", async () => {
+    navigationMocks.params = new URLSearchParams(`package=${PACKAGE_ID}&focus=figures`);
+    renderUpload();
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Performance · 2026-01-01 to 2026-02-28")).toBeInTheDocument();
+    expect(document.getElementById("drawer-figures")).not.toBeNull();
+  });
+
+  it("ignores an unknown package id and renders the page normally", async () => {
+    navigationMocks.params = new URLSearchParams("package=00000000-0000-4000-8000-000000000000");
+    renderUpload();
+
+    await screen.findByText(/Performance · 2026-01-01 to 2026-02-28/i);
+    expect(screen.getByText("Governed reports")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("clears the params when the drawer closes", async () => {
+    renderUpload();
+    await openDetailsDrawer();
+
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+
+    expect(navigationMocks.replace).toHaveBeenCalledTimes(1);
+    const cleared = navigationMocks.replace.mock.calls[0][0] as string;
+    expect(cleared).toBe(navigationMocks.pathname);
+    expect(cleared).not.toContain("package=");
+    expect(cleared).not.toContain("focus=");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("preselects the mapping box when a mapping decision opens an awaiting-contract package", async () => {
+    const awaitingId = "dddddddd-9999-4ddd-8ddd-dddddddddddd";
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/recognised-families")) {
+          return new Response(JSON.stringify({ sheets: [], recognisedFamilies: [] }), {
+            status: 200,
+          });
+        }
+        return new Response(
+          JSON.stringify({
+            ...undecidedContractSnapshot(awaitingId),
+            packages: [
+              {
+                ...snapshot.packages[0],
+                id: awaitingId,
+                report_type: "Marketplace performance",
+                declared_period_start: "2026-03-01",
+                declared_period_end: "2026-03-31",
+                status: "awaiting_contract",
+              },
+            ],
+            projectionRuns: [],
+            reconciliationGroups: [],
+          }),
+          { status: 200 },
+        );
+      }),
+    );
+    renderUpload();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    await screen.findByRole("dialog");
+    const combo = await screen.findByRole("combobox", { name: /which upload are you mapping/i });
+    expect(combo).toHaveTextContent(/Marketplace performance/);
   });
 });

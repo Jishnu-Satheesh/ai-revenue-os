@@ -2,9 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload } from "tus-js-client";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Banknote,
   Calculator,
   Calendar as CalendarIcon,
   ChevronDown,
@@ -19,6 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -35,7 +35,10 @@ import {
   ReportIntakeMapping,
   type RecognisedFamily,
 } from "@/components/integrations/report-intake-mapping";
-import { ReportPackageDrawer } from "@/components/integrations/report-package-drawer";
+import {
+  ReportPackageDrawer,
+  type DrawerFocus,
+} from "@/components/integrations/report-package-drawer";
 import { ReportReviewQueue } from "@/components/integrations/report-review-queue";
 import {
   isBareCategoricalValueNotDeclared,
@@ -44,7 +47,6 @@ import {
   parseCategoricalRefusalDetail,
   type ParsedCategoricalRefusal,
 } from "@/domain/reports/projection-error";
-import { summarizeReportProjection } from "@/domain/reports/projection-copy";
 import {
   Select,
   SelectContent,
@@ -55,7 +57,7 @@ import {
 import { currencyOptions } from "@/domain/reference/currencies";
 import { REPORT_PACKAGE_LIMITS, type ReportPackageStatus } from "@/domain/reports/types";
 import { hasReportPermission } from "@/domain/reports/permissions";
-import { parserLabel, summarizeReportContract } from "@/domain/reports/validation-copy";
+import { summarizeReportContract } from "@/domain/reports/validation-copy";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import type {
   ReportPackageSnapshot,
@@ -331,7 +333,7 @@ const contentTypeFor: Readonly<Record<UploadFileKind, string>> = {
   pdf: "application/pdf",
 };
 
-function approvedProjectionSources(
+export function approvedProjectionSources(
   version: ReportPackageSnapshot["contractVersions"][number] | undefined,
 ): string[] {
   const document = version?.mapping_document;
@@ -525,7 +527,7 @@ type ReportFamilyRecognition = { sheets: unknown[]; recognisedFamilies: Recognis
  * which would just be refused on submit) tells them anything useful to look
  * at while they wait for an owner or admin.
  */
-function ReportContractStep({
+export function ReportContractStep({
   organizationId,
   packageId,
   canApprove,
@@ -750,9 +752,13 @@ export function ReportPackageUpload({
   const [proposalPackageId, setProposalPackageId] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
   const [projectionContractVersionId, setProjectionContractVersionId] = useState("");
-  // Local drawer state only. Slice 3 mirrors this in `?package=` so a row can
-  // be deep-linked; until then the queue is the only way to open a package.
+  // Drawer state, mirrored in `?package=` + `?focus=` so a row can be
+  // deep-linked: row clicks push, the sync effect below reads params back.
   const [openPackageId, setOpenPackageId] = useState<string | null>(null);
+  const [openFocus, setOpenFocus] = useState<DrawerFocus>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const canUpload = hasReportPermission(role, "report.upload");
   const canRetry = hasReportPermission(role, "report.retry");
   const canApproveContract = hasReportPermission(role, "report.contract_approve");
@@ -766,29 +772,105 @@ export function ReportPackageUpload({
   const view = useMemo(() => toSnapshotView(snapshot.data), [snapshot.data]);
   // The channel page answers for one channel, so it lists only that
   // channel's uploads. The Integrations view keeps answering for all of them.
-  const visiblePackages = fixedChannelId
-    ? view.packages.filter((reportPackage) => reportPackage.channel_id === fixedChannelId)
-    : view.packages;
-  // Versions belong to a channel through their package. A fixed view hides
-  // every other channel's mappings and figures rather than offering
-  // approvals for work happening elsewhere.
-  const contractVersionVisible = (version: { report_package_id: string }): boolean =>
-    !fixedChannelId ||
-    view.packages.some(
-      (reportPackage) =>
-        reportPackage.id === version.report_package_id &&
-        reportPackage.channel_id === fixedChannelId,
-    );
-  const projectionVersionVisible = (version: { report_contract_version_id: string }): boolean => {
-    if (!fixedChannelId) return true;
-    const contractVersion = view.contractVersions.find(
-      (candidate) => candidate.id === version.report_contract_version_id,
-    );
-    return contractVersion ? contractVersionVisible(contractVersion) : false;
-  };
+  // Memoized: the param-sync effect below keys off this list's identity, and
+  // a fresh filter each render would re-run it for no reason.
+  const visiblePackages = useMemo(
+    () =>
+      fixedChannelId
+        ? view.packages.filter((reportPackage) => reportPackage.channel_id === fixedChannelId)
+        : view.packages,
+    [fixedChannelId, view.packages],
+  );
+  // Versions belong to a channel through their package. The queue and the
+  // drawer receive only this view's packages and filter versions to the open
+  // package, so every other channel's mappings and figures stay out of reach
+  // rather than offering approvals for work happening elsewhere.
   const activeBranches = view.branches;
   const invalidate = () =>
     void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
+
+  /**
+   * The single way a package opens: row clicks and the `?package=` sync
+   * below both go through it, so a deep link (or back/forward) preselects
+   * the mapping box exactly like a row click does.
+   */
+  const applyOpenState = useCallback(
+    (packageId: string, focus: DrawerFocus) => {
+      setOpenPackageId(packageId);
+      setOpenFocus(focus);
+      // A mapping row lands on its upload's mapping box with that
+      // upload already chosen. Anything else leaves the selector
+      // wherever the operator last put it.
+      if (focus === "mapping") {
+        const reportPackage = visiblePackages.find((candidate) => candidate.id === packageId);
+        if (reportPackage?.status === "awaiting_contract") {
+          setProposalPackageId(packageId);
+        }
+      }
+    },
+    [visiblePackages],
+  );
+
+  /**
+   * What the last param sync settled: the raw query plus the package ids it
+   * resolved against. The effect only acts when one of them moved -- without
+   * this, the render between a row click's setState and its push landing
+   * would read the stale (empty) params and close the drawer the click just
+   * opened. It never calls the router itself, so no loop is possible.
+   */
+  const lastParamSync = useRef<{ params: string; packageIds: string } | null>(null);
+  useEffect(() => {
+    const paramsKey = searchParams.toString();
+    const packageIds = visiblePackages.map((reportPackage) => reportPackage.id).join(",");
+    if (
+      lastParamSync.current?.params === paramsKey &&
+      lastParamSync.current.packageIds === packageIds
+    ) {
+      return;
+    }
+    lastParamSync.current = { params: paramsKey, packageIds };
+    const paramId = searchParams.get("package");
+    const rawFocus = searchParams.get("focus");
+    const paramFocus: DrawerFocus =
+      rawFocus === "mapping" || rawFocus === "figures" || rawFocus === "validation"
+        ? rawFocus
+        : null;
+    const nextId =
+      paramId !== null && visiblePackages.some((pkg) => pkg.id === paramId) ? paramId : null;
+    // An unknown or malformed id, or one outside this view's channel
+    // scoping, resolves to closed: the page renders normally, never a crash.
+    const nextFocus = nextId === null ? null : paramFocus;
+    if (nextId === openPackageId && nextFocus === openFocus) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- param→state sync is this effect's whole
+    job (§7): it sets state only when the derived open state differs from the current one, and it
+    never calls the router, so no render loop is possible. */
+    if (nextId === null) {
+      setOpenPackageId(null);
+      setOpenFocus(null);
+    } else {
+      applyOpenState(nextId, nextFocus);
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [searchParams, visiblePackages, openPackageId, openFocus, applyOpenState]);
+
+  const handleOpen = (packageId: string, focus: DrawerFocus) => {
+    applyOpenState(packageId, focus);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("package", packageId);
+    if (focus === null) params.delete("focus");
+    else params.set("focus", focus);
+    router.push(`${pathname}?${params.toString()}`);
+  };
+
+  const handleClose = () => {
+    setOpenPackageId(null);
+    setOpenFocus(null);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("package");
+    params.delete("focus");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  };
 
   /**
    * The report type this channel is already known to carry, if -- and only
@@ -875,29 +957,6 @@ export function ReportPackageUpload({
     overridingReportType || recognisedReportTypeForChannel === null
       ? reportType
       : recognisedReportTypeForChannel;
-
-  const selectedProjectionContract = view.contractVersions.find(
-    (version) => version.id === projectionContractVersionId,
-  );
-  /**
-   * Whether the selected mapping already has figures nobody has rejected.
-   *
-   * Two live declarations for one mapping would either agree, and be
-   * redundant, or disagree, and leave no honest answer about which one the
-   * ledger follows.
-   */
-  const alreadyProposed = view.projectionVersions.some(
-    (version) =>
-      version.report_contract_version_id === projectionContractVersionId &&
-      view.projectionDecisions.find(
-        (decision) => decision.report_projection_version_id === version.id,
-      )?.decision !== "rejected",
-  );
-
-  const projectionSources = useMemo(
-    () => approvedProjectionSources(selectedProjectionContract),
-    [selectedProjectionContract],
-  );
 
   const upload = useMutation({
     mutationFn: async () => {
@@ -1196,6 +1255,35 @@ export function ReportPackageUpload({
           <div>
             <CardTitle className="flex items-center gap-2">
               <FileSpreadsheet className="size-5" /> Governed reports
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="ghost" size="sm">
+                    How it works
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start">
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    <li className="flex gap-2">
+                      <Lock className="mt-0.5 size-4 shrink-0" />
+                      It stays in private storage. Nobody outside your organization can reach it.
+                    </li>
+                    <li className="flex gap-2">
+                      <ScanLine className="mt-0.5 size-4 shrink-0" />
+                      Recognition looks at column headings only — never at a customer, an order or
+                      an amount.
+                    </li>
+                    <li className="flex gap-2">
+                      <UserCheck className="mt-0.5 size-4 shrink-0" />A person approves twice before
+                      any figure is recorded, and both decisions are kept.
+                    </li>
+                    <li className="flex gap-2">
+                      <Calculator className="mt-0.5 size-4 shrink-0" />
+                      Where the file states its own total, the rows have to add up to it or the
+                      import stops.
+                    </li>
+                  </ul>
+                </PopoverContent>
+              </Popover>
             </CardTitle>
             <CardDescription>
               Upload one declared CSV, XLSX, or PDF report directly to private storage. A PDF is
@@ -1462,13 +1550,17 @@ export function ReportPackageUpload({
           retryValidationPending={retryValidation.isPending}
           onRequestProjection={(packageId) => requestProjection.mutate(packageId)}
           requestProjectionPending={requestProjection.isPending}
-          onOpen={(packageId) => setOpenPackageId(packageId)}
+          onOpen={handleOpen}
         />
         <ReportPackageDrawer
           packageId={openPackageId}
+          focus={openFocus}
           organizationId={organizationId}
           timeZone={timeZone}
           view={view}
+          packages={visiblePackages}
+          fixedChannelId={fixedChannelId}
+          canUpload={canUpload}
           canRetry={canRetry}
           canApproveContract={canApproveContract}
           onRetry={(packageId) => retry.mutate(packageId)}
@@ -1479,340 +1571,24 @@ export function ReportPackageUpload({
           requestProjectionPending={requestProjection.isPending}
           onResolveOverlap={(input) => resolveOverlapGroup.mutate(input)}
           resolveOverlapPending={resolveOverlapGroup.isPending}
-          onClose={() => setOpenPackageId(null)}
+          rejectionReason={rejectionReason}
+          onRejectionReasonChange={setRejectionReason}
+          proposalPackageId={proposalPackageId}
+          onProposalPackageIdChange={setProposalPackageId}
+          onMappingDone={() => {
+            setProposalPackageId("");
+            invalidate();
+          }}
+          projectionContractVersionId={projectionContractVersionId}
+          onProjectionContractVersionIdChange={setProjectionContractVersionId}
+          onDecideContract={(input) => decideContract.mutate(input)}
+          decideContractPending={decideContract.isPending}
+          onDecideProjection={(input) => decideProjection.mutate(input)}
+          decideProjectionPending={decideProjection.isPending}
+          onProposeProjection={(contractVersionId) => proposeProjection.mutate(contractVersionId)}
+          proposeProjectionPending={proposeProjection.isPending}
+          onClose={handleClose}
         />
-
-        <div className="space-y-3 border-t pt-4">
-          <div>
-            <h3 className="text-sm font-medium">2 · Approve what the columns mean</h3>
-            <p className="text-xs text-muted-foreground">
-              An owner or admin decides. Until then the file has been profiled and nothing more.
-            </p>
-          </div>
-          {view.contractVersions.filter(contractVersionVisible).length ? (
-            view.contractVersions.filter(contractVersionVisible).map((version) => {
-              const decision = view.contractDecisions.find(
-                (item) => item.report_contract_version_id === version.id,
-              );
-              const contractSummary = summarizeReportContract(version.mapping_document);
-              return (
-                <div key={version.id} className="rounded-lg border p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="flex flex-wrap items-center gap-2 font-medium">
-                      Mapping v{version.version}
-                      <Badge variant="secondary" className="font-normal">
-                        {version.provider_definition_key
-                          ? `From the known ${version.provider_definition_key} report`
-                          : "Described by hand"}
-                      </Badge>
-                    </span>
-                    <Badge variant={decision?.decision === "rejected" ? "destructive" : "outline"}>
-                      {decision?.decision === "approved"
-                        ? "Approved · validation next"
-                        : decision?.decision === "rejected"
-                          ? "Rejected"
-                          : "Awaiting approval"}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Fingerprint {version.schema_fingerprint.slice(0, 12)}… · mapping digest{" "}
-                    {version.mapping_digest.slice(0, 12)}…
-                  </p>
-                  {contractSummary ? (
-                    <div className="mt-3 space-y-2 rounded-md bg-muted/30 p-2 text-xs">
-                      <p className="font-medium">What this contract checks</p>
-                      <p className="text-muted-foreground">
-                        Currency {contractSummary.currency} · outlet grain{" "}
-                        {contractSummary.outletGrain} · unmapped fields:{" "}
-                        {contractSummary.unmappedFieldDisposition}
-                      </p>
-                      {contractSummary.sheets.map((sheet) => (
-                        <div
-                          key={sheet.normalizedSheetName}
-                          className="rounded border bg-background p-2"
-                        >
-                          <p className="font-medium">Sheet {sheet.normalizedSheetName}</p>
-                          <p className="mt-1 text-muted-foreground">
-                            Header row {sheet.headerRow} · data starts at row {sheet.dataStartRow} ·{" "}
-                            formulas {sheet.allowFormula ? "allowed" : "rejected"} · merged cells{" "}
-                            {sheet.allowMergedCells ? "allowed" : "rejected"}
-                          </p>
-                          {sheet.requiredFields.length > 0 ? (
-                            <div className="mt-2 space-y-1">
-                              <p className="font-medium">Required fields</p>
-                              {sheet.requiredFields.map((field) => (
-                                <p
-                                  key={`${sheet.normalizedSheetName}.${field.canonicalField}`}
-                                  className="text-muted-foreground"
-                                >
-                                  {field.canonicalField} · source header {field.sourceHeader} ·{" "}
-                                  {parserLabel(field.parser, field.financialSign)}
-                                </p>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {canApproveContract && !decision ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        disabled={decideContract.isPending}
-                        onClick={() =>
-                          decideContract.mutate({ versionId: version.id, decision: "approved" })
-                        }
-                      >
-                        Approve exact contract
-                      </Button>
-                      <Input
-                        aria-label={`Rejection reason for contract version ${version.version}`}
-                        value={rejectionReason}
-                        onChange={(event) => setRejectionReason(event.target.value)}
-                        placeholder="Reason required to reject"
-                        className="max-w-xs"
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={decideContract.isPending || rejectionReason.trim().length === 0}
-                        onClick={() =>
-                          decideContract.mutate({ versionId: version.id, decision: "rejected" })
-                        }
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {fixedChannelId
-                ? "Nothing has been mapped for this channel yet."
-                : "Nothing has been mapped yet."}
-            </p>
-          )}
-          {canApproveContract || canUpload ? (
-            <div className="space-y-3 rounded-lg border border-dashed p-4">
-              <div className="space-y-2">
-                <Label htmlFor="report-contract-package">Which upload are you mapping?</Label>
-                <Select value={proposalPackageId} onValueChange={setProposalPackageId}>
-                  <SelectTrigger id="report-contract-package">
-                    <SelectValue placeholder="Select an upload waiting to be mapped" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {visiblePackages
-                      .filter((reportPackage) => reportPackage.status === "awaiting_contract")
-                      .map((reportPackage) => (
-                        <SelectItem key={reportPackage.id} value={reportPackage.id}>
-                          {reportPackage.report_type} · {reportPackage.declared_period_start}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {proposalPackageId ? (
-                <ReportContractStep
-                  key={proposalPackageId}
-                  organizationId={organizationId}
-                  packageId={proposalPackageId}
-                  canApprove={canApproveContract}
-                  onDone={() => {
-                    setProposalPackageId("");
-                    invalidate();
-                  }}
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Choose an upload and we will tell you whether we already know how to read it.
-                </p>
-              )}
-            </div>
-          ) : null}
-          <div className="border-t pt-4">
-            <h3 className="text-sm font-medium">3 · Approve what gets recorded</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              A separate decision, because it is a separate consequence: this is what enters the
-              ledger and drives every figure downstream. No workbook value appears here.
-            </p>
-            {view.projectionVersions.filter(projectionVersionVisible).map((version) => {
-              const decision = view.projectionDecisions.find(
-                (item) => item.report_projection_version_id === version.id,
-              );
-              const contractVersion = view.contractVersions.find(
-                (candidate) => candidate.id === version.report_contract_version_id,
-              );
-              // The last thing a person reads before figures enter the ledger.
-              // A digest proves two documents are the same and is useless for
-              // deciding whether to approve one.
-              const summary = summarizeReportProjection(
-                version.projection_document,
-                contractVersion?.mapping_document,
-              );
-              return (
-                <div key={version.id} className="mt-2 rounded-lg border p-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">Figures v{version.version}</span>
-                    <Badge variant={decision?.decision === "rejected" ? "destructive" : "outline"}>
-                      {decision?.decision === "approved"
-                        ? "Approved"
-                        : decision?.decision === "rejected"
-                          ? "Rejected"
-                          : "Awaiting approval"}
-                    </Badge>
-                  </div>
-                  {summary ? (
-                    <div className="mt-2 space-y-2">
-                      <ul className="space-y-1">
-                        {summary.entries.map((entry) => (
-                          <li key={entry.label} className="flex items-start gap-2">
-                            <Banknote className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                            <span>
-                              <span className="font-medium capitalize">{entry.label}</span>
-                              <span className="text-muted-foreground">
-                                {" — "}
-                                {summary.shape}
-                                {entry.sourceColumn ? `, from ${entry.sourceColumn}` : ""}
-                              </span>
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                      {summary.checkedAgainst ? (
-                        <p className="text-xs text-muted-foreground">
-                          Checked against {summary.checkedAgainst}. The import stops if the rows do
-                          not reach it.
-                        </p>
-                      ) : null}
-                      {summary.mayHaveGaps ? (
-                        <p className="text-xs text-muted-foreground">
-                          Days the provider left blank stay blank. They are not recorded as zero, so
-                          a quiet day and a day nobody reported on never look the same.
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      This declaration was written in a form this screen cannot read back. Reject it
-                      and map the upload again rather than approving what you cannot see.
-                    </p>
-                  )}
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Declaration digest {version.projection_digest.slice(0, 12)}…
-                  </p>
-                  {canApproveContract && !decision ? (
-                    <div className="mt-2 flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          decideProjection.mutate({ versionId: version.id, decision: "approved" })
-                        }
-                        disabled={decideProjection.isPending}
-                      >
-                        Approve these figures
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          decideProjection.mutate({ versionId: version.id, decision: "rejected" })
-                        }
-                        disabled={decideProjection.isPending}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-            {canApproveContract ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-dashed p-4">
-                <div className="space-y-2">
-                  <Label htmlFor="report-projection-contract">Approved mapping</Label>
-                  <Select
-                    value={projectionContractVersionId}
-                    onValueChange={setProjectionContractVersionId}
-                  >
-                    <SelectTrigger id="report-projection-contract">
-                      <SelectValue placeholder="Select an approved mapping" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {view.contractVersions
-                        .filter(contractVersionVisible)
-                        .filter((version) =>
-                          view.contractDecisions.some(
-                            (decision) =>
-                              decision.report_contract_version_id === version.id &&
-                              decision.decision === "approved",
-                          ),
-                        )
-                        .map((version) => (
-                          <SelectItem key={version.id} value={version.id}>
-                            Mapping v{version.version}
-                            {version.provider_definition_key
-                              ? ` · ${version.provider_definition_key}`
-                              : ""}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {projectionSources.length ? (
-                  <p className="text-xs text-muted-foreground">
-                    Reads from {projectionSources.join(", ")}.
-                  </p>
-                ) : null}
-                <p className="text-xs text-muted-foreground">
-                  The figures follow from the mapping that was approved, so nothing here can differ
-                  from what an owner already agreed to.
-                </p>
-                {alreadyProposed ? (
-                  <p className="text-xs text-muted-foreground">
-                    This mapping already has a set of figures above. Reject that one before
-                    proposing another, so there is never a question about which one governs.
-                  </p>
-                ) : null}
-                <Button
-                  size="sm"
-                  disabled={
-                    proposeProjection.isPending || !projectionContractVersionId || alreadyProposed
-                  }
-                  onClick={() => proposeProjection.mutate(projectionContractVersionId)}
-                >
-                  {proposeProjection.isPending ? "Proposing…" : "Propose the figures to read"}
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">What happens to your file</h3>
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li className="flex gap-2">
-              <Lock className="mt-0.5 size-4 shrink-0" />
-              It stays in private storage. Nobody outside your organization can reach it.
-            </li>
-            <li className="flex gap-2">
-              <ScanLine className="mt-0.5 size-4 shrink-0" />
-              Recognition looks at column headings only — never at a customer, an order or an
-              amount.
-            </li>
-            <li className="flex gap-2">
-              <UserCheck className="mt-0.5 size-4 shrink-0" />A person approves twice before any
-              figure is recorded, and both decisions are kept.
-            </li>
-            <li className="flex gap-2">
-              <Calculator className="mt-0.5 size-4 shrink-0" />
-              Where the file states its own total, the rows have to add up to it or the import
-              stops.
-            </li>
-          </ul>
-        </div>
       </CardContent>
     </Card>
   );

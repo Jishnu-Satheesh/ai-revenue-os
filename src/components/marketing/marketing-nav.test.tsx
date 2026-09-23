@@ -14,6 +14,13 @@ describe("MarketingNav", () => {
     expect(screen.getByText(nav.productName)).toBeTruthy();
   });
 
+  it("shows the dark-theme brand lockup", () => {
+    render(<MarketingNav />);
+
+    const logo = screen.getByRole("img", { name: nav.productName });
+    expect(logo.getAttribute("src")).toContain("dark-theme");
+  });
+
   it("links sign in to /login", () => {
     render(<MarketingNav />);
 

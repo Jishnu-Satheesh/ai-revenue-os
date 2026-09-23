@@ -46,22 +46,33 @@ function packageFixture(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function queueView(packages: unknown[], projectionRuns: unknown[] = []) {
+function queueView(
+  packages: unknown[],
+  projectionRuns: unknown[] = [],
+  lists: {
+    contractVersions?: unknown[];
+    contractDecisions?: unknown[];
+    projectionVersions?: unknown[];
+    projectionDecisions?: unknown[];
+    validationRuns?: unknown[];
+    reconciliationGroups?: unknown[];
+  } = {},
+) {
   return {
     packages,
     sheetManifests: [],
     contracts: [],
-    contractVersions: [],
-    contractDecisions: [],
+    contractVersions: lists.contractVersions ?? [],
+    contractDecisions: lists.contractDecisions ?? [],
     contractBindings: [],
-    validationRuns: [],
+    validationRuns: lists.validationRuns ?? [],
     validationSheetResults: [],
     validationControlResults: [],
-    projectionVersions: [],
-    projectionDecisions: [],
+    projectionVersions: lists.projectionVersions ?? [],
+    projectionDecisions: lists.projectionDecisions ?? [],
     projectionBindings: [],
     projectionRuns,
-    reconciliationGroups: [],
+    reconciliationGroups: lists.reconciliationGroups ?? [],
     channels: [],
     branches: [],
   } as unknown as ReportPackageSnapshot;
@@ -72,6 +83,14 @@ function renderQueue(input: {
   view?: ReportPackageSnapshot;
   fixedChannelId?: string;
   canRetry?: boolean;
+  lists?: {
+    contractVersions?: unknown[];
+    contractDecisions?: unknown[];
+    projectionVersions?: unknown[];
+    projectionDecisions?: unknown[];
+    validationRuns?: unknown[];
+    reconciliationGroups?: unknown[];
+  };
 }) {
   const callbacks = {
     onRetry: vi.fn(),
@@ -79,7 +98,7 @@ function renderQueue(input: {
     onRequestProjection: vi.fn(),
     onOpen: vi.fn(),
   };
-  const view = input.view ?? queueView(input.packages);
+  const view = input.view ?? queueView(input.packages, [], input.lists ?? {});
   render(
     <ReportReviewQueue
       packages={view.packages}
@@ -151,24 +170,29 @@ describe("ReportReviewQueue rows", () => {
     ]);
   });
 
-  it("names the state and the age on one compact line", () => {
+  it("names the reason and the age on one compact line", () => {
     renderQueue({
       packages: [packageFixture({ status: "awaiting_contract" })],
     });
 
-    // The badge and the reason line carry the same state label.
-    expect(screen.getAllByText(/Profiled · awaiting contract/)).toHaveLength(2);
+    // Slice 3: the reason replaces the state label in the sub-line; the
+    // badge keeps the state label.
+    expect(screen.getByText(/Needs column mapping/)).toBeInTheDocument();
     expect(screen.getByText(/ago/)).toBeInTheDocument();
+    expect(screen.getByText("Profiled · awaiting contract")).toBeInTheDocument();
   });
 
-  it("opens the drawer with the row's package id", () => {
+  it("opens the drawer with the row's package id and its mapping focus", () => {
     const callbacks = renderQueue({
       packages: [packageFixture({ id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd" })],
     });
 
     fireEvent.click(screen.getByRole("button", { name: /Open details for Performance/i }));
 
-    expect(callbacks.onOpen).toHaveBeenCalledWith("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+    expect(callbacks.onOpen).toHaveBeenCalledWith(
+      "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "mapping",
+    );
   });
 });
 
@@ -270,8 +294,255 @@ describe("ReportReviewQueue actions", () => {
       canRetry: false,
     });
 
-    expect(screen.getAllByText(/Validation needs attention/)).toHaveLength(2);
+    // Slice 3: the sub-line carries the reason, the badge the state label.
+    expect(screen.getByText("Validation needs attention")).toBeInTheDocument();
+    expect(screen.getByText(/Validation failed: 0 error\(s\)/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Retry validation/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Open details for/i })).toBeInTheDocument();
+  });
+});
+
+describe("ReportReviewQueue decision rows", () => {
+  const PACKAGE_ID = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+  const CONTRACT_VERSION_ID = "55555555-5555-4555-8555-555555555555";
+  const PROJECTION_VERSION_ID = "66666666-6666-4666-8666-666666666666";
+
+  function versionLists(
+    overrides: {
+      contractVersions?: unknown[];
+      contractDecisions?: unknown[];
+      projectionVersions?: unknown[];
+      projectionDecisions?: unknown[];
+    } = {},
+  ) {
+    return {
+      contractVersions: [
+        {
+          id: CONTRACT_VERSION_ID,
+          report_package_id: PACKAGE_ID,
+          version: 1,
+          created_at: "2026-02-01T00:00:00.000Z",
+        },
+      ],
+      contractDecisions: [],
+      projectionVersions: [],
+      projectionDecisions: [],
+      ...overrides,
+    };
+  }
+
+  it("reviews an undecided mapping with the package id and mapping focus", () => {
+    const callbacks = renderQueue({
+      packages: [packageFixture({ id: PACKAGE_ID })],
+      lists: versionLists(),
+    });
+
+    expect(screen.getByText(/Mapping v1 awaiting approval/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+
+    expect(callbacks.onOpen).toHaveBeenCalledWith(PACKAGE_ID, "mapping");
+  });
+
+  it("reviews undecided figures with the package id and figures focus", () => {
+    const callbacks = renderQueue({
+      packages: [packageFixture({ id: PACKAGE_ID })],
+      lists: versionLists({
+        contractDecisions: [
+          { report_contract_version_id: CONTRACT_VERSION_ID, decision: "approved" },
+        ],
+        projectionVersions: [
+          {
+            id: PROJECTION_VERSION_ID,
+            report_contract_version_id: CONTRACT_VERSION_ID,
+            version: 1,
+            created_at: "2026-02-02T00:00:00.000Z",
+          },
+        ],
+      }),
+    });
+
+    expect(screen.getByText(/Figures v1 awaiting approval/)).toBeInTheDocument();
+    expect(screen.queryByText(/Mapping v1 awaiting approval/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+
+    expect(callbacks.onOpen).toHaveBeenCalledWith(PACKAGE_ID, "figures");
+  });
+
+  it("shows no decision rows once every version is decided", () => {
+    renderQueue({
+      packages: [packageFixture({ id: PACKAGE_ID })],
+      lists: versionLists({
+        contractDecisions: [
+          { report_contract_version_id: CONTRACT_VERSION_ID, decision: "approved" },
+        ],
+        projectionVersions: [
+          {
+            id: PROJECTION_VERSION_ID,
+            report_contract_version_id: CONTRACT_VERSION_ID,
+            version: 1,
+            created_at: "2026-02-02T00:00:00.000Z",
+          },
+        ],
+        projectionDecisions: [
+          { report_projection_version_id: PROJECTION_VERSION_ID, decision: "rejected" },
+        ],
+      }),
+    });
+
+    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Awaiting approval/)).not.toBeInTheDocument();
+  });
+
+  it("shows no decision rows for versions outside this view", () => {
+    renderQueue({
+      packages: [packageFixture({ id: PACKAGE_ID })],
+      lists: versionLists({
+        contractVersions: [
+          {
+            id: CONTRACT_VERSION_ID,
+            report_package_id: "00000000-0000-4000-8000-000000000000",
+            version: 1,
+            created_at: "2026-02-01T00:00:00.000Z",
+          },
+        ],
+        projectionVersions: [
+          {
+            id: PROJECTION_VERSION_ID,
+            report_contract_version_id: "00000000-0000-4000-8000-000000000000",
+            version: 1,
+            created_at: "2026-02-02T00:00:00.000Z",
+          },
+        ],
+      }),
+    });
+
+    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+  });
+});
+
+describe("ReportReviewQueue tiers", () => {
+  it("renders one package per tier in T1 to T4 order", () => {
+    // The Tier-2 package is still profiling, so it sits in the
+    // in-progress strip (no row of its own) while its undecided mapping
+    // version renders the Tier-2 decision row.
+    const tierTwoPackageId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    renderQueue({
+      packages: [
+        packageFixture({
+          id: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+          report_type: "Validated report",
+          status: "validated",
+        }),
+        packageFixture({
+          id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          report_type: "Mapping report",
+          status: "awaiting_contract",
+        }),
+        packageFixture({
+          id: tierTwoPackageId,
+          report_type: "Decision report",
+          status: "profiling",
+        }),
+        packageFixture({
+          id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          report_type: "Failure report",
+          status: "validation_failed",
+        }),
+      ],
+      lists: {
+        contractVersions: [
+          {
+            id: "55555555-5555-4555-8555-555555555555",
+            report_package_id: tierTwoPackageId,
+            version: 1,
+            created_at: "2026-02-01T00:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    const rows = screen.getAllByRole("button", {
+      name: /^(Open details for|Review mapping v)/,
+    });
+    expect(rows.map((row) => row.getAttribute("aria-label"))).toEqual([
+      "Open details for Failure report · 2026-01-01 to 2026-02-28",
+      "Review mapping v1 for Decision report · 2026-01-01 to 2026-02-28",
+      "Open details for Mapping report · 2026-01-01 to 2026-02-28",
+      "Open details for Validated report · 2026-01-01 to 2026-02-28",
+    ]);
+  });
+
+  it("states each tier's reason in the row's own words", () => {
+    const failedValidationId = "11111111-0000-4000-8000-000000000000";
+    const overlapId = "22222222-0000-4000-8000-000000000000";
+    renderQueue({
+      packages: [
+        packageFixture({ id: failedValidationId, status: "validation_failed" }),
+        packageFixture({
+          id: "33333333-0000-4000-8000-000000000000",
+          status: "awaiting_contract",
+        }),
+        packageFixture({
+          id: "44444444-0000-4000-8000-000000000000",
+          status: "validated",
+        }),
+        packageFixture({ id: overlapId, status: "reconciliation_required" }),
+        packageFixture({
+          id: "55555555-0000-4000-8000-000000000000",
+          status: "awaiting_projection",
+        }),
+      ],
+      lists: {
+        validationRuns: [
+          {
+            report_package_id: failedValidationId,
+            error_codes: ["REQUIRED_FIELD_MISSING", "OPTIONAL_FIELD_MISSING"],
+          },
+        ],
+        reconciliationGroups: [
+          { report_package_id: overlapId, affected_record_count: 20 },
+          { report_package_id: overlapId, affected_record_count: 5 },
+        ],
+      },
+    });
+
+    expect(screen.getByText(/Validation failed: 2 error\(s\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Needs column mapping/)).toBeInTheDocument();
+    expect(screen.getByText(/Validated — project the figures/)).toBeInTheDocument();
+    expect(screen.getByText(/25 records need review/)).toBeInTheDocument();
+    expect(screen.getByText(/Projection starts when the rollout is enabled/)).toBeInTheDocument();
+  });
+});
+
+describe("ReportReviewQueue strips", () => {
+  it("keeps settled packages in the collapsed strip, never as queue rows", () => {
+    renderQueue({
+      packages: [packageFixture({ status: "projected" })],
+    });
+
+    expect(screen.getByRole("button", { name: "Settled · 1" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Open details for/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("No governed report packages yet.")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Settled · 1" }));
+
+    expect(
+      screen.getByRole("button", {
+        name: "Open details for Performance, 2026-01-01 to 2026-02-28",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Performance")).toBeInTheDocument();
+    expect(screen.getByText("Projected · exact-range evidence ready")).toBeInTheDocument();
+    expect(screen.getByText("2026-01-01 to 2026-02-28")).toBeInTheDocument();
+  });
+
+  it("renders in-progress uploads as slim rows with no buttons", () => {
+    renderQueue({
+      packages: [packageFixture({ status: "profiling" })],
+    });
+
+    expect(screen.getByText("Performance · 2026-01-01 to 2026-02-28")).toBeInTheDocument();
+    expect(screen.getByText("Checking structure")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
 });

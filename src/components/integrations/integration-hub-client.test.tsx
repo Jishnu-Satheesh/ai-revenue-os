@@ -8,6 +8,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   pathname: "/organizations/11111111-1111-4111-8111-111111111111/integrations",
+  params: new URLSearchParams(),
   getOrganizationContext: vi.fn(),
   assertIntegrationHubEnabled: vi.fn(),
   getOrganization: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => mocks.params,
 }));
 vi.mock("@/lib/api/organization-context", () => ({
   getOrganizationContext: mocks.getOrganizationContext,

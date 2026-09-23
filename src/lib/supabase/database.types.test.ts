@@ -239,6 +239,12 @@ const UNTYPED_TABLES = new Set([
   // privilege from anon, authenticated AND service_role: nothing reaches it
   // except the fenced definer path. Typing it would imply access no role holds.
   "growth_intelligence_item_contexts",
+  // Anonymous marketing leads are written only by the public route through
+  // record_public_lead under the service role, and no session role holds any
+  // grant: a lead has no tenant to scope a read policy to. A generated row
+  // type would imply direct access that deliberately does not exist, the same
+  // reason provider_webhook_receipts is listed above.
+  "marketing_leads",
 ]);
 
 /**

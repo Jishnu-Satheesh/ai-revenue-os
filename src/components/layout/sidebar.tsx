@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -250,8 +251,14 @@ export function Sidebar() {
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild tooltip="Lunes AI">
               <Link href="/">
-                <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-md bg-foreground text-background text-sm font-bold">
-                  L
+                <span className="flex aspect-square size-8 shrink-0 items-center justify-center overflow-hidden rounded-md">
+                  <Image
+                    src="/assets/logo/logo.png"
+                    alt="Lunes AI"
+                    width={32}
+                    height={32}
+                    className="size-8 object-contain"
+                  />
                 </span>
                 <span className="grid min-w-0 flex-1 text-left leading-tight">
                   <span className="truncate text-[10px] font-semibold tracking-[0.18em] text-muted-foreground uppercase">

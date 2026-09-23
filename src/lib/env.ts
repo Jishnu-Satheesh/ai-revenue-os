@@ -64,6 +64,8 @@ const serverEnvSchema = z.object({
    * anywhere, while this one is quoted back in a query string by design.
    */
   META_WEBHOOK_VERIFY_TOKEN: optionalNonEmptyString,
+  COMING_SOON_ORIGINS: optionalNonEmptyString,
+  LEADS_EMAIL_HASH_KEY: optionalNonEmptyString,
   SENTRY_DSN: optionalUrl,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
 });
@@ -121,6 +123,8 @@ const parsedEnv = serverEnvSchema.safeParse({
   META_APP_ID: process.env.META_APP_ID,
   META_APP_SECRET: process.env.META_APP_SECRET,
   META_WEBHOOK_VERIFY_TOKEN: process.env.META_WEBHOOK_VERIFY_TOKEN,
+  COMING_SOON_ORIGINS: process.env.COMING_SOON_ORIGINS,
+  LEADS_EMAIL_HASH_KEY: process.env.LEADS_EMAIL_HASH_KEY,
   SENTRY_DSN: process.env.SENTRY_DSN,
   OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
 });

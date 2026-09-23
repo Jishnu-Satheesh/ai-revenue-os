@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import Image from "next/image";
 import { ArrowRight, ShieldCheck } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -35,8 +36,14 @@ export default function LoginPage() {
     <main className="flex min-h-screen items-center justify-center bg-background px-6 py-12">
       <div className="w-full max-w-md">
         <div className="mb-10">
-          <div className="mb-6 flex size-11 items-center justify-center rounded-xl bg-foreground text-background">
-            <ArrowRight />
+          <div className="mb-6 flex size-11 items-center justify-center overflow-hidden rounded-xl">
+            <Image
+              src="/assets/logo/logo.png"
+              alt="Lunes AI"
+              width={44}
+              height={44}
+              className="size-11 object-contain"
+            />
           </div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
             The Revenue Intelligence

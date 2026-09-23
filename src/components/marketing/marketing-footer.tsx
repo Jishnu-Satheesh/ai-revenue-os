@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 import { footer, nav, WALKTHROUGH_MAILTO } from "@/components/marketing/content";
 
 export function MarketingFooter() {
@@ -6,7 +8,13 @@ export function MarketingFooter() {
       <div className="mx-auto max-w-6xl px-6 py-12">
         <div className="flex flex-col justify-between gap-8 sm:flex-row sm:items-start">
           <div className="space-y-2">
-            <p className="text-sm font-semibold">{nav.productName}</p>
+            <Image
+              src="/assets/logo/dark-theme.png"
+              alt={nav.productName}
+              width={160}
+              height={90}
+              className="h-7 w-auto"
+            />
             <p className="max-w-md text-sm text-muted-foreground">{footer.tagline}</p>
           </div>
           <div className="flex items-center gap-6">
