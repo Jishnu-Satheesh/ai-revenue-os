@@ -1,5 +1,7 @@
 # Overview growth — data, calculation and persistence contract
 
+> 2026-09-24 pointer (user-approved): per-partition baselines from available reported days supersede the D03 baseline floors and evidence gates below — see ADR 0069 (`adrs/0069-per-partition-baseline-from-available-reported-days.md`). D03 text is intentionally left unchanged until Tasks 2–4 implement it.
+
 ## D00 — Status and naming
 
 - Product decisions approved: actual versus projected lines; separate colours/points/values; contextual advice; original projection fixed for the selected period.
