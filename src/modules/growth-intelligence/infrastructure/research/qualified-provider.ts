@@ -68,7 +68,7 @@ export function resolveResearchAdapterAvailability(
  * live-preview route, which persists nothing. This descriptor is the logged
  * reason for that exclusion: the research worker logs its reasonCode once
  * per run, so a future `adapter_provider = 'brave'` row always means a
- * fail-closed blocked lane (which reports this legacy default), never a
+ * fail-closed blocked lane (historical pre-fix rows report this legacy default; post-fix blocked lanes record tinyfish, so a new brave row means a legacy pre-fix lane), never a
  * live Brave call.
  */
 export const BRAVE_MARKET_RESEARCH_EXCLUSION = {
