@@ -26,6 +26,7 @@ import type {
 import type {
   ResearchAttemptUsage,
   ResearchCoverageEntry,
+  ResearchCoverageOutcome,
 } from "@/domain/growth-intelligence/research-pipeline";
 import {
   researchModelBudgetSchema,
@@ -307,6 +308,17 @@ export type MarketResearchResult =
       uncertainCount: number;
       unknownUsageCount: number;
       reassessmentEnqueued: boolean;
+      /**
+       * Truthful retrieval reason, always present on success outcomes.
+       * Zero-source runs no longer complete silently: the code names WHY
+       * nothing was recorded (provider returned nothing usable, every call
+       * failed, policy/budget stopped the run, or every source was
+       * policy-excluded), and retrievalSlotOutcomes carries the per-outcome
+       * slot counts behind it. Adapter-agnostic: derived from the retrieval
+       * coverage manifest both adapters already return.
+       */
+      retrievalReasonCode: string;
+      retrievalSlotOutcomes: Record<ResearchCoverageOutcome, number>;
     }
   | { outcome: "failed"; code: string; runId: string | null; lane?: MarketResearchLane }
   | { outcome: "not_acquired"; claimOutcome: string }
@@ -381,6 +393,63 @@ export function recordMarketResearchLatency(
   if (typeof latencyMs === "number" && Number.isInteger(latencyMs) && latencyMs >= 0) {
     ledger.latencyMs += latencyMs;
   }
+}
+
+/**
+ * Stable machine-readable reason for one finished retrieval phase.
+ *
+ * Pure and deterministic: the recorded sources, the retrieval coverage
+ * manifest, and the policy-exclusion count always yield the same code, so
+ * unit tests pin it without any provider call. A zero-source run maps to
+ * exactly one cause — clean-but-empty provider answers
+ * (RETRIEVAL_NO_USABLE_EVIDENCE) are distinct from failed calls
+ * (RETRIEVAL_FAILED), policy/budget stops, and full policy exclusion —
+ * instead of completing as an undifferentiated partial 0/0.
+ */
+export function describeRetrievalOutcome(input: {
+  sources: readonly unknown[];
+  coverage: readonly ResearchCoverageEntry[];
+  excludedSourceCount: number;
+}): {
+  reasonCode: string;
+  slotOutcomeCounts: Record<ResearchCoverageOutcome, number>;
+} {
+  const slotOutcomeCounts: Record<ResearchCoverageOutcome, number> = {
+    not_started: 0,
+    searched_no_usable_evidence: 0,
+    supported: 0,
+    failed: 0,
+    skipped_budget: 0,
+    skipped_policy: 0,
+  };
+  for (const entry of input.coverage) {
+    slotOutcomeCounts[entry.outcome] += 1;
+  }
+  if (input.sources.length > 0) {
+    return { reasonCode: "RETRIEVAL_SOURCES_RETURNED", slotOutcomeCounts };
+  }
+  const outcomes = input.coverage.map((entry) => entry.outcome);
+  const all = (outcome: ResearchCoverageOutcome) =>
+    outcomes.length > 0 && outcomes.every((entry) => entry === outcome);
+  if (all("searched_no_usable_evidence")) {
+    return { reasonCode: "RETRIEVAL_NO_USABLE_EVIDENCE", slotOutcomeCounts };
+  }
+  if (all("failed")) {
+    return { reasonCode: "RETRIEVAL_FAILED", slotOutcomeCounts };
+  }
+  if (all("skipped_policy")) {
+    return { reasonCode: "RETRIEVAL_POLICY_REVOKED", slotOutcomeCounts };
+  }
+  if (all("skipped_budget")) {
+    return { reasonCode: "RETRIEVAL_BUDGET_EXHAUSTED", slotOutcomeCounts };
+  }
+  if (all("not_started")) {
+    return { reasonCode: "RETRIEVAL_NOT_STARTED", slotOutcomeCounts };
+  }
+  if (all("supported") && input.excludedSourceCount > 0) {
+    return { reasonCode: "RETRIEVAL_ALL_SOURCES_EXCLUDED", slotOutcomeCounts };
+  }
+  return { reasonCode: "RETRIEVAL_NO_SOURCES_MIXED", slotOutcomeCounts };
 }
 
 /**
@@ -970,6 +1039,15 @@ export async function runMarketResearch(
     retrievalIncomplete || extraction.unprocessedSourceCount > 0 || excludedSourceCount > 0
       ? "partial"
       : "completed";
+  // Truthful zero-source reason, recorded on the event payload and the run
+  // result below: a partial 0/0 run names its cause instead of completing
+  // silently. `sources` here is the recordable set, so full policy
+  // exclusion also resolves to its own code.
+  const retrievalOutcome = describeRetrievalOutcome({
+    sources,
+    coverage,
+    excludedSourceCount,
+  });
 
   if (sources.length > 0) {
     try {
@@ -1019,6 +1097,8 @@ export async function runMarketResearch(
     unprocessedSourceCount: extraction.unprocessedSourceCount,
     excludedSourceCount,
     unknownUsageCount: ledger.unknownCount,
+    retrievalReasonCode: retrievalOutcome.reasonCode,
+    retrievalSlotOutcomes: retrievalOutcome.slotOutcomeCounts,
     extractionModel: dependencies.extraction.modelId,
     reviewModel: dependencies.supportReview.modelId,
     ...(brief
@@ -1186,5 +1266,7 @@ export async function runMarketResearch(
     uncertainCount: review.uncertainCount,
     unknownUsageCount: ledger.unknownCount,
     reassessmentEnqueued,
+    retrievalReasonCode: retrievalOutcome.reasonCode,
+    retrievalSlotOutcomes: retrievalOutcome.slotOutcomeCounts,
   };
 }

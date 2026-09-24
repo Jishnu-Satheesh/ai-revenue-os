@@ -13,8 +13,10 @@ import {
   createTinyfishSearchAdapter,
   requirePlannedTinyfishSlot,
   runTinyfishSearchResearch,
+  summarizeTinyfishSearchOutcome,
   type TinyfishSearchDurableState,
   type TinyfishSearchSpender,
+  type TinyfishRetrievalSummary,
 } from "@/modules/growth-intelligence/infrastructure/research/tinyfish-search-adapter";
 import {
   TINYFISH_SEARCH_ENDPOINT,
@@ -1225,5 +1227,186 @@ describe("createTinyfishSearchAdapter", () => {
       expect.stringMatching(/^topic:/),
     ]);
     expect(transport.calls).toBe(2);
+  });
+});
+
+describe("retrieval outcome summary and observer", () => {
+  function productionShapedScope() {
+    return {
+      publicBusinessName: "Al Noor Kitchen",
+      approvedDomains: [],
+      niches: ["Emirati family dining"],
+      city: "Dubai",
+      countryCode: "AE",
+      topics: ["weekend brunch", "ramadan tents"],
+      competitors: [{ name: "Azure Dhow Restaurant", locationHint: "Deira waterfront" }],
+    };
+  }
+
+  function productionShapedRequest() {
+    return baseRequest({
+      scope: productionShapedScope(),
+      maxQueries: 4,
+      maxResultsPerQuery: 5,
+    });
+  }
+
+  it("returns sources for a known-good production-shaped query with quoted phrases", async () => {
+    const scope = approvedResearchScopeSchema.parse(productionShapedScope());
+    const plan = buildResearchQuerySlots({ scope, maxResultsPerQuery: 5 });
+    expect(plan.map((entry) => entry.slotKey)).toEqual([
+      "local_market",
+      "topic:weekend-brunch",
+      "topic:ramadan-tents",
+      "competitor:azure-dhow-restaurant",
+    ]);
+    for (const entry of plan) expect(entry.text.length).toBeGreaterThan(0);
+
+    const seen: TinyfishRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport((call) =>
+      tinyfishResponse([validResult(`https://guide.example/known-good-${call}`)], {
+        total_results: 1,
+        page: 0,
+      }),
+    );
+    const adapter = createTinyfishSearchAdapter({
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(productionShapedRequest());
+
+    expect(result.sources.length).toBeGreaterThan(0);
+    expect(result.coverage.every((entry) => entry.outcome === "supported")).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.reasonCode).toBe("TINYFISH_SOURCES_RETURNED");
+    expect(seen[0]?.sourceCount).toBe(result.sources.length);
+    expect(seen[0]?.stopReason).toBe("completed");
+  });
+
+  it("records NO_USABLE_EVIDENCE when the provider answers cleanly with nothing usable", async () => {
+    const seen: TinyfishRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport(() =>
+      tinyfishResponse([], { total_results: 0, page: 0 }),
+    );
+    const adapter = createTinyfishSearchAdapter({
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources).toHaveLength(0);
+    expect(result.coverage.map((entry) => entry.outcome)).toEqual([
+      "searched_no_usable_evidence",
+      "searched_no_usable_evidence",
+    ]);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      reasonCode: "TINYFISH_NO_USABLE_EVIDENCE",
+      sourceCount: 0,
+      stopReason: "completed",
+    });
+    expect(seen[0]?.slotOutcomeCounts.searched_no_usable_evidence).toBe(2);
+    expect(seen[0]?.callsIssued).toBe(2);
+  });
+
+  it("records RETRIEVAL_FAILED when every call fails at the provider", async () => {
+    const seen: TinyfishRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport(() => ({ status: 503, body: encodeJson({}) }));
+    const adapter = createTinyfishSearchAdapter({
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources).toHaveLength(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.reasonCode).toBe("TINYFISH_RETRIEVAL_FAILED");
+    expect(seen[0]?.slotOutcomeCounts.failed).toBe(2);
+  });
+
+  it("records POLICY_REVOKED without issuing calls when the gate starts closed", async () => {
+    const seen: TinyfishRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport(() =>
+      tinyfishResponse([validResult("https://guide.example/never")]),
+    );
+    const adapter = createTinyfishSearchAdapter({
+      transport,
+      spender,
+      gate: gate(false),
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources).toHaveLength(0);
+    expect(transport.calls).toBe(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      reasonCode: "TINYFISH_POLICY_REVOKED",
+      callsIssued: 0,
+      stopReason: "policy_revoked",
+    });
+  });
+
+  it("summarizes mixed zero-source coverage without inventing a clean code", () => {
+    const summary = summarizeTinyfishSearchOutcome({
+      result: {
+        sources: [],
+        coverage: [
+          {
+            slotKey: "local_market",
+            kind: "local_market",
+            outcome: "searched_no_usable_evidence",
+            attemptIds: [],
+            acceptedClaimIds: [],
+          },
+          {
+            slotKey: "topic:volatile",
+            kind: "topic",
+            outcome: "failed",
+            attemptIds: [],
+            acceptedClaimIds: [],
+          },
+        ],
+      },
+      stopReason: "completed",
+      stats: {
+        callsIssued: 2,
+        bytesReceived: 128,
+        resultsSeen: 3,
+        duplicatesDropped: 0,
+        unsafeDropped: 2,
+        emptyExcerptsDropped: 1,
+      },
+    });
+
+    expect(summary.reasonCode).toBe("TINYFISH_NO_SOURCES_MIXED");
+    expect(summary.slotOutcomeCounts).toEqual({
+      not_started: 0,
+      searched_no_usable_evidence: 1,
+      supported: 0,
+      failed: 1,
+      skipped_budget: 0,
+      skipped_policy: 0,
+    });
+    expect(summary.droppedUnsafe).toBe(2);
+    expect(summary.droppedEmptyExcerpts).toBe(1);
   });
 });

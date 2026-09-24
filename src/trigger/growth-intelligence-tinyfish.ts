@@ -20,6 +20,7 @@ import {
   createTinyfishSearchAdapter,
   type TinyfishSearchGate,
   type TinyfishSearchSpender,
+  type TinyfishRetrievalSummary,
 } from "@/modules/growth-intelligence/infrastructure/research/tinyfish-search-adapter";
 import { createTinyfishSearchTransport } from "@/modules/growth-intelligence/infrastructure/research/tinyfish-search-transport";
 import { TinyFish } from "@tiny-fish/sdk";
@@ -154,6 +155,13 @@ export async function createQualifiedTinyfishResearchAdapter(input: {
   claimToken: () => string | null;
   signal?: AbortSignal;
   fetchImpl?: typeof globalThis.fetch;
+  /**
+   * Truthful-outcome observer for the delegating adapter: called once per
+   * retrieval run with the finished summary (reason code, slot outcome
+   * counts, drop stats). Blocked paths return before any adapter exists, so
+   * the observer never fires for them — exactly as before.
+   */
+  observeResearchOutcome?: (summary: TinyfishRetrievalSummary) => void;
 }): Promise<ResearchAdapter> {
   const blocked = () => getQualifiedMarketResearchAdapter();
   const apiKey = readTinyfishSearchApiKey();
@@ -199,6 +207,7 @@ export async function createQualifiedTinyfishResearchAdapter(input: {
     gate,
     availability,
     signal: input.signal,
+    observe: input.observeResearchOutcome,
   });
   return getQualifiedMarketResearchAdapter(
     availability,

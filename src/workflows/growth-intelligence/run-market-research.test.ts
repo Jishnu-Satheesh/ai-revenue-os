@@ -35,6 +35,7 @@ import {
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
 import {
   createMarketResearchSpendLedger,
+  describeRetrievalOutcome,
   marketResearchPayloadSchema,
   recordMarketResearchLatency,
   recordMarketResearchUsage,
@@ -1044,6 +1045,45 @@ describe("runMarketResearch extraction and admission", () => {
     );
   });
 
+  it("names full policy exclusion when every retrieved source is excluded", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            sources: [
+              retrievedSource({
+                sourceUrl: "https://blocked.example/closed",
+                domain: "blocked.example",
+                publisher: "Blocked Publisher",
+                excerptText: EXCERPT_B,
+                excerptDigest: sha256(EXCERPT_B),
+              }),
+            ],
+          }),
+        ),
+      },
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({
+      outcome: "partial",
+      sourceAttemptCount: 0,
+      retrievalReasonCode: "RETRIEVAL_ALL_SOURCES_EXCLUDED",
+    });
+    expect(deps.evidence.record).not.toHaveBeenCalled();
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.partially_completed",
+        payload: expect.objectContaining({
+          retrievalReasonCode: "RETRIEVAL_ALL_SOURCES_EXCLUDED",
+          excludedSourceCount: 1,
+        }),
+      }),
+    );
+  });
+
   it("links corroborating claims from independent publishers and nothing else", async () => {
     const deps = dependencies({
       adapter: {
@@ -1156,11 +1196,164 @@ describe("runMarketResearch extraction and admission", () => {
 
     const result = await runMarketResearch(payload, deps);
 
-    expect(result).toMatchObject({ outcome: "partial", sourceAttemptCount: 0 });
+    expect(result).toMatchObject({
+      outcome: "partial",
+      sourceAttemptCount: 0,
+      retrievalReasonCode: "RETRIEVAL_NO_USABLE_EVIDENCE",
+      retrievalSlotOutcomes: expect.objectContaining({ searched_no_usable_evidence: 1 }),
+    });
     expect(deps.evidence.record).not.toHaveBeenCalled();
     expect(deps.events.publish).toHaveBeenCalledWith(
-      expect.objectContaining({ eventName: "market_research.partially_completed" }),
+      expect.objectContaining({
+        eventName: "market_research.partially_completed",
+        payload: expect.objectContaining({
+          retrievalReasonCode: "RETRIEVAL_NO_USABLE_EVIDENCE",
+          retrievalSlotOutcomes: expect.objectContaining({ searched_no_usable_evidence: 1 }),
+        }),
+      }),
     );
+  });
+
+  it("records RETRIEVAL_FAILED when every retrieval slot failed", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            sources: [],
+            coverage: [
+              {
+                slotKey: "local_market",
+                kind: "local_market",
+                outcome: "failed",
+                attemptIds: ["10000000-0000-4000-8000-000000000010"],
+                acceptedClaimIds: [],
+              },
+            ],
+            attempts: [
+              {
+                attemptId: "10000000-0000-4000-8000-000000000010",
+                slotKey: "local_market",
+                usage: { kind: "unknown" },
+              },
+            ],
+          }),
+        ),
+      },
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({
+      outcome: "partial",
+      sourceAttemptCount: 0,
+      retrievalReasonCode: "RETRIEVAL_FAILED",
+      retrievalSlotOutcomes: expect.objectContaining({ failed: 1 }),
+    });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.partially_completed",
+        payload: expect.objectContaining({ retrievalReasonCode: "RETRIEVAL_FAILED" }),
+      }),
+    );
+  });
+
+  it("records RETRIEVAL_SOURCES_RETURNED on the result and event of a healthy run", async () => {
+    const deps = dependencies();
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({
+      outcome: "completed",
+      retrievalReasonCode: "RETRIEVAL_SOURCES_RETURNED",
+      retrievalSlotOutcomes: expect.objectContaining({ supported: 1 }),
+    });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.completed",
+        payload: expect.objectContaining({ retrievalReasonCode: "RETRIEVAL_SOURCES_RETURNED" }),
+      }),
+    );
+  });
+
+  it("names full policy exclusion instead of a generic zero-source partial", () => {
+    const outcome = describeRetrievalOutcome({
+      sources: [],
+      coverage: [
+        {
+          slotKey: "local_market",
+          kind: "local_market",
+          outcome: "supported",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+      ],
+      excludedSourceCount: 2,
+    });
+
+    expect(outcome.reasonCode).toBe("RETRIEVAL_ALL_SOURCES_EXCLUDED");
+    expect(outcome.slotOutcomeCounts).toEqual({
+      not_started: 0,
+      searched_no_usable_evidence: 0,
+      supported: 1,
+      failed: 0,
+      skipped_budget: 0,
+      skipped_policy: 0,
+    });
+  });
+
+  it("names mixed and never-started zero-source coverage without inventing success", () => {
+    const mixed = describeRetrievalOutcome({
+      sources: [],
+      coverage: [
+        {
+          slotKey: "local_market",
+          kind: "local_market",
+          outcome: "searched_no_usable_evidence",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+        {
+          slotKey: "topic:volatile",
+          kind: "topic",
+          outcome: "failed",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+      ],
+      excludedSourceCount: 0,
+    });
+    expect(mixed.reasonCode).toBe("RETRIEVAL_NO_SOURCES_MIXED");
+
+    const neverStarted = describeRetrievalOutcome({
+      sources: [],
+      coverage: [
+        {
+          slotKey: "local_market",
+          kind: "local_market",
+          outcome: "not_started",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+      ],
+      excludedSourceCount: 0,
+    });
+    expect(neverStarted.reasonCode).toBe("RETRIEVAL_NOT_STARTED");
+
+    const revoked = describeRetrievalOutcome({
+      sources: [],
+      coverage: [
+        {
+          slotKey: "local_market",
+          kind: "local_market",
+          outcome: "skipped_policy",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+      ],
+      excludedSourceCount: 0,
+    });
+    expect(revoked.reasonCode).toBe("RETRIEVAL_POLICY_REVOKED");
   });
 
   it("refuses unbounded retrieval results instead of truncating them silently", async () => {

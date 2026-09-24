@@ -18,6 +18,7 @@ import {
   researchRetrievalResultSchema,
   researchRequestSchema,
   type ResearchAdapter,
+  type ResearchRetrievalResult,
   type ResearchRetrievedSource,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
 import {
@@ -146,6 +147,148 @@ export type TinyfishSearchRunOutput = {
   durableState: TinyfishSearchDurableState;
   stats: TinyfishSearchRunStats;
 };
+
+/**
+ * Stable machine-readable reason for one finished TinyFish retrieval run.
+ *
+ * The retrieval result alone cannot distinguish the zero-source cases that
+ * matter to operators: a clean provider answer with nothing usable looks
+ * identical to a run whose calls all failed. These codes preserve that
+ * distinction, so a zero-source run records WHY instead of completing
+ * silently. Codes are additive-only: new stop conditions gain new codes,
+ * never renumbered ones.
+ */
+export type TinyfishRetrievalReasonCode =
+  | "TINYFISH_SOURCES_RETURNED"
+  | "TINYFISH_NO_USABLE_EVIDENCE"
+  | "TINYFISH_RETRIEVAL_FAILED"
+  | "TINYFISH_NO_SOURCES_MIXED"
+  | "TINYFISH_POLICY_REVOKED"
+  | "TINYFISH_BUDGET_EXHAUSTED"
+  | "TINYFISH_RESERVATION_FAILED"
+  | "TINYFISH_SETTLEMENT_FAILED"
+  | "TINYFISH_CLAIM_LOST"
+  | "TINYFISH_CANCELLED"
+  | "TINYFISH_DEADLINE_EXCEEDED"
+  | "TINYFISH_ATTEMPT_CEILING"
+  | "TINYFISH_BYTE_BUDGET_EXCEEDED"
+  | "TINYFISH_SOURCE_BUDGET_EXCEEDED";
+
+export type TinyfishRetrievalSummary = {
+  reasonCode: TinyfishRetrievalReasonCode;
+  sourceCount: number;
+  slotOutcomeCounts: Record<ResearchCoverageOutcome, number>;
+  callsIssued: number;
+  resultsSeen: number;
+  droppedDuplicates: number;
+  droppedUnsafe: number;
+  droppedEmptyExcerpts: number;
+  stopReason: TinyfishSearchStopReason;
+};
+
+const EMPTY_SLOT_OUTCOME_COUNTS: Record<ResearchCoverageOutcome, number> = {
+  not_started: 0,
+  searched_no_usable_evidence: 0,
+  supported: 0,
+  failed: 0,
+  skipped_budget: 0,
+  skipped_policy: 0,
+};
+
+/**
+ * Derives the truthful zero-source reason for a finished run. Pure and
+ * deterministic: the same result, stop reason, and stats always yield the
+ * same code, so unit tests pin it without any provider call.
+ */
+export function summarizeTinyfishSearchOutcome(input: {
+  result: Pick<ResearchRetrievalResult, "sources" | "coverage">;
+  stopReason: TinyfishSearchStopReason;
+  stats: TinyfishSearchRunStats;
+}): TinyfishRetrievalSummary {
+  const slotOutcomeCounts: Record<ResearchCoverageOutcome, number> = {
+    ...EMPTY_SLOT_OUTCOME_COUNTS,
+  };
+  for (const entry of input.result.coverage) {
+    slotOutcomeCounts[entry.outcome] += 1;
+  }
+  const sourceCount = input.result.sources.length;
+  let reasonCode: TinyfishRetrievalReasonCode;
+  if (sourceCount > 0) {
+    reasonCode = "TINYFISH_SOURCES_RETURNED";
+  } else {
+    switch (input.stopReason) {
+      case "policy_revoked":
+        reasonCode = "TINYFISH_POLICY_REVOKED";
+        break;
+      case "budget_exhausted":
+        reasonCode = "TINYFISH_BUDGET_EXHAUSTED";
+        break;
+      case "reservation_failed":
+        reasonCode = "TINYFISH_RESERVATION_FAILED";
+        break;
+      case "settlement_failed":
+        reasonCode = "TINYFISH_SETTLEMENT_FAILED";
+        break;
+      case "claim_lost":
+        reasonCode = "TINYFISH_CLAIM_LOST";
+        break;
+      case "cancelled":
+        reasonCode = "TINYFISH_CANCELLED";
+        break;
+      case "deadline":
+        reasonCode = "TINYFISH_DEADLINE_EXCEEDED";
+        break;
+      case "attempt_ceiling":
+        reasonCode = "TINYFISH_ATTEMPT_CEILING";
+        break;
+      case "byte_budget":
+        reasonCode = "TINYFISH_BYTE_BUDGET_EXCEEDED";
+        break;
+      case "source_budget":
+        reasonCode = "TINYFISH_SOURCE_BUDGET_EXCEEDED";
+        break;
+      default: {
+        const outcomes = input.result.coverage.map((entry) => entry.outcome);
+        if (outcomes.length > 0 && outcomes.every((outcome) => outcome === "supported")) {
+          // Supported coverage with zero retained sources is contradictory:
+          // report it as mixed rather than inventing a clean code for it.
+          reasonCode = "TINYFISH_NO_SOURCES_MIXED";
+        } else if (
+          outcomes.length > 0 &&
+          outcomes.every((outcome) => outcome === "searched_no_usable_evidence")
+        ) {
+          reasonCode = "TINYFISH_NO_USABLE_EVIDENCE";
+        } else if (outcomes.length > 0 && outcomes.every((outcome) => outcome === "failed")) {
+          reasonCode = "TINYFISH_RETRIEVAL_FAILED";
+        } else if (
+          outcomes.length > 0 &&
+          outcomes.every((outcome) => outcome === "skipped_policy")
+        ) {
+          reasonCode = "TINYFISH_POLICY_REVOKED";
+        } else if (
+          outcomes.length > 0 &&
+          outcomes.every((outcome) => outcome === "skipped_budget")
+        ) {
+          reasonCode = "TINYFISH_BUDGET_EXHAUSTED";
+        } else {
+          reasonCode = "TINYFISH_NO_SOURCES_MIXED";
+        }
+        break;
+      }
+    }
+  }
+  return {
+    reasonCode,
+    sourceCount,
+    slotOutcomeCounts,
+    callsIssued: input.stats.callsIssued,
+    resultsSeen: input.stats.resultsSeen,
+    droppedDuplicates: input.stats.duplicatesDropped,
+    droppedUnsafe: input.stats.unsafeDropped,
+    droppedEmptyExcerpts: input.stats.emptyExcerptsDropped,
+    stopReason: input.stopReason,
+  };
+}
 
 /**
  * Builds the fixed-endpoint request for one slot page against the real
@@ -769,6 +912,13 @@ export function createTinyfishSearchAdapter(input: {
   deadlineMs?: number;
   now?: () => Date;
   signal?: AbortSignal;
+  /**
+   * Truthful-outcome observer, called once per searchAndFetch with the
+   * finished run's summary (reason code, slot outcome counts, drop stats).
+   * Retrieval behavior is unchanged: the observer only reads. Defaults to
+   * no observation.
+   */
+  observe?: (summary: TinyfishRetrievalSummary) => void;
 }): ResearchAdapter {
   const availability = input.availability ?? {
     available: input.gate.isAvailable(),
@@ -793,6 +943,13 @@ export function createTinyfishSearchAdapter(input: {
         now: input.now,
         signal: input.signal,
       });
+      input.observe?.(
+        summarizeTinyfishSearchOutcome({
+          result: output.result,
+          stopReason: output.stopReason,
+          stats: output.stats,
+        }),
+      );
       return output.result;
     },
   };

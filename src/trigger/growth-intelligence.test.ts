@@ -729,4 +729,73 @@ describe("TinyFish research assembly (Task 5)", () => {
     expect(reserveRequestBudget).not.toHaveBeenCalled();
     expect(reserveAttempt).not.toHaveBeenCalled();
   });
+
+  it("reports the retrieval summary through the observer on a qualified lane", async () => {
+    process.env.TINYFISH_SEARCH_API_KEY = FAKE_KEY;
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence } = persistenceFor({
+      provider: "tinyfish",
+      available: true,
+      blockers: [],
+    });
+    const fetchImpl = (async (url: string) => {
+      const parsed = new URL(url);
+      const body = tinyfishPage(
+        parsed.searchParams.get("query") ?? "q",
+        Number(parsed.searchParams.get("page") ?? "0"),
+        5,
+      );
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+    const observed: Array<{ reasonCode: string; sourceCount: number }> = [];
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+      fetchImpl,
+      observeResearchOutcome: (summary) => {
+        observed.push(summary);
+      },
+    });
+
+    const result = await adapter.searchAndFetch(validRequest());
+
+    expect(result.sources.length).toBeGreaterThan(0);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({
+      reasonCode: "TINYFISH_SOURCES_RETURNED",
+      sourceCount: result.sources.length,
+    });
+  });
+
+  it("never calls the observer on blocked lanes that issue no retrieval", async () => {
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence } = persistenceFor({
+      provider: "tinyfish",
+      available: true,
+      blockers: [],
+    });
+    const observed: unknown[] = [];
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+      observeResearchOutcome: (summary) => {
+        observed.push(summary);
+      },
+    });
+
+    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+    expect(observed).toHaveLength(0);
+  });
 });
