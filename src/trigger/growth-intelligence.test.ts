@@ -465,7 +465,7 @@ describe("TinyFish research assembly (Task 5)", () => {
       claimToken: () => CLAIM_TOKEN,
     });
 
-    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    expect(adapter.availability).toEqual({ available: false, provider: "tinyfish" });
     await expect(adapter.searchAndFetch(validRequest())).rejects.toBeInstanceOf(DomainError);
     await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
@@ -488,7 +488,7 @@ describe("TinyFish research assembly (Task 5)", () => {
       claimToken: () => CLAIM_TOKEN,
     });
 
-    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    expect(adapter.availability).toEqual({ available: false, provider: "tinyfish" });
     await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
@@ -511,7 +511,7 @@ describe("TinyFish research assembly (Task 5)", () => {
       claimToken: () => CLAIM_TOKEN,
     });
 
-    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    expect(adapter.availability).toEqual({ available: false, provider: "tinyfish" });
     await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
@@ -537,7 +537,7 @@ describe("TinyFish research assembly (Task 5)", () => {
       claimToken: () => CLAIM_TOKEN,
     });
 
-    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    expect(adapter.availability).toEqual({ available: false, provider: "tinyfish" });
     await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
@@ -563,7 +563,7 @@ describe("TinyFish research assembly (Task 5)", () => {
       claimToken: () => CLAIM_TOKEN,
     });
 
-    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    expect(adapter.availability).toEqual({ available: false, provider: "tinyfish" });
     await expect(adapter.searchAndFetch(validRequest())).rejects.toBeInstanceOf(DomainError);
     await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
@@ -583,7 +583,7 @@ describe("TinyFish research assembly (Task 5)", () => {
       claimToken: () => CLAIM_TOKEN,
     });
 
-    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    expect(adapter.availability).toEqual({ available: false, provider: "tinyfish" });
     await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
@@ -802,7 +802,7 @@ describe("TinyFish research assembly (Task 5)", () => {
       },
     });
 
-    expect(adapter.availability).toEqual({ available: false, provider: "brave" });
+    expect(adapter.availability).toEqual({ available: false, provider: "tinyfish" });
     await expect(adapter.searchAndFetch(validRequest())).rejects.toEqual(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );

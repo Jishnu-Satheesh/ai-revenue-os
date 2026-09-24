@@ -163,7 +163,16 @@ export async function createQualifiedTinyfishResearchAdapter(input: {
    */
   observeResearchOutcome?: (summary: TinyfishRetrievalSummary) => void;
 }): Promise<ResearchAdapter> {
-  const blocked = () => getQualifiedMarketResearchAdapter();
+  // Blocked lanes report the TinyFish provider, not the shared registry's
+  // legacy Brave default: the worker persists availability.provider as the
+  // run row's adapter_provider, so a blocked TinyFish lane must never mint
+  // another adapter_provider = 'brave' row (those mislabeled rows caused the
+  // 2026-09 ADAPTER_UNAVAILABLE confusion). Historical rows stay untouched.
+  const blocked = () =>
+    getQualifiedMarketResearchAdapter({
+      available: false,
+      provider: QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
+    });
   const apiKey = readTinyfishSearchApiKey();
   if (apiKey.length === 0 || !isTinyfishResearchGateOpen()) return blocked();
 
