@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { RevenueFact } from "@/domain/organizations/growth-progress";
 import type { RevenueScenarioInput } from "@/domain/organizations/revenue-scenario";
+import type { BaselineFact } from "@/modules/organizations/application/growth-projection-builder";
 import {
   assembleLedgerBaselineCandidate,
   type GrowthCandidateAssemblyDependencies,
@@ -157,19 +158,47 @@ describe("assembleLedgerBaselineCandidate", () => {
     expect(result.document.limitations.join(" ")).toContain("Baseline from 20 reported days");
   });
 
-  it("refuses a sliver of fewer than 7 reported days", async () => {
+  it("publishes from a single reported day at the first rung", async () => {
     const result = await assembleLedgerBaselineCandidate(
       material(),
       context(),
       dependencies({
-        readBaselineFacts: async () => ({ status: "ready", facts: septemberFacts({ from: 16 }) }),
+        readBaselineFacts: async () => ({ status: "ready", facts: septemberFacts({ from: 21 }) }),
       }),
     );
 
-    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+    // ADR 0069: the floor is 1 reported day, so one day builds on its own —
+    // labelled with its exact count, never presented as a full month of data.
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.document.monthlyLowMinor).toBe(3000000);
+    expect(result.document.baselineWindow).toEqual({
+      startDate: "2026-08-23",
+      endDateExclusive: "2026-09-22",
+    });
+    expect(result.document.limitations.join(" ")).toContain(
+      "Baseline from 1 reported days (ending 2026-09-21)",
+    );
   });
 
-  it("widens to the second rung when the recent window is thin but history is deep", async () => {
+  it("refuses when no rung reports a single day", async () => {
+    const readBaselineFacts = vi.fn(async (): Promise<RevenueFactsEnvelope> => ({
+      status: "ready",
+      facts: [],
+    }));
+    const result = await assembleLedgerBaselineCandidate(
+      material(),
+      context(),
+      dependencies({ readBaselineFacts }),
+    );
+
+    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+    // An empty window widens through every rung before the assembly gives
+    // up; it never publishes a guess.
+    expect(readBaselineFacts).toHaveBeenCalledTimes(4);
+  });
+
+  it("builds at the first rung instead of widening a thin recent window", async () => {
     const result = await assembleLedgerBaselineCandidate(
       material(),
       context(),
@@ -184,40 +213,156 @@ describe("assembleLedgerBaselineCandidate", () => {
       }),
     );
 
-    // Six September days cannot carry rung one, but the wider window holds 21
-    // reported days against rung two's floor of 14: older data earned its
-    // place with more of it.
+    // Six September days meet the 1-day floor, so rung one builds on its own
+    // even though deeper history holds more: the first rung with at least
+    // one reported day wins.
     expect(result.status).toBe("ready");
     if (result.status !== "ready") return;
     expect(result.document.baselineWindow).toEqual({
-      startDate: "2026-07-24",
+      startDate: "2026-08-23",
       endDateExclusive: "2026-09-22",
     });
     expect(result.document.monthlyLowMinor).toBe(3000000);
     expect(result.document.limitations.join(" ")).toContain(
-      "Baseline from 21 reported days (ending 2026-09-21)",
+      "Baseline from 6 reported days (ending 2026-09-21)",
     );
   });
 
-  it("refuses when deeper history still misses the higher rung floor", async () => {
+  it("publishes the qualifying partition while naming the excluded one", async () => {
+    const channelA = "33333333-3333-4333-8333-333333333333";
+    const channelB = "44444444-4444-4444-8444-444444444444";
+    const keyA = `channel-${channelA}-branch-org`;
+    const keyB = `channel-${channelB}-branch-org`;
     const result = await assembleLedgerBaselineCandidate(
       material(),
       context(),
       dependencies({
-        readBaselineFacts: async (input): Promise<RevenueFactsEnvelope> => ({
+        listBaselineCoordinates: async () => [
+          { channelId: channelA, branchId: null },
+          { channelId: channelB, branchId: null },
+        ],
+        readBaselineFacts: async () => ({
           status: "ready",
-          facts:
-            input.from === "2026-08-23"
-              ? septemberFacts({ from: 16 })
-              : septemberFacts({ from: 12 }),
+          facts: septemberFacts({ key: keyA }),
         }),
       }),
     );
 
-    // Ten reported days clear rung one's floor of 7 only in count, but rung
-    // one never sees them: the recent window holds six, and ten misses rung
-    // two's floor of 14 and every rung above it.
-    expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+    // Only keyA reported: the baseline covers exactly it, and keyB is named
+    // as excluded rather than silently dropped.
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(result.document.monthlyLowMinor).toBe(3000000);
+    expect(result.document.scopePartitions.map((partition) => partition.partitionKey)).toEqual([
+      keyA,
+    ]);
+    const text = result.document.limitations.join(" ");
+    expect(text).toContain("Baseline covers 1 of 2 scope partitions");
+    expect(text).toContain("Excluded partitions with no qualifying baseline");
+    expect(text).toContain(keyB);
+  });
+
+  it("counts ghost partitions' unreconciled days instead of zeroing the assessment", async () => {
+    // Live-case shape: org-level rows plus a single-day channel row, all
+    // unreconciled with no digest. The old joint rule needed every partition
+    // to cover a day, so these ghosts zeroed the whole assessment; assessed
+    // per partition, each contributes its own reported days.
+    const channel = "55555555-5555-4555-8555-555555555555";
+    const channelKey = `channel-${channel}-branch-org`;
+    const dayFact = (
+      date: string,
+      next: string,
+      key: string,
+      amountMinor: number,
+      rowId: string,
+    ): BaselineFact => ({
+      sourceTable: "normalized_metrics",
+      rowId,
+      organizationId: ORG_ID,
+      partitionKey: key,
+      startDate: date,
+      endDateExclusive: next,
+      amountMinor,
+      currency: "AED",
+      createdAt: "2026-09-21T00:00:00.000Z",
+      reconciliationDigest: null,
+      provenance: "unreconciled",
+    });
+    const result = await assembleLedgerBaselineCandidate(
+      material(),
+      context(),
+      dependencies({
+        listBaselineCoordinates: async () => [{ channelId: null, branchId: null }, { channelId: channel, branchId: null }],
+        readBaselineFacts: async () => ({
+          status: "ready",
+          facts: [
+            dayFact("2026-09-19", "2026-09-20", "organization-total", 100000, "ghost-org-1"),
+            dayFact("2026-09-20", "2026-09-21", "organization-total", 100000, "ghost-org-2"),
+            dayFact("2026-09-21", "2026-09-22", "organization-total", 100000, "ghost-org-3"),
+            dayFact("2026-09-21", "2026-09-22", channelKey, 50000, "ghost-channel-1"),
+          ],
+        }),
+      }),
+    );
+
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    // 100k/day plus 50k/day paces sum to a 150k/day combined pace.
+    expect(result.document.monthlyLowMinor).toBe(4500000);
+    expect(
+      result.document.scopePartitions.map((partition) => partition.partitionKey).sort(),
+    ).toEqual(["organization-total", channelKey].sort());
+    const text = result.document.limitations.join(" ");
+    expect(text).toContain("Baseline from 4 reported days (ending 2026-09-21)");
+    expect(text).toContain("treat figures as estimates pending reconciliation");
+  });
+
+  it("publishes the clean partition when another partition conflicts", async () => {
+    const channelA = "33333333-3333-4333-8333-333333333333";
+    const channelB = "44444444-4444-4444-8444-444444444444";
+    const keyA = `channel-${channelA}-branch-org`;
+    const keyB = `channel-${channelB}-branch-org`;
+    const clash: BaselineFact[] = [3_100_000, 3_100_001].map(
+      (amountMinor, index): BaselineFact => ({
+        sourceTable: "exact_range_metric_observations",
+        rowId: `span-clash-${index}`,
+        organizationId: ORG_ID,
+        partitionKey: keyA,
+        startDate: "2026-09-01",
+        endDateExclusive: "2026-09-22",
+        amountMinor,
+        currency: "AED",
+        createdAt: "2026-09-21T00:00:00.000Z",
+        reconciliationDigest: DIGEST,
+        provenance: "reconciled",
+      }),
+    );
+    const readBaselineFacts = vi.fn(async (): Promise<RevenueFactsEnvelope> => ({
+      status: "ready",
+      facts: [...clash, ...septemberFacts({ key: keyB, from: 19 })],
+    }));
+    const result = await assembleLedgerBaselineCandidate(
+      material(),
+      context(),
+      dependencies({
+        listBaselineCoordinates: async () => [
+          { channelId: channelA, branchId: null },
+          { channelId: channelB, branchId: null },
+        ],
+        readBaselineFacts,
+      }),
+    );
+
+    // keyA's conflict refuses only keyA; keyB's three days build at rung one.
+    expect(result.status).toBe("ready");
+    if (result.status !== "ready") return;
+    expect(readBaselineFacts).toHaveBeenCalledTimes(1);
+    expect(result.document.scopePartitions.map((partition) => partition.partitionKey)).toEqual([
+      keyB,
+    ]);
+    const text = result.document.limitations.join(" ");
+    expect(text).toContain("Excluded partitions with no qualifying baseline");
+    expect(text).toContain(keyA);
   });
 
   it("refuses a conflict at the first rung instead of widening past it", async () => {

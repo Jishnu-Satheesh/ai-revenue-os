@@ -592,6 +592,7 @@ describe("growth-progress repository", () => {
       amountMinor: 100000,
       currency: "AED",
       reconciliationDigest: "digest-1",
+      provenance: "reconciled",
     });
     // Inclusive exact-range end dates arrive end-exclusive internally.
     expect(spanFact).toMatchObject({
@@ -602,6 +603,7 @@ describe("growth-progress repository", () => {
       endDateExclusive: "2030-01-02",
       amountMinor: 50000,
       currency: "AED",
+      provenance: "reconciled",
     });
   });
 
@@ -719,17 +721,49 @@ describe("growth-progress repository", () => {
       ],
     });
     if (result.status !== "ready") throw new Error(`expected ready, got ${result.status}`);
-    // Measured + derived period rows and the complete/complete span survive;
-    // estimated, blocked, undigested, currency-less, dimensioned, misaligned,
-    // out-of-window, fractional, unmatched and branchless-span rows do not.
+    // ADR 0069 reporting-as-evidence: reconciliation standing, digest and
+    // quality gates are gone, so estimated, blocked, undigested and partial
+    // rows are admitted with unreconciled provenance. Currency-less,
+    // dimensioned, misaligned, out-of-window, fractional, unmatched and
+    // branchless-span rows are still excluded — the honesty checks stay.
     expect(result.facts.map((fact) => fact.rowId).sort()).toEqual([
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb101",
       "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb102",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb103",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb104",
+      "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb105",
       "cccccccc-cccc-4ccc-8ccc-cccccccc0101",
+      "cccccccc-cccc-4ccc-8ccc-cccccccc0102",
+      "cccccccc-cccc-4ccc-8ccc-cccccccc0103",
     ]);
-    const exactCall = calls.find((call) => call.table === "exact_range_metric_observations");
-    expect(exactCall).toBeDefined();
-    expect(exactCall?.filters.some((filter) => filter.includes("quality_tier"))).toBe(false);
+    const provenanceByRow = new Map(result.facts.map((fact) => [fact.rowId, fact.provenance]));
+    // Provenance follows reconciliation standing plus digest only: quality
+    // neither gates nor taints a row anymore.
+    expect(provenanceByRow.get("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb101")).toBe("reconciled");
+    expect(provenanceByRow.get("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb102")).toBe("reconciled");
+    expect(provenanceByRow.get("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb103")).toBe("reconciled");
+    expect(provenanceByRow.get("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb104")).toBe("unreconciled");
+    expect(provenanceByRow.get("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb105")).toBe("unreconciled");
+    expect(provenanceByRow.get("cccccccc-cccc-4ccc-8ccc-cccccccc0101")).toBe("reconciled");
+    expect(provenanceByRow.get("cccccccc-cccc-4ccc-8ccc-cccccccc0102")).toBe("reconciled");
+    expect(provenanceByRow.get("cccccccc-cccc-4ccc-8ccc-cccccccc0103")).toBe("reconciled");
+    // The digest-null row carries no digest: null stops nothing now.
+    const undigested = result.facts.find(
+      (fact) => fact.rowId === "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbb105",
+    );
+    expect(undigested?.reconciliationDigest).toBeNull();
+    // Neither ledger filters on reconciliation standing, digest or quality:
+    // those rows are admitted and labelled, never dropped at the query.
+    const periodCall = calls.find((call) => call.table === "normalized_metrics");
+    expect(periodCall).toBeDefined();
+    for (const call of [periodCall, calls.find((c) => c.table === "exact_range_metric_observations")]) {
+      const joined = (call?.filters ?? []).join("\n");
+      expect(joined).not.toContain("reconciliation_state");
+      expect(joined).not.toContain("reconciliation_digest");
+      expect(joined).not.toContain("quality_tier");
+      expect(joined).not.toContain("quality_state");
+      expect(joined).not.toContain("completeness_state");
+    }
   });
 
   it("reads the registry with org-override precedence and money-sum rules", async () => {
@@ -849,6 +883,57 @@ describe("growth-progress repository", () => {
       }),
     ).rejects.toMatchObject({ code: "SCOPE_NOT_COMPARABLE" });
     expect(calls.map((call) => call.table)).toEqual(["organizations"]);
+  });
+
+  it("refuses cross-tenant scope without reading the ledgers", async () => {
+    const { createGrowthProgressRepository } = await import(
+      "@/modules/organizations/infrastructure/growth-progress-repository"
+    );
+    // A channel no local row vouches for: the tenancy probe misses, so the
+    // read refuses instead of reaching across tenants.
+    const { client, calls } = fakeClient((steps) => {
+      if (steps.table === "organizations") return { data: [{ id: ORG }], error: null };
+      if (steps.table === "metric_definitions") return { data: registryRows(), error: null };
+      if (steps.table === "organization_channels") return { data: [], error: null };
+      return { data: [], error: null };
+    });
+    await expect(
+      createGrowthProgressRepository(client).readRevenueFacts({
+        organizationId: ORG,
+        from: "2030-01-01",
+        toExclusive: "2030-02-01",
+        scopePartitions: [
+          {
+            partitionKey: "pk-foreign",
+            channelId: "66666666-6666-4666-8666-666666666666",
+            branchId: null,
+            metricDefinitionId: DEF,
+            dimensionsDigest: "empty",
+            periodTimezone: "UTC",
+          },
+        ],
+      }),
+    ).rejects.toThrow(/channel outside this organization/);
+    expect(calls.some((call) => call.table === "normalized_metrics")).toBe(false);
+    expect(calls.some((call) => call.table === "exact_range_metric_observations")).toBe(false);
+
+    // A metric from another comparison refuses before any ledger read.
+    const metric = fakeClient((steps) => {
+      if (steps.table === "organizations") return { data: [{ id: ORG }], error: null };
+      if (steps.table === "metric_definitions") return { data: registryRows(), error: null };
+      return { data: [], error: null };
+    });
+    await expect(
+      createGrowthProgressRepository(metric.client).readRevenueFacts({
+        organizationId: ORG,
+        from: "2030-01-01",
+        toExclusive: "2030-02-01",
+        scopePartitions: [
+          { ...SCOPE[0]!, metricDefinitionId: "99999999-9999-4999-8999-999999999999" },
+        ],
+      }),
+    ).rejects.toThrow(/metric outside this comparison/);
+    expect(metric.calls.some((call) => call.table === "normalized_metrics")).toBe(false);
   });
 
   it("denies strangers before any ledger read and fails loudly on errors", async () => {

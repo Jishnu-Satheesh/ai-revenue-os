@@ -93,7 +93,11 @@ export const revenueFactSchema = z
     amountMinor: safeMinorSchemaField(),
     currency: currencySchema,
     createdAt: instantSchema,
-    reconciliationDigest: z.string().trim().min(1).max(256),
+    // ADR 0069 reporting-as-evidence: rows that never reconciled carry no
+    // digest (null). The BaselineFact provenance flag says how to read such
+    // a fact; cover arithmetic never uses the digest, so null changes no
+    // total — it only stops the reader from dropping the row.
+    reconciliationDigest: z.string().trim().min(1).max(256).nullable(),
   })
   .refine((value) => value.startDate < value.endDateExclusive, {
     message: "A revenue fact must end after it starts.",

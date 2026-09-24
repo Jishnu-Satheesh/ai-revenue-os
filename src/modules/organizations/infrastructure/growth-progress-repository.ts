@@ -8,8 +8,6 @@ import {
   currencySchema,
   frozenGrowthProjectionSchema,
   GROWTH_SERIES_MAX_FACTS,
-  revenueFactSchema,
-  type RevenueFact,
   type ScopePartition,
 } from "@/domain/organizations/growth-progress";
 import type {
@@ -26,7 +24,9 @@ import {
 } from "@/modules/organizations/application/growth-progress-ports";
 import {
   assertComparableGrowthScope,
+  baselineFactSchema,
   GrowthScopeError,
+  type BaselineFact,
 } from "@/modules/organizations/application/growth-projection-builder";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -435,18 +435,31 @@ type NormalizedRow = {
   created_at: string;
 };
 
+function toProvenance(row: {
+  reconciliation_state: string;
+  reconciliation_digest: string | null;
+}): "reconciled" | "unreconciled" {
+  // ADR 0069 reporting-as-evidence: only a row the source still vouches for
+  // (current standing with a digest to cite) reads as reconciled. Anything
+  // else — pending, blocked, excluded, undigested — is admitted as evidence
+  // but labelled unreconciled, never presented as verified.
+  return row.reconciliation_state === "current" && row.reconciliation_digest
+    ? "reconciled"
+    : "unreconciled";
+}
+
 function toPeriodFact(
   row: NormalizedRow,
   partitions: readonly ScopePartition[],
   window: { from: string; toExclusive: string },
-): RevenueFact | null {
-  // Qualification mirrors the publication gates: current standing, a digest,
-  // measured-or-derived quality, money kind, integer minor units and a real
-  // currency. Anything less is excluded — absence downstream reads as a gap,
-  // never as zero.
-  if (row.superseded_by_id !== null || row.reconciliation_state !== "current") return null;
-  if (!row.reconciliation_digest) return null;
-  if (row.quality_tier !== "measured" && row.quality_tier !== "derived") return null;
+): BaselineFact | null {
+  // Qualification under ADR 0069: reporting scope counts as evidence, so the
+  // reconciliation-standing, digest and quality-tier gates are gone. What
+  // stays is everything that keeps a total honest — live revision, money
+  // kind, integer minor units, a real currency, empty dimensions and
+  // midnight-aligned days inside the window. Anything less is excluded —
+  // absence downstream reads as a gap, never as zero.
+  if (row.superseded_by_id !== null) return null;
   if (row.value_kind !== "money") return null;
   if (!hasEmptyDimensions(row.dimensions)) return null;
   const amountMinor = toSafeAmount(row.value_numerator);
@@ -482,8 +495,10 @@ function toPeriodFact(
     currency,
     createdAt: row.created_at,
     reconciliationDigest: row.reconciliation_digest,
+    provenance: toProvenance(row),
   };
-  return revenueFactSchema.safeParse(fact).success ? fact : null;
+  const parsed = baselineFactSchema.safeParse(fact);
+  return parsed.success ? parsed.data : null;
 }
 
 type ExactRangeRow = {
@@ -511,14 +526,13 @@ function toSpanFact(
   row: ExactRangeRow,
   partitions: readonly ScopePartition[],
   window: { from: string; toExclusive: string },
-): RevenueFact | null {
-  // Exact-range eligibility follows its own contract — quality_state plus
-  // completeness_state plus reconciliation_state. There is no quality_tier
-  // column on this table, and none is guessed here. Branch and channel are
-  // always set on span observations, so a null in either is unusable.
-  if (row.superseded_by_id !== null || row.reconciliation_state !== "current") return null;
-  if (!row.reconciliation_digest) return null;
-  if (row.quality_state !== "complete" || row.completeness_state !== "complete") return null;
+): BaselineFact | null {
+  // Exact-range eligibility under ADR 0069 follows the same reporting-as-
+  // evidence rule as period rows: no reconciliation-standing, digest or
+  // quality/completeness gates. Branch and channel are always set on span
+  // observations, so a null in either is still unusable, as are non-money
+  // kinds, missing currency and unusable dates.
+  if (row.superseded_by_id !== null) return null;
   if (row.value_kind !== "money") return null;
   if (row.branch_id === null || row.channel_id === null) return null;
   if (!row.period_timezone) return null;
@@ -550,8 +564,10 @@ function toSpanFact(
     currency,
     createdAt: row.created_at,
     reconciliationDigest: row.reconciliation_digest,
+    provenance: toProvenance(row),
   };
-  return revenueFactSchema.safeParse(fact).success ? fact : null;
+  const parsed = baselineFactSchema.safeParse(fact);
+  return parsed.success ? parsed.data : null;
 }
 
 async function readRevenueFacts(
@@ -592,7 +608,7 @@ async function readRevenueFacts(
     Date.parse(`${input.toExclusive}T00:00:00Z`) + FETCH_WIDENING_DAYS * MS_PER_DAY,
   ).toISOString();
   const window = { from: input.from, toExclusive: input.toExclusive };
-  const facts: RevenueFact[] = [];
+  const facts: BaselineFact[] = [];
 
   const page = async (table: "normalized_metrics" | "exact_range_metric_observations") => {
     for (let pageIndex = 0; pageIndex < FACT_MAX_PAGES_PER_TABLE; pageIndex += 1) {
@@ -601,6 +617,9 @@ async function readRevenueFacts(
       // One branch per ledger: their filter vocabularies differ by design —
       // exact-range rows carry quality_state/completeness_state and no
       // quality_tier, so a shared typed query cannot even name the columns.
+      // Neither branch filters on reconciliation standing, digest or quality
+      // (ADR 0069 reporting-as-evidence): those rows are admitted with an
+      // unreconciled provenance flag, and the converters below label them.
       const outcome =
         table === "normalized_metrics"
           ? await supabase
@@ -609,11 +628,8 @@ async function readRevenueFacts(
               .eq("organization_id", input.organizationId)
               .eq("metric_definition_id", registry.definitionId)
               .is("superseded_by_id", null)
-              .eq("reconciliation_state", "current")
-              .not("reconciliation_digest", "is", null)
               .eq("value_kind", "money")
               .not("currency", "is", null)
-              .in("quality_tier", ["measured", "derived"])
               .gte("period_start", fetchStart)
               .lt("period_start", fetchEndExclusive)
               .order("period_start", { ascending: true })
@@ -625,12 +641,8 @@ async function readRevenueFacts(
               .eq("organization_id", input.organizationId)
               .eq("metric_definition_id", registry.definitionId)
               .is("superseded_by_id", null)
-              .eq("reconciliation_state", "current")
-              .not("reconciliation_digest", "is", null)
               .eq("value_kind", "money")
               .not("currency", "is", null)
-              .eq("quality_state", "complete")
-              .eq("completeness_state", "complete")
               .gte("period_start", fetchStart)
               .lt("period_start", fetchEndExclusive)
               .order("period_start", { ascending: true })

@@ -4,8 +4,8 @@ import { isoDateSchema } from "@/domain/organizations/growth-periods";
 import {
   frozenGrowthProjectionSchema,
   scopePartitionSchema,
-  type RevenueFact,
 } from "@/domain/organizations/growth-progress";
+import type { BaselineFact } from "@/modules/organizations/application/growth-projection-builder";
 
 /**
  * Read and write boundaries for the fixed-projection slice (data contract D07).
@@ -67,7 +67,7 @@ export type ProjectionReadEnvelope =
 
 /** Typed fact-read outcome; truncation is reported, never silently partial. */
 export type RevenueFactsEnvelope =
-  | { status: "ready"; facts: readonly RevenueFact[] }
+  | { status: "ready"; facts: readonly BaselineFact[] }
   | { status: "denied"; reason: "PERMISSION_DENIED" }
   | { status: "limited"; reason: "SOURCE_LIMIT_EXCEEDED" }
   | { status: "failed"; reason: "SOURCE_READ_FAILED" };

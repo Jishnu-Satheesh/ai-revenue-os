@@ -4,12 +4,11 @@ import {
 import type { ScopePartition } from "@/domain/organizations/growth-progress";
 import type { RevenueScenarioInput } from "@/domain/organizations/revenue-scenario";
 import {
-  assessTrailingBaselineWindow,
+  assessPartitionBaselines,
   buildGrowthProjectionCandidate,
   GROWTH_BASELINE_FALLBACK_RUNGS,
   resolveTrailingBaselineWindow,
   type BuildGrowthProjectionCandidateResult,
-  type TrailingBaselineAssessment,
 } from "@/modules/organizations/application/growth-projection-builder";
 import type { GrowthCandidateBuildContext } from "@/modules/organizations/application/growth-projection-publisher";
 import type { RevenueFactsEnvelope } from "@/modules/organizations/application/growth-progress-ports";
@@ -20,10 +19,13 @@ import type { RevenueFactsEnvelope } from "@/modules/organizations/application/g
  *
  * Like developing a photo from its negative: the frozen scope is derived
  * from the organization's own revenue vocabulary, the baseline is the
- * trailing reported window ending at the source cutoff (the observed daily
- * mean over reported days, scaled to a standard month, widening rung by
- * rung until its floor is met), and the curve carries no action money until
- * cited findings bind it — an unproven window refuses instead of guessing.
+ * trailing reported window ending at the source cutoff (each scope partition
+ * assessed on its own reported days, widening rung by rung until some
+ * partition meets the rung floor), and the curve carries no action money
+ * until cited findings bind it — a window no partition can vouch for refuses
+ * instead of guessing. Partitions that cannot qualify are excluded and named
+ * by the builder, never silently dropped. The snapshot material rides along
+ * for future finding/action bindings but contributes nothing today.
  * The snapshot material rides along for future finding/action bindings but
  * contributes nothing today.
  *
@@ -83,10 +85,14 @@ export async function assembleLedgerBaselineCandidate(
   // under channels. The frozen document records exactly what froze, so the
   // scope stays checkable even as it varies run to run.
   //
-  // Fallback ladder: the trailing window widens rung by rung until its
-  // reported days meet that rung's floor. The first qualifying rung builds;
-  // a rung that cannot trust its days (conflict, mixed currency, unreadable
-  // reads) refuses outright instead of widening past a defect.
+  // Fallback ladder: the trailing window widens rung by rung until some
+  // scope partition's reported days meet that rung's floor (ADR 0069: floor
+  // 1 at every rung, assessed per partition). The first rung with at least
+  // one qualifying partition builds on its own; the builder narrows the
+  // frozen scope to the qualifying partitions and names the excluded ones.
+  // A rung no partition can trust (every partition conflicts, mixed
+  // currency, unreadable reads) refuses outright instead of widening past
+  // a defect; a rung no partition reports in simply widens.
   let period: { startDate: string; endDateExclusive: string };
   try {
     const resolved = resolveGrowthPeriod(
@@ -160,7 +166,7 @@ export async function assembleLedgerBaselineCandidate(
     }
     const [currency] = currencies;
 
-    const assessed: TrailingBaselineAssessment = assessTrailingBaselineWindow({
+    const assessed = assessPartitionBaselines({
       windowStart: baselineWindow.startDate,
       windowEndExclusive: baselineWindow.endDateExclusive,
       cutoffDate: context.sourceCutoffDate,
@@ -168,13 +174,22 @@ export async function assembleLedgerBaselineCandidate(
       scopePartitions,
       facts,
     });
-    if (assessed.status === "conflict") {
+    // Every partition conflicting means the rung's evidence disagrees with
+    // itself: refuse outright rather than widening past the defect. A mix of
+    // conflicted and merely empty partitions widens — the empty ones may
+    // still report further back, and the builder names whichever partitions
+    // cannot qualify.
+    if (assessed.every((partition) => partition.status === "conflict")) {
       return refused(
         "BASELINE_INCOMPLETE",
         "Conflicting reports cover the same day, so no total is stated.",
       );
     }
-    if (assessed.reportedDays.length < rung.minReportedDays) continue;
+    const rungQualifies = assessed.some(
+      (partition) =>
+        partition.status === "ok" && partition.reportedDays.length >= rung.minReportedDays,
+    );
+    if (!rungQualifies) continue;
 
     return buildGrowthProjectionCandidate({
       organizationId: context.organizationId,

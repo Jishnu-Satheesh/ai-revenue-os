@@ -193,9 +193,12 @@ const growthActionCandidateSchema = z
  * provenance: facts sourced from unreconciled rows carry "unreconciled" end
  * to end. The field stays optional so facts predating provenance keep their
  * old treatment (absent reads as reconciled) and existing callers passing
- * plain RevenueFact rows still validate.
+ * plain RevenueFact rows still validate. The digest is nullable at the
+ * domain layer (ADR 0069 reporting-as-evidence): rows that never reconciled
+ * carry no digest, and provenance — not the digest — says how to read them.
+ * Exported so the fact readers validate the same boundary the builder trusts.
  */
-const baselineFactSchema = revenueFactSchema.extend({
+export const baselineFactSchema = revenueFactSchema.extend({
   provenance: z.enum(["reconciled", "unreconciled"]).optional(),
 });
 
