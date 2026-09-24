@@ -31,7 +31,10 @@ import {
   type ResearchAdapter,
   type ResearchRequest,
 } from "@/modules/growth-intelligence/infrastructure/research/ports";
-import { QUALIFIED_TINYFISH_RESEARCH_PROVIDER } from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
+import {
+  QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
+  describeBraveMarketResearchExclusion,
+} from "@/modules/growth-intelligence/infrastructure/research/qualified-provider";
 import { createResearchBudgetRepository } from "@/modules/growth-intelligence/infrastructure/research/budget-repository";
 import {
   digestClaimCandidate,
@@ -439,6 +442,16 @@ async function createResearchDependencies(
     observeResearchOutcome: (summary) => {
       laneSummaryRef.current = summary;
     },
+  });
+  // Brave is excluded from the production market-research rotation (no
+  // staged Brave qualification exists; Brave serves ephemeral live-preview
+  // only). Logged once per run with identifiers only, so the rotation
+  // decision is visible without chasing adapter rows.
+  const braveExclusion = describeBraveMarketResearchExclusion();
+  logger.info("growth_intelligence.brave_research_excluded", {
+    organizationId: scope.organizationId,
+    ...(scope.correlationId ? { correlationId: scope.correlationId } : {}),
+    reasonCode: braveExclusion.reasonCode,
   });
   // Task 2: wire the extraction and support-review model phases behind the
   // existing environment names. The single TinyFish lane kill-switch governs

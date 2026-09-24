@@ -8,6 +8,7 @@ import {
   GrowthIntelligenceError,
   type GrowthIntelligenceErrorCode,
 } from "@/domain/growth-intelligence/errors";
+import { logger } from "@/lib/logger";
 import {
   RESEARCH_BUDGET_LIMITS,
   type ResearchAttemptUsage,
@@ -156,6 +157,155 @@ export type BraveSearchRunOutput = {
   durableState: BraveSearchDurableState;
   stats: BraveSearchRunStats;
 };
+
+/**
+ * Stable machine-readable reason for one finished Brave retrieval run.
+ *
+ * The retrieval result alone cannot distinguish the zero-source cases that
+ * matter to operators: a clean provider answer with nothing usable looks
+ * identical to a run whose calls all failed. These codes preserve that
+ * distinction, so a zero-source run records WHY instead of completing
+ * silently. Same shape as the Tinyfish lane summary; only the prefix
+ * differs, so Brave flows ride the shared worker's adapter-agnostic
+ * RETRIEVAL_* reason with identical event/result shape. Codes are
+ * additive-only: new stop conditions gain new codes, never renumbered ones.
+ */
+export type BraveRetrievalReasonCode =
+  | "BRAVE_SOURCES_RETURNED"
+  | "BRAVE_NO_USABLE_EVIDENCE"
+  | "BRAVE_RETRIEVAL_FAILED"
+  | "BRAVE_NO_SOURCES_MIXED"
+  | "BRAVE_POLICY_REVOKED"
+  | "BRAVE_BUDGET_EXHAUSTED"
+  | "BRAVE_RESERVATION_FAILED"
+  | "BRAVE_SETTLEMENT_FAILED"
+  | "BRAVE_CLAIM_LOST"
+  | "BRAVE_CANCELLED"
+  | "BRAVE_DEADLINE_EXCEEDED"
+  | "BRAVE_ATTEMPT_CEILING"
+  | "BRAVE_BYTE_BUDGET_EXCEEDED"
+  | "BRAVE_SOURCE_BUDGET_EXCEEDED";
+
+export type BraveRetrievalSummary = {
+  reasonCode: BraveRetrievalReasonCode;
+  sourceCount: number;
+  slotOutcomeCounts: Record<ResearchCoverageOutcome, number>;
+  callsIssued: number;
+  resultsSeen: number;
+  droppedDuplicates: number;
+  droppedUnsafe: number;
+  droppedEmptyExcerpts: number;
+  stopReason: BraveSearchStopReason;
+};
+
+const EMPTY_SLOT_OUTCOME_COUNTS: Record<ResearchCoverageOutcome, number> = {
+  not_started: 0,
+  searched_no_usable_evidence: 0,
+  supported: 0,
+  failed: 0,
+  skipped_budget: 0,
+  skipped_policy: 0,
+};
+
+/**
+ * Derives the truthful reason for a finished run. Pure and
+ * deterministic: the same result, stop reason, and stats always yield the
+ * same code, so unit tests pin it without any provider call.
+ *
+ * A terminal stop (cancelled, claim lost, deadline, budget or policy stop,
+ * attempt/byte/source ceilings) always names itself, even when earlier
+ * slots already banked sources: reporting SOURCES_RETURNED would hide the
+ * truncation behind a clean success.
+ */
+export function summarizeBraveSearchOutcome(input: {
+  result: Pick<z.infer<typeof researchRetrievalResultSchema>, "sources" | "coverage">;
+  stopReason: BraveSearchStopReason;
+  stats: BraveSearchRunStats;
+}): BraveRetrievalSummary {
+  const slotOutcomeCounts: Record<ResearchCoverageOutcome, number> = {
+    ...EMPTY_SLOT_OUTCOME_COUNTS,
+  };
+  for (const entry of input.result.coverage) {
+    slotOutcomeCounts[entry.outcome] += 1;
+  }
+  const sourceCount = input.result.sources.length;
+  let reasonCode: BraveRetrievalReasonCode;
+  if (sourceCount > 0 && input.stopReason === "completed") {
+    reasonCode = "BRAVE_SOURCES_RETURNED";
+  } else {
+    switch (input.stopReason) {
+      case "policy_revoked":
+        reasonCode = "BRAVE_POLICY_REVOKED";
+        break;
+      case "budget_exhausted":
+        reasonCode = "BRAVE_BUDGET_EXHAUSTED";
+        break;
+      case "reservation_failed":
+        reasonCode = "BRAVE_RESERVATION_FAILED";
+        break;
+      case "settlement_failed":
+        reasonCode = "BRAVE_SETTLEMENT_FAILED";
+        break;
+      case "claim_lost":
+        reasonCode = "BRAVE_CLAIM_LOST";
+        break;
+      case "cancelled":
+        reasonCode = "BRAVE_CANCELLED";
+        break;
+      case "deadline":
+        reasonCode = "BRAVE_DEADLINE_EXCEEDED";
+        break;
+      case "attempt_ceiling":
+        reasonCode = "BRAVE_ATTEMPT_CEILING";
+        break;
+      case "byte_budget":
+        reasonCode = "BRAVE_BYTE_BUDGET_EXCEEDED";
+        break;
+      case "source_budget":
+        reasonCode = "BRAVE_SOURCE_BUDGET_EXCEEDED";
+        break;
+      default: {
+        const outcomes = input.result.coverage.map((entry) => entry.outcome);
+        if (outcomes.length > 0 && outcomes.every((outcome) => outcome === "supported")) {
+          // Supported coverage with zero retained sources is contradictory:
+          // report it as mixed rather than inventing a clean code for it.
+          reasonCode = "BRAVE_NO_SOURCES_MIXED";
+        } else if (
+          outcomes.length > 0 &&
+          outcomes.every((outcome) => outcome === "searched_no_usable_evidence")
+        ) {
+          reasonCode = "BRAVE_NO_USABLE_EVIDENCE";
+        } else if (outcomes.length > 0 && outcomes.every((outcome) => outcome === "failed")) {
+          reasonCode = "BRAVE_RETRIEVAL_FAILED";
+        } else if (
+          outcomes.length > 0 &&
+          outcomes.every((outcome) => outcome === "skipped_policy")
+        ) {
+          reasonCode = "BRAVE_POLICY_REVOKED";
+        } else if (
+          outcomes.length > 0 &&
+          outcomes.every((outcome) => outcome === "skipped_budget")
+        ) {
+          reasonCode = "BRAVE_BUDGET_EXHAUSTED";
+        } else {
+          reasonCode = "BRAVE_NO_SOURCES_MIXED";
+        }
+        break;
+      }
+    }
+  }
+  return {
+    reasonCode,
+    sourceCount,
+    slotOutcomeCounts,
+    callsIssued: input.stats.callsIssued,
+    resultsSeen: input.stats.resultsSeen,
+    droppedDuplicates: input.stats.duplicatesDropped,
+    droppedUnsafe: input.stats.unsafeDropped,
+    droppedEmptyExcerpts: input.stats.emptyExcerptsDropped,
+    stopReason: input.stopReason,
+  };
+}
 
 /**
  * Builds the fixed-endpoint request for one slot. Only the bounded public
@@ -697,6 +847,14 @@ export function createBraveSearchAdapter(input: {
   deadlineMs?: number;
   now?: () => Date;
   signal?: AbortSignal;
+  /**
+   * Truthful-outcome observer, called once per searchAndFetch with the
+   * finished run's summary (reason code, slot outcome counts, drop stats).
+   * Retrieval behavior is unchanged: the observer only reads, and an
+   * observer that throws is logged and swallowed — telemetry never turns
+   * a successful retrieval into a failure. Defaults to no observation.
+   */
+  observe?: (summary: BraveRetrievalSummary) => void;
 }): ResearchAdapter {
   const availability = input.availability ?? {
     available: input.gate.isAvailable(),
@@ -721,6 +879,21 @@ export function createBraveSearchAdapter(input: {
         now: input.now,
         signal: input.signal,
       });
+      // Telemetry must never crash retrieval: a throwing observer is
+      // logged and swallowed, so a successful run stays successful.
+      try {
+        input.observe?.(
+          summarizeBraveSearchOutcome({
+            result: output.result,
+            stopReason: output.stopReason,
+            stats: output.stats,
+          }),
+        );
+      } catch (error) {
+        logger.warn("growth_intelligence.brave_observe_failed", {
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
+      }
       return output.result;
     },
   };

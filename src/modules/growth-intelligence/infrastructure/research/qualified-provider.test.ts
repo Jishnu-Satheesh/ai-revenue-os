@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import { DomainError } from "@/lib/errors";
 import {
+  BRAVE_MARKET_RESEARCH_EXCLUSION,
+  describeBraveMarketResearchExclusion,
   getQualifiedMarketResearchAdapter,
   QUALIFIED_RESEARCH_PROVIDER,
   QUALIFIED_TINYFISH_RESEARCH_PROVIDER,
@@ -136,6 +138,20 @@ describe("the market research provider qualification", () => {
     await expect(wrongProvider.searchAndFetch({ ...VALID_INPUT })).rejects.toMatchObject({
       code: "FEATURE_NOT_AVAILABLE",
     });
+  });
+
+  it("excludes Brave from the production market-research rotation with a stable reason", () => {
+    expect(BRAVE_MARKET_RESEARCH_EXCLUSION.excluded).toBe(true);
+    expect(BRAVE_MARKET_RESEARCH_EXCLUSION.reasonCode).toBe(
+      "BRAVE_MARKET_RESEARCH_NOT_STAGED",
+    );
+    expect(BRAVE_MARKET_RESEARCH_EXCLUSION.reasonCode).toMatch(/^[A-Z][A-Z0-9_]{2,80}$/);
+    expect(BRAVE_MARKET_RESEARCH_EXCLUSION.reason).toMatch(/live-preview/);
+    expect(BRAVE_MARKET_RESEARCH_EXCLUSION.reason).toMatch(/Tinyfish/);
+
+    const resolved = describeBraveMarketResearchExclusion();
+    expect(resolved).toEqual(BRAVE_MARKET_RESEARCH_EXCLUSION);
+    expect(resolved).not.toBe(BRAVE_MARKET_RESEARCH_EXCLUSION);
   });
 
   it("delegates to the TinyFish adapter only while qualified on TinyFish", async () => {

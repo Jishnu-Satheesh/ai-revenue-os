@@ -14,6 +14,8 @@ import {
   createBraveSearchAdapter,
   requirePlannedSlot,
   runBraveSearchResearch,
+  summarizeBraveSearchOutcome,
+  type BraveRetrievalSummary,
   type BraveSearchDurableState,
   type BraveSearchSpender,
   type BraveSearchTransport,
@@ -958,5 +960,268 @@ describe("createBraveSearchAdapter", () => {
       expect.stringMatching(/^topic:/),
     ]);
     expect(transport.calls).toBe(2);
+  });
+});
+
+describe("brave retrieval outcome summary and observer", () => {
+  it("returns sources for a known-good production-shaped query with quoted phrases", async () => {
+    const seen: BraveRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport((call) =>
+      jsonResponse([validResult(`https://guide.example/brave-known-good-${call}`)]),
+    );
+    const adapter = createBraveSearchAdapter({
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(
+      baseRequest({
+        scope: {
+          publicBusinessName: "Al Noor Kitchen",
+          approvedDomains: [],
+          niches: ["Emirati family dining"],
+          city: "Dubai",
+          countryCode: "AE",
+          topics: ["weekend brunch", "ramadan tents"],
+          competitors: [{ name: "Azure Dhow Restaurant", locationHint: "Deira waterfront" }],
+        },
+        maxResultsPerQuery: 5,
+      }),
+    );
+
+    expect(result.sources.length).toBeGreaterThan(0);
+    expect(result.coverage.every((entry) => entry.outcome === "supported")).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.reasonCode).toBe("BRAVE_SOURCES_RETURNED");
+    expect(seen[0]?.sourceCount).toBe(result.sources.length);
+    expect(seen[0]?.stopReason).toBe("completed");
+  });
+
+  it("records NO_USABLE_EVIDENCE when the provider answers cleanly with nothing usable", async () => {
+    const seen: BraveRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport(() => jsonResponse([]));
+    const adapter = createBraveSearchAdapter({
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources).toHaveLength(0);
+    expect(
+      result.coverage.every((entry) => entry.outcome === "searched_no_usable_evidence"),
+    ).toBe(true);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      reasonCode: "BRAVE_NO_USABLE_EVIDENCE",
+      sourceCount: 0,
+      stopReason: "completed",
+    });
+    expect(seen[0]?.slotOutcomeCounts.searched_no_usable_evidence).toBe(
+      result.coverage.length,
+    );
+    expect(seen[0]?.callsIssued).toBe(result.coverage.length);
+  });
+
+  it("records RETRIEVAL_FAILED when every call fails at the provider", async () => {
+    const seen: BraveRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport(() => ({ status: 503, body: encodeJson({}) }));
+    const adapter = createBraveSearchAdapter({
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources).toHaveLength(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]?.reasonCode).toBe("BRAVE_RETRIEVAL_FAILED");
+    expect(seen[0]?.slotOutcomeCounts.failed).toBe(result.coverage.length);
+  });
+
+  it("records POLICY_REVOKED without issuing calls when the gate starts closed", async () => {
+    const seen: BraveRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport(() =>
+      jsonResponse([validResult("https://guide.example/never")]),
+    );
+    const adapter = createBraveSearchAdapter({
+      transport,
+      spender,
+      gate: gate(false),
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources).toHaveLength(0);
+    expect(transport.calls).toBe(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      reasonCode: "BRAVE_POLICY_REVOKED",
+      callsIssued: 0,
+      stopReason: "policy_revoked",
+    });
+  });
+
+  it("summarizes mixed zero-source coverage without inventing a clean code", () => {
+    const summary = summarizeBraveSearchOutcome({
+      result: {
+        sources: [],
+        coverage: [
+          {
+            slotKey: "local_market",
+            kind: "local_market",
+            outcome: "searched_no_usable_evidence",
+            attemptIds: [],
+            acceptedClaimIds: [],
+          },
+          {
+            slotKey: "topic:volatile",
+            kind: "topic",
+            outcome: "failed",
+            attemptIds: [],
+            acceptedClaimIds: [],
+          },
+        ],
+      },
+      stopReason: "completed",
+      stats: {
+        callsIssued: 2,
+        bytesReceived: 128,
+        resultsSeen: 3,
+        duplicatesDropped: 0,
+        unsafeDropped: 2,
+        emptyExcerptsDropped: 1,
+      },
+    });
+
+    expect(summary.reasonCode).toBe("BRAVE_NO_SOURCES_MIXED");
+    expect(summary.slotOutcomeCounts).toEqual({
+      not_started: 0,
+      searched_no_usable_evidence: 1,
+      supported: 0,
+      failed: 1,
+      skipped_budget: 0,
+      skipped_policy: 0,
+    });
+    expect(summary.droppedUnsafe).toBe(2);
+    expect(summary.droppedEmptyExcerpts).toBe(1);
+  });
+
+  it("names the terminal stop even when earlier slots already banked sources", () => {
+    const banked = {
+      sources: [
+        {
+          sourceUrl: "https://guide.example/kept",
+          domain: "guide.example",
+          excerptText: "A bounded synthetic snippet.",
+          excerptDigest: "d".repeat(64),
+          retrievedAt: "2026-09-08T10:00:00.000Z",
+        },
+      ],
+      coverage: [
+        {
+          slotKey: "local_market",
+          kind: "local_market",
+          outcome: "supported",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+        {
+          slotKey: "topic:late",
+          kind: "topic",
+          outcome: "not_started",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+      ],
+    } as unknown as Parameters<typeof summarizeBraveSearchOutcome>[0]["result"];
+    const stats = {
+      callsIssued: 1,
+      bytesReceived: 128,
+      resultsSeen: 1,
+      duplicatesDropped: 0,
+      unsafeDropped: 0,
+      emptyExcerptsDropped: 0,
+    };
+    const cases = [
+      { stopReason: "cancelled", reasonCode: "BRAVE_CANCELLED" },
+      { stopReason: "claim_lost", reasonCode: "BRAVE_CLAIM_LOST" },
+      { stopReason: "deadline", reasonCode: "BRAVE_DEADLINE_EXCEEDED" },
+      { stopReason: "budget_exhausted", reasonCode: "BRAVE_BUDGET_EXHAUSTED" },
+      { stopReason: "policy_revoked", reasonCode: "BRAVE_POLICY_REVOKED" },
+      { stopReason: "source_budget", reasonCode: "BRAVE_SOURCE_BUDGET_EXCEEDED" },
+    ] as const;
+    for (const { stopReason, reasonCode } of cases) {
+      expect(
+        summarizeBraveSearchOutcome({ result: banked, stopReason, stats }).reasonCode,
+      ).toBe(reasonCode);
+    }
+    // A clean finish with sources keeps the success code.
+    expect(
+      summarizeBraveSearchOutcome({ result: banked, stopReason: "completed", stats }).reasonCode,
+    ).toBe("BRAVE_SOURCES_RETURNED");
+  });
+
+  it("surfaces mid-run policy revocation with banked sources through the observer", async () => {
+    let open = true;
+    const seen: BraveRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport((call) => {
+      open = false;
+      return jsonResponse([validResult(`https://guide.example/revoked-${call}`)]);
+    });
+    const adapter = createBraveSearchAdapter({
+      transport,
+      spender,
+      gate: { isAvailable: () => open },
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources.length).toBeGreaterThan(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      reasonCode: "BRAVE_POLICY_REVOKED",
+      sourceCount: result.sources.length,
+      stopReason: "policy_revoked",
+    });
+  });
+
+  it("never lets a throwing observer fail retrieval", async () => {
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport((call) =>
+      jsonResponse([validResult(`https://guide.example/observed-${call}`)]),
+    );
+    const adapter = createBraveSearchAdapter({
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+      observe: () => {
+        throw new Error("telemetry boom");
+      },
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources.length).toBeGreaterThan(0);
+    expect(result.coverage.every((entry) => entry.outcome === "supported")).toBe(true);
   });
 });

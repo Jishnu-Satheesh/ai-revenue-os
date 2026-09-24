@@ -57,6 +57,36 @@ export function resolveResearchAdapterAvailability(
   };
 }
 
+/**
+ * Brave is excluded from the production market-research rotation.
+ *
+ * Production research runs assemble the staged Tinyfish lane only
+ * (`createQualifiedTinyfishResearchAdapter`); no Brave production assembly
+ * exists for market research because no staged Brave qualification (account
+ * agreement with storage rights, rates, credential, model bounds, passing
+ * canary) is present. Brave stays the ephemeral-preview provider behind the
+ * live-preview route, which persists nothing. This descriptor is the logged
+ * reason for that exclusion: the research worker logs its reasonCode once
+ * per run, so a future `adapter_provider = 'brave'` row always means a
+ * fail-closed blocked lane (which reports this legacy default), never a
+ * live Brave call.
+ */
+export const BRAVE_MARKET_RESEARCH_EXCLUSION = {
+  excluded: true as const,
+  reasonCode: "BRAVE_MARKET_RESEARCH_NOT_STAGED",
+  reason:
+    "Brave serves ephemeral live-preview only; production market research runs on the staged Tinyfish lane.",
+};
+
+/**
+ * Returns the Brave exclusion descriptor (a copy, so callers cannot mutate
+ * the shared constant). Pure and stable: the same reasonCode travels on
+ * every research run's exclusion log line.
+ */
+export function describeBraveMarketResearchExclusion(): typeof BRAVE_MARKET_RESEARCH_EXCLUSION {
+  return { ...BRAVE_MARKET_RESEARCH_EXCLUSION };
+}
+
 export function getQualifiedMarketResearchAdapter(
   availability: ResearchAdapterAvailability = UNQUALIFIED_RESEARCH_AVAILABILITY,
   candidate?: ResearchAdapter,

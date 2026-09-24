@@ -93,6 +93,17 @@ describe("Growth Intelligence Trigger registration", () => {
     expect(source).not.toMatch(/logger\.(?:info|warn|error)\([^)]*idempotencyKey[\s\S]*/);
   });
 
+  it("excludes Brave from the research rotation with a logged reason", async () => {
+    const source = await readFile(
+      resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
+      "utf8",
+    );
+
+    expect(source).toContain("describeBraveMarketResearchExclusion");
+    expect(source).toContain('logger.info("growth_intelligence.brave_research_excluded"');
+    expect(source).toContain("reasonCode: braveExclusion.reasonCode");
+  });
+
   it("keeps raw business and evidence payloads out of the synthesis wiring", async () => {
     const source = await readFile(
       resolve(process.cwd(), "src/trigger/growth-intelligence.ts"),
