@@ -1,15 +1,25 @@
 import { describe, expect, it, vi } from "vitest";
 
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import type { FrozenGrowthProjection } from "@/domain/organizations/growth-progress";
 import { frozenGrowthProjectionSchema } from "@/domain/organizations/growth-progress";
 import type { RevenueScenarioInput } from "@/domain/organizations/revenue-scenario";
+import type { Database } from "@/lib/supabase/database.types";
 import { assembleLedgerBaselineCandidate } from "@/modules/organizations/application/growth-candidate-assembly";
+import {
+  createGrowthProgressRepository,
+  listBaselineCoordinates,
+  resolveGrowthRevenueDefinitionId,
+} from "@/modules/organizations/infrastructure/growth-progress-repository";
 import {
   publishDueGrowthProjections,
   type GrowthCandidateBuildContext,
   type GrowthProjectionPublisherDependencies,
   type GrowthScheduleSnapshot,
 } from "@/modules/organizations/application/growth-projection-publisher";
+
+vi.mock("server-only", () => ({}));
 
 const ORG_ID = "11111111-1111-4111-8111-111111111111";
 const OTHER_ORG_ID = "22222222-2222-4222-8222-222222222222";
@@ -433,59 +443,260 @@ describe("publishDueGrowthProjections idempotency", () => {
   });
 });
 
-describe("publishDueGrowthProjections with the ledger-bound assembly", () => {
+describe("publishDueGrowthProjections over the live dev-org profile", () => {
   const DEFINITION_ID = "a1a1a1a1-1111-4111-8111-111111111111";
   const FACT_DIGEST = "d".repeat(64);
-  /** Dubai local 2026-09-21: bootstrap origin becomes 2026-09-22, all horizons due. */
-  const NIGHTLY_NOW_ISO = "2026-09-20T20:00:00.000Z";
+  /** Dubai local 2026-08-29: the live ledger ends here, so the cutoff sits here. */
+  const LIVE_NOW_ISO = "2026-08-28T20:00:00.000Z";
+  const LIVE_CUTOFF = "2026-08-29";
 
-  function nightlyFacts() {
-    const facts = [];
-    for (let day = 1; day <= 21; day += 1) {
-      const date = `2026-09-${String(day).padStart(2, "0")}`;
-      const next = day === 21 ? "2026-09-22" : `2026-09-${String(day + 1).padStart(2, "0")}`;
-      facts.push({
-        sourceTable: "normalized_metrics" as const,
-        rowId: `nightly-fact-${date}`,
-        organizationId: ORG_ID,
-        partitionKey: "organization-total",
-        startDate: date,
-        endDateExclusive: next,
-        amountMinor: 100000,
-        currency: "AED",
-        createdAt: "2026-09-21T00:00:00.000Z",
-        reconciliationDigest: FACT_DIGEST,
-      });
+  // Live profile from the controller's staging reads: revenue.gross rows are
+  // measured/current/AED ending 2026-08-29, zero exact_range rows, 208 of 286
+  // trailing-120d rows lack a reconciliation digest, zero frozen projections.
+  // The fixture mirrors that composition at a smaller scale: 88 trailing-120d
+  // normalized rows, 60 digest-null (a 68% majority, live 73%), 28
+  // digest-present across 28 distinct days, 0 exact_range rows. Recent days
+  // are deliberately thin (5 present in the trailing 30) so the real ladder
+  // must widen past the 7-in-30 rung to the 14-in-60 rung.
+  const LIVE_RECENT_DAYS = [
+    "2026-08-25",
+    "2026-08-26",
+    "2026-08-27",
+    "2026-08-28",
+    "2026-08-29",
+  ];
+
+  function dateRange(from: string, to: string): string[] {
+    const dates: string[] = [];
+    let current = Date.parse(`${from}T00:00:00Z`);
+    const end = Date.parse(`${to}T00:00:00Z`);
+    while (current <= end) {
+      dates.push(new Date(current).toISOString().slice(0, 10));
+      current += 24 * 60 * 60 * 1000;
     }
-    return facts;
+    return dates;
   }
 
-  function assemblyBuildCandidate(
-    overrides: {
-      resolveRevenueDefinitionId?: () => Promise<string | null>;
-    } = {},
-  ) {
-    const facts = nightlyFacts();
-    return async (
-      nightlyMaterial: RevenueScenarioInput,
-      context: GrowthCandidateBuildContext,
-    ) =>
+  const LIVE_MID_DAYS = dateRange("2026-07-05", "2026-07-15");
+  const LIVE_OLD_DAYS = dateRange("2026-05-10", "2026-05-21");
+
+  type LiveLedgerRow = Record<string, unknown>;
+
+  function liveRow(date: string, rowId: string, digest: string | null): LiveLedgerRow {
+    const previous = new Date(Date.parse(`${date}T00:00:00Z`) - 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+    return {
+      id: rowId,
+      organization_id: ORG_ID,
+      branch_id: null,
+      channel_id: null,
+      metric_definition_id: DEFINITION_ID,
+      value_kind: "money",
+      dimensions: {},
+      // Dubai-midnight instants: date 00:00 at +04:00 is 20:00Z the day before.
+      period_start: `${previous}T20:00:00.000Z`,
+      period_end: `${date}T20:00:00.000Z`,
+      period_timezone: "Asia/Dubai",
+      value_numerator: 100000,
+      currency: "AED",
+      quality_tier: "measured",
+      revision: 1,
+      superseded_by_id: null,
+      reconciliation_state: "current",
+      reconciliation_digest: digest,
+      created_at: "2026-08-29T00:00:00.000Z",
+    };
+  }
+
+  /**
+   * In-memory stand-in for the database boundary beneath the readers: the
+   * only stub in these tests. It answers the exact query vocabulary the real
+   * readers use (eq/or/is/not/in/gte/lt/order/range/limit/maybeSingle) with
+   * PostgREST-like semantics, so the real definition, coordinate and fact
+   * readers — quality, reconciliation, digest, measured and currency
+   * filtering included — run un-bypassed above it.
+   */
+  class LiveLedgerQuery {
+    private readonly tests: Array<(row: LiveLedgerRow) => boolean> = [];
+    private readonly sorts: Array<{ column: string; ascending: boolean }> = [];
+    private rangeValue: readonly [number, number] | null = null;
+    private limitValue: number | null = null;
+    private single = false;
+
+    constructor(
+      private readonly table: string,
+      private readonly tables: Record<string, LiveLedgerRow[]>,
+    ) {}
+
+    select(): this {
+      return this;
+    }
+
+    eq(column: string, value: unknown): this {
+      const text = String(value);
+      this.tests.push((row) => String(row[column]) === text);
+      return this;
+    }
+
+    or(expression: string): this {
+      const clauses = expression.split(",").map((part) => {
+        const [column = "", operator = "", ...rest] = part.split(".");
+        return { column, operator, value: rest.join(".") };
+      });
+      this.tests.push((row) =>
+        clauses.some(({ column, operator, value }) => {
+          if (operator === "is" && value === "null") return row[column] == null;
+          if (operator === "eq") return String(row[column]) === value;
+          return false;
+        }),
+      );
+      return this;
+    }
+
+    is(column: string, value: unknown): this {
+      this.tests.push((row) =>
+        value === null ? row[column] == null : String(row[column]) === String(value),
+      );
+      return this;
+    }
+
+    not(column: string, operator: string, value: unknown): this {
+      this.tests.push((row) => {
+        if (operator === "is" && value === null) return row[column] != null;
+        return String(row[column]) !== String(value);
+      });
+      return this;
+    }
+
+    in(column: string, values: readonly unknown[]): this {
+      const accepted = new Set(values.map(String));
+      this.tests.push((row) => accepted.has(String(row[column])));
+      return this;
+    }
+
+    gte(column: string, value: unknown): this {
+      const text = String(value);
+      this.tests.push((row) => String(row[column]) >= text);
+      return this;
+    }
+
+    lt(column: string, value: unknown): this {
+      const text = String(value);
+      this.tests.push((row) => String(row[column]) < text);
+      return this;
+    }
+
+    order(column: string, options?: { ascending?: boolean }): this {
+      this.sorts.push({ column, ascending: options?.ascending !== false });
+      return this;
+    }
+
+    range(from: number, to: number): this {
+      this.rangeValue = [from, to];
+      return this;
+    }
+
+    limit(count: number): this {
+      this.limitValue = count;
+      return this;
+    }
+
+    maybeSingle(): Promise<{ data: unknown; error: unknown }> {
+      this.single = true;
+      return this.execute();
+    }
+
+    then<TResult1 = { data: unknown; error: unknown }, TResult2 = never>(
+      onFulfilled?: (value: { data: unknown; error: unknown }) => TResult1 | PromiseLike<TResult1>,
+      onRejected?: (reason: unknown) => TResult2 | PromiseLike<TResult2>,
+    ): Promise<TResult1 | TResult2> {
+      return this.execute().then(onFulfilled, onRejected);
+    }
+
+    private async execute(): Promise<{ data: unknown; error: unknown }> {
+      let rows = [...(this.tables[this.table] ?? [])];
+      for (const test of this.tests) rows = rows.filter(test);
+      for (const sort of this.sorts) {
+        const { column, ascending } = sort;
+        rows = [...rows].sort((left, right) => {
+          if (String(left[column]) === String(right[column])) return 0;
+          const result = String(left[column]) < String(right[column]) ? -1 : 1;
+          return ascending ? result : -result;
+        });
+      }
+      if (this.rangeValue) rows = rows.slice(this.rangeValue[0], this.rangeValue[1] + 1);
+      if (this.limitValue !== null) rows = rows.slice(0, this.limitValue);
+      if (this.single) return { data: rows[0] ?? null, error: null };
+      return { data: rows, error: null };
+    }
+  }
+
+  function fakeLiveClient(options: { definitionId: string | null } = { definitionId: DEFINITION_ID }) {
+    const presentDates = [...LIVE_RECENT_DAYS, ...LIVE_MID_DAYS, ...LIVE_OLD_DAYS];
+    // Every second day of the trailing 120d window: 60 digest-null rows, the
+    // majority the live profile reports (208 of 286).
+    const nullDates = dateRange("2026-05-02", "2026-08-29").filter((_, index) => index % 2 === 0);
+    const tables: Record<string, LiveLedgerRow[]> = {
+      organizations: [{ id: ORG_ID }],
+      metric_definitions:
+        options.definitionId === null
+          ? []
+          : [
+              {
+                id: DEFINITION_ID,
+                key: "revenue.gross",
+                value_kind: "money",
+                aggregation: "sum",
+                is_active: true,
+                organization_id: null,
+              },
+            ],
+      normalized_metrics: [
+        ...presentDates.map((date) => liveRow(date, `live-present-${date}`, FACT_DIGEST)),
+        ...nullDates.map((date, index) => liveRow(date, `live-null-${index}`, null)),
+      ],
+      // The live profile carries zero exact_range rows: the table stays empty.
+      exact_range_metric_observations: [],
+    };
+    const calls: string[] = [];
+    const client = {
+      from: (table: string) => {
+        calls.push(table);
+        return new LiveLedgerQuery(table, tables) as unknown as ReturnType<
+          SupabaseClient<Database>["from"]
+        >;
+      },
+    } as unknown as SupabaseClient<Database>;
+    return { client, calls };
+  }
+
+  /**
+   * The exact nightly composition minus the database: the real assembly over
+   * the real readers, with only the ledger boundary faked. The readers
+   * themselves are never stubbed, so their filtering and the fallback ladder
+   * run exactly as they would on staging.
+   */
+  function liveBuildCandidate(client: SupabaseClient<Database>) {
+    return async (nightlyMaterial: RevenueScenarioInput, context: GrowthCandidateBuildContext) =>
       assembleLedgerBaselineCandidate(nightlyMaterial, context, {
-        resolveRevenueDefinitionId:
-          overrides.resolveRevenueDefinitionId ?? (async () => DEFINITION_ID),
-        listBaselineCoordinates: async () => [{ channelId: null, branchId: null }],
-        readBaselineFacts: async () => ({ status: "ready" as const, facts: [...facts] }),
+        resolveRevenueDefinitionId: (organizationId) =>
+          resolveGrowthRevenueDefinitionId(client, organizationId),
+        listBaselineCoordinates: (coordinateInput) => listBaselineCoordinates(client, coordinateInput),
+        readBaselineFacts: (factInput) =>
+          createGrowthProgressRepository(client).readRevenueFacts(factInput),
       });
   }
 
-  function nightlyInput(overrides: Record<string, unknown> = {}) {
-    return input({ nowIso: NIGHTLY_NOW_ISO, ...overrides });
+  function liveInput(overrides: Record<string, unknown> = {}) {
+    return input({ nowIso: LIVE_NOW_ISO, ...overrides });
   }
 
-  it("publishes due horizons from real baseline facts, not a blanket skip", async () => {
+  it("publishes due horizons from live-profile baseline facts through the real readers", async () => {
+    const { client, calls } = fakeLiveClient();
     const seen: FrozenGrowthProjection[] = [];
     const deps = dependencies({
-      buildCandidate: assemblyBuildCandidate(),
+      buildCandidate: liveBuildCandidate(client),
       publish: vi.fn(async ({ document }: { document: FrozenGrowthProjection }) => {
         // The nightly composition hands the RPC a schema-valid frozen
         // document: the publication boundary revalidates the same shape.
@@ -498,31 +709,52 @@ describe("publishDueGrowthProjections with the ledger-bound assembly", () => {
         };
       }),
     });
-    const result = await publishDueGrowthProjections(nightlyInput(), deps);
+    // Bootstrap: zero frozen projections on staging, so all four horizons
+    // open at cycle 0 from the next-day origin.
+    const result = await publishDueGrowthProjections(liveInput(), deps);
 
     for (const entry of result.results) {
       expect(entry).toMatchObject({ status: "published", reasonCode: null });
     }
     expect(seen).toHaveLength(4);
     for (const document of seen) {
+      // Only 5 days report in the trailing 30, so the 7-in-30 rung cannot
+      // qualify: the ladder widened to the 14-in-60 rung (16 reported days)
+      // and froze that window — the ladder ran, it was not bypassed.
+      expect(document.baselineWindow).toEqual({
+        startDate: "2026-07-01",
+        endDateExclusive: "2026-08-30",
+      });
       expect(document.monthlyLowMinor).toBe(3000000);
       expect(document.monthlyHighMinor).toBe(3000000);
-      expect(document.limitations).toContain(
-        "Action impact is not included in this estimate.",
-      );
+      expect(document.currency).toBe("AED");
+      expect(document.limitations).toContain("Action impact is not included in this estimate.");
     }
     expect(new Set(seen.map((document) => document.horizonMonths))).toEqual(
       new Set([1, 3, 6, 12]),
     );
+    // Proof nothing was bypassed: the run reached the membership probe, the
+    // definition registry, and both ledger tables through the real readers.
+    expect(new Set(calls)).toEqual(
+      new Set([
+        "organizations",
+        "metric_definitions",
+        "normalized_metrics",
+        "exact_range_metric_observations",
+      ]),
+    );
   });
 
-  it("publishes only the due horizon while quieter horizons skip", async () => {
-    const buildCandidate = vi.fn(assemblyBuildCandidate());
+  it("records each horizon's own blocker when some horizons are due and others quiet", async () => {
+    const { client } = fakeLiveClient({ definitionId: null });
+    const buildCandidate = vi.fn(liveBuildCandidate(client));
     const deps = dependencies({
-      readSchedule: vi.fn(async (): Promise<GrowthScheduleSnapshot> => ({
-        status: "ready",
-        origins: ["2026-08-22"],
-      })),
+      readSchedule: vi.fn(
+        async (): Promise<GrowthScheduleSnapshot> => ({
+          status: "ready",
+          origins: ["2026-05-30"],
+        }),
+      ),
       buildCandidate,
       publish: vi.fn(async () => ({
         projectionId: "33333333-3333-4333-8333-333333333333",
@@ -530,38 +762,26 @@ describe("publishDueGrowthProjections with the ledger-bound assembly", () => {
         published: true,
       })),
     });
-    const result = await publishDueGrowthProjections(nightlyInput(), deps);
+    const result = await publishDueGrowthProjections(liveInput(), deps);
 
-    // Only the 1-month horizon opens a period on 2026-09-22: longer horizons
-    // stay quiet with their own code instead of sharing one blanket skip.
-    expect(result.results[0]).toMatchObject({ horizonMonths: 1, status: "published" });
-    expect(result.results.slice(1)).toMatchObject([
-      { horizonMonths: 3, status: "skipped", reasonCode: "NOT_DUE" },
+    // Only the 1-month (cycle 3) and 3-month (cycle 1) horizons open a period
+    // on 2026-08-30: each due horizon records its own true blocker while the
+    // quieter horizons keep theirs — no shared blanket skip.
+    expect(result.results[0]).toMatchObject({
+      horizonMonths: 1,
+      status: "skipped",
+      reasonCode: "CANDIDATE_BASELINE_INCOMPLETE",
+    });
+    expect(result.results[1]).toMatchObject({
+      horizonMonths: 3,
+      status: "skipped",
+      reasonCode: "CANDIDATE_BASELINE_INCOMPLETE",
+    });
+    expect(result.results.slice(2)).toMatchObject([
       { horizonMonths: 6, status: "skipped", reasonCode: "NOT_DUE" },
       { horizonMonths: 12, status: "skipped", reasonCode: "NOT_DUE" },
     ]);
-    expect(buildCandidate).toHaveBeenCalledTimes(1);
-  });
-
-  it("records the true blocker per horizon when no revenue definition binds the org", async () => {
-    const deps = dependencies({
-      buildCandidate: assemblyBuildCandidate({
-        resolveRevenueDefinitionId: async () => null,
-      }),
-      publish: vi.fn(async () => ({
-        projectionId: "33333333-3333-4333-8333-333333333333",
-        digest: DIGEST,
-        published: true,
-      })),
-    });
-    const result = await publishDueGrowthProjections(nightlyInput(), deps);
-
-    for (const entry of result.results) {
-      expect(entry).toMatchObject({
-        status: "skipped",
-        reasonCode: "CANDIDATE_BASELINE_INCOMPLETE",
-      });
-    }
+    expect(buildCandidate).toHaveBeenCalledTimes(2);
     expect(deps.publish).not.toHaveBeenCalled();
 
     // The refusal names the missing binding, not a vague baseline complaint.
@@ -569,22 +789,54 @@ describe("publishDueGrowthProjections with the ledger-bound assembly", () => {
       material().input,
       {
         organizationId: ORG_ID,
-        scheduleOriginDate: "2026-09-22",
+        scheduleOriginDate: "2026-05-30",
         horizonMonths: 1,
-        cycleIndex: 0,
-        issuedAt: NIGHTLY_NOW_ISO,
-        sourceCutoffDate: "2026-09-21",
+        cycleIndex: 3,
+        issuedAt: LIVE_NOW_ISO,
+        sourceCutoffDate: LIVE_CUTOFF,
         timeZone: "Asia/Dubai",
       },
       {
-        resolveRevenueDefinitionId: async () => null,
-        listBaselineCoordinates: async () => [{ channelId: null, branchId: null }],
-        readBaselineFacts: async () => ({ status: "ready" as const, facts: nightlyFacts() }),
+        resolveRevenueDefinitionId: (organizationId) =>
+          resolveGrowthRevenueDefinitionId(client, organizationId),
+        listBaselineCoordinates: (coordinateInput) =>
+          listBaselineCoordinates(client, coordinateInput),
+        readBaselineFacts: (factInput) =>
+          createGrowthProgressRepository(client).readRevenueFacts(factInput),
       },
     );
     expect(direct).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
     if (direct.status === "refused") {
       expect(direct.detail).toContain("revenue definition");
     }
+  });
+
+  it("keeps neighboring publications when one horizon's write fails", async () => {
+    const { client } = fakeLiveClient();
+    const deps = dependencies({
+      buildCandidate: liveBuildCandidate(client),
+      publish: vi.fn(async ({ document }: { document: FrozenGrowthProjection }) =>
+        document.horizonMonths === 6
+          ? Promise.reject({ code: "PERIOD_ALREADY_STARTED" })
+          : {
+              projectionId: "33333333-3333-4333-8333-333333333333",
+              digest: DIGEST,
+              published: true,
+            },
+      ),
+    });
+    const result = await publishDueGrowthProjections(liveInput(), deps);
+
+    // One horizon's missed prospective window stands beside neighboring
+    // successes, each with its own code — never a shared verdict.
+    expect(result.results[0]).toMatchObject({ horizonMonths: 1, status: "published" });
+    expect(result.results[1]).toMatchObject({ horizonMonths: 3, status: "published" });
+    expect(result.results[2]).toMatchObject({
+      horizonMonths: 6,
+      status: "failed",
+      reasonCode: "PERIOD_ALREADY_STARTED",
+    });
+    expect(result.results[3]).toMatchObject({ horizonMonths: 12, status: "published" });
+    expect(deps.publish).toHaveBeenCalledTimes(4);
   });
 });
