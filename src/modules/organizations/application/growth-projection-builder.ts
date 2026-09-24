@@ -43,22 +43,27 @@ import {
 /** Local days in the trailing baseline window ending at the source cutoff. */
 export const GROWTH_BASELINE_WINDOW_DAYS = 30;
 
-/** Minimum reported days in the window; fewer refuses instead of guessing. */
-export const GROWTH_BASELINE_MIN_REPORTED_DAYS = 7;
+/**
+ * Minimum reported days in the window; fewer refuses instead of guessing.
+ * ADR 0069 lowered this to 1: the first rung with at least 1 reported day
+ * builds on its own, labelled with its exact reported-day count.
+ */
+export const GROWTH_BASELINE_MIN_REPORTED_DAYS = 1;
 
 /**
  * Fallback ladder: each rung pairs the evidence it demands with how far back
  * it reaches. The first rung that qualifies wins, evaluated top-down every
- * run — older data earns its place with more of it. A sparse reporter (a
+ * run. Old → new rung floors (ADR 0069, windows unchanged): 7→1 at 30 days,
+ * 14→1 at 60 days, 21→1 at 90 days, 28→1 at 120 days. A sparse reporter (a
  * shop reconciling twice a week, an org with a thin recent month but deep
  * history) publishes at a lower rung instead of waiting; an empty window
  * refuses at every rung.
  */
 export const GROWTH_BASELINE_FALLBACK_RUNGS = [
-  { minReportedDays: 7, windowDays: 30 },
-  { minReportedDays: 14, windowDays: 60 },
-  { minReportedDays: 21, windowDays: 90 },
-  { minReportedDays: 28, windowDays: 120 },
+  { minReportedDays: 1, windowDays: 30 },
+  { minReportedDays: 1, windowDays: 60 },
+  { minReportedDays: 1, windowDays: 90 },
+  { minReportedDays: 1, windowDays: 120 },
 ] as const;
 
 /** Standard month the observed daily mean scales to; a named judgment call. */
@@ -183,6 +188,20 @@ const growthActionCandidateSchema = z
     message: "Assumption low must not exceed high.",
   });
 
+/**
+ * A revenue fact as the builder accepts it. Readers (Task 3) attach
+ * provenance: facts sourced from unreconciled rows carry "unreconciled" end
+ * to end. The field stays optional so facts predating provenance keep their
+ * old treatment (absent reads as reconciled) and existing callers passing
+ * plain RevenueFact rows still validate.
+ */
+const baselineFactSchema = revenueFactSchema.extend({
+  provenance: z.enum(["reconciled", "unreconciled"]).optional(),
+});
+
+/** A revenue fact with optional reconciliation provenance (see above). */
+export type BaselineFact = z.output<typeof baselineFactSchema>;
+
 const buildCandidateInputSchema = z.strictObject({
   organizationId: z.string().uuid(),
   scheduleOriginDate: isoDateSchema,
@@ -201,7 +220,7 @@ const buildCandidateInputSchema = z.strictObject({
   // from GROWTH_BASELINE_FALLBACK_RUNGS so older windows earn their place
   // with more reported days.
   minReportedDays: z.number().int().min(1).max(366),
-  baselineFacts: z.array(revenueFactSchema),
+  baselineFacts: z.array(baselineFactSchema),
   findingBases: z.array(growthFindingBasisSchema).max(MAX_FINDING_BASES),
   actionCandidates: z.array(growthActionCandidateSchema).max(MAX_ACTION_CANDIDATES),
 });
@@ -390,6 +409,141 @@ export function assessTrailingBaselineWindow(args: {
   return { status: "ok", reportedDays, totalNumerator, totalDenominator };
 }
 
+/**
+ * One scope partition's independent baseline measurement (ADR 0069).
+ *
+ * Additive and stable for the assembly (Task 3) and publisher/display
+ * (Task 4): a single object shape per partition, in scope order, with no
+ * narrowing. A conflicting partition reports status "conflict" with empty
+ * days and a zero total; every other partition still reports its own days
+ * and exact reduced-rational total. `unreconciledReportedDays` counts the
+ * subset of reported days whose winning cover came from unreconciled rows.
+ */
+export type PartitionBaselineAssessment = {
+  partitionKey: string;
+  status: "ok" | "conflict";
+  reportedDays: string[];
+  totalNumerator: bigint;
+  totalDenominator: bigint;
+  unreconciledReportedDays: number;
+};
+
+/**
+ * Assesses each scope partition independently (ADR 0069): a partition's day
+ * is reported when that partition covers it exactly once at the finest
+ * granularity available, regardless of what other partitions report. Same
+ * day-cover rules as the joint assessment above — exact day cover wins over
+ * a coarser containing span, a single containing span contributes its amount
+ * spread evenly over its own reported days, two disagreeing covers of one
+ * day mark that partition conflicting, and a foreign-currency edge taints
+ * the days it spans for its partition — but a conflict or a gap in one
+ * partition never touches another. Facts outside the window are ignored,
+ * never clipped into it. Totals stay exact reduced rationals per partition;
+ * combining partitions (summing monthly paces) is the caller's policy.
+ */
+export function assessPartitionBaselines(args: {
+  windowStart: string;
+  windowEndExclusive: string;
+  cutoffDate: string;
+  currency: string;
+  scopePartitions: readonly ScopePartition[];
+  facts: readonly BaselineFact[];
+}): PartitionBaselineAssessment[] {
+  const { windowStart, windowEndExclusive, cutoffDate, currency, scopePartitions, facts } = args;
+  const byPartition = new Map<string, BaselineFact[]>();
+  for (const partition of scopePartitions) byPartition.set(partition.partitionKey, []);
+  for (const fact of facts) {
+    const bucket = byPartition.get(fact.partitionKey);
+    if (!bucket) continue;
+    if (fact.startDate < windowStart || fact.endDateExclusive > windowEndExclusive) continue;
+    bucket.push(fact);
+  }
+  // Only dates the source vouches for: inside the window and at/before cutoff.
+  let lastDate = addLocalDays(windowEndExclusive, -1);
+  if (lastDate > cutoffDate) lastDate = cutoffDate;
+  return scopePartitions.map((partition) => {
+    const edges = byPartition.get(partition.partitionKey) ?? [];
+    const reportedDays: string[] = [];
+    let totalNumerator = BigInt(0);
+    let totalDenominator = BigInt(1);
+    let unreconciledReportedDays = 0;
+    for (let date = windowStart; date <= lastDate; date = addLocalDays(date, 1)) {
+      const nextDay = addLocalDays(date, 1);
+      const containing = edges.filter(
+        (fact) => fact.startDate <= date && date < fact.endDateExclusive,
+      );
+      if (containing.some((fact) => fact.currency !== currency)) continue;
+      const seen = new Set<string>();
+      const unique: BaselineFact[] = [];
+      for (const fact of containing) {
+        const identity = `${fact.sourceTable}\n${fact.rowId}`;
+        if (seen.has(identity)) continue;
+        seen.add(identity);
+        unique.push(fact);
+      }
+      const exact = unique.filter(
+        (fact) => fact.startDate === date && fact.endDateExclusive === nextDay,
+      );
+      let amount: bigint;
+      let spanDays: bigint;
+      let unreconciled: boolean;
+      if (exact.length > 0) {
+        const amounts = new Set(exact.map((fact) => fact.amountMinor));
+        if (amounts.size !== 1) {
+          return {
+            partitionKey: partition.partitionKey,
+            status: "conflict" as const,
+            reportedDays: [],
+            totalNumerator: BigInt(0),
+            totalDenominator: BigInt(1),
+            unreconciledReportedDays: 0,
+          };
+        }
+        amount = BigInt(exact[0]!.amountMinor);
+        spanDays = BigInt(1);
+        unreconciled = exact.some((fact) => fact.provenance === "unreconciled");
+      } else if (unique.length === 0) {
+        continue;
+      } else {
+        const shapes = new Set(
+          unique.map((fact) => `${fact.startDate}|${fact.endDateExclusive}|${fact.amountMinor}`),
+        );
+        if (shapes.size !== 1) {
+          return {
+            partitionKey: partition.partitionKey,
+            status: "conflict" as const,
+            reportedDays: [],
+            totalNumerator: BigInt(0),
+            totalDenominator: BigInt(1),
+            unreconciledReportedDays: 0,
+          };
+        }
+        const only = unique[0]!;
+        amount = BigInt(only.amountMinor);
+        spanDays = BigInt(daysBetweenLocal(only.startDate, only.endDateExclusive));
+        unreconciled = unique.some((fact) => fact.provenance === "unreconciled");
+      }
+      reportedDays.push(date);
+      if (unreconciled) unreconciledReportedDays += 1;
+      totalNumerator = totalNumerator * spanDays + amount * totalDenominator;
+      totalDenominator = totalDenominator * spanDays;
+      const divisor = bigintGcd(totalNumerator, totalDenominator);
+      if (divisor > BigInt(1)) {
+        totalNumerator /= divisor;
+        totalDenominator /= divisor;
+      }
+    }
+    return {
+      partitionKey: partition.partitionKey,
+      status: "ok" as const,
+      reportedDays,
+      totalNumerator,
+      totalDenominator,
+      unreconciledReportedDays,
+    };
+  });
+}
+
 /** User-facing coverage line naming exactly what the baseline rests on. */
 function reportedDaysLimitation(reportedDays: number, latestDate: string): string {
   return (
@@ -399,14 +553,87 @@ function reportedDaysLimitation(reportedDays: number, latestDate: string): strin
 }
 
 /**
+ * Names scope partitions inside a 300-character limitation string: as many
+ * full entries as fit, then an honest remainder count — never a silent cut.
+ * The first entry is always shown whole (a key is at most 200 characters, so
+ * the framing still fits); callers route the result through fitLimitation.
+ */
+function namePartitionEntries(entries: readonly string[]): string {
+  const BUDGET = 240;
+  const shown: string[] = [];
+  let used = 0;
+  for (const entry of entries) {
+    const extra = (shown.length === 0 ? 0 : 2) + entry.length;
+    if (shown.length > 0 && used + extra > BUDGET) break;
+    if (entry.length > BUDGET) break;
+    shown.push(entry);
+    used += extra;
+  }
+  const remainder = entries.length - shown.length;
+  if (shown.length === 0) {
+    const first = entries[0]!;
+    const rest = entries.length - 1;
+    return rest > 0 ? `${first}, and ${rest} more` : first;
+  }
+  const listed = shown.join(", ");
+  if (remainder > 0) {
+    return `${listed}, and ${remainder} more`;
+  }
+  return listed;
+}
+
+/**
+ * Keeps a limitation string inside the frozen document's 300-character cap:
+ * the fully named line when it fits, a counts-only line that still states
+ * coverage when it does not. Counts are never dropped to save space.
+ */
+function fitLimitation(primary: string, fallback: string): string {
+  return primary.length <= 300 ? primary : fallback;
+}
+
+/** User-facing scope line: which partitions the baseline covers, with exact counts. */
+function scopeCoverageLimitation(
+  entries: readonly string[],
+  totalPartitions: number,
+): string {
+  return (
+    `Baseline covers ${entries.length} of ${totalPartitions} scope partitions: ` +
+    `${namePartitionEntries(entries)}.`
+  );
+}
+
+/** User-facing exclusion line: non-qualifying partitions are named, never silently dropped. */
+function scopeExclusionLimitation(excludedKeys: readonly string[]): string {
+  return (
+    `Excluded partitions with no qualifying baseline: ` +
+    `${namePartitionEntries(excludedKeys)}.`
+  );
+}
+
+/** User-facing provenance line: unreconciled evidence is labelled, never hidden. */
+function unreconciledProvenanceLimitation(
+  unreconciledDays: number,
+  entries: readonly string[],
+): string {
+  return (
+    `Baseline includes ${unreconciledDays} reported days from unreconciled rows ` +
+    `(${namePartitionEntries(entries)}); treat figures as estimates pending reconciliation.`
+  );
+}
+
+/**
  * Builds one frozen candidate document, or a typed refusal (data contract D03).
  *
- * The baseline is the trailing reported window over the frozen scope: the
- * observed daily mean scaled to a 30-day standard month, requiring at least
- * the rung's minimum reported days and a latest reported day no older than
- * GROWTH_BASELINE_MAX_AGE_DAYS. Qualified action ranges adapt
- * to the existing deterministic scenario engine; an unqualified range keeps
- * its advice downstream but contributes no money here.
+ * The baseline is the trailing reported window over the frozen scope,
+ * assessed per partition (ADR 0069): each scope partition contributes its
+ * own observed daily mean scaled to a 30-day standard month, and the frozen
+ * monthly level is the sum of the qualifying partitions' paces. A partition
+ * qualifies with at least the rung's minimum reported days and a latest
+ * reported day no older than GROWTH_BASELINE_MAX_AGE_DAYS; other partitions
+ * are excluded and named, never silently dropped. A partition-level conflict
+ * refuses only its partition unless every partition conflicts. Qualified
+ * action ranges adapt to the existing deterministic scenario engine; an
+ * unqualified range keeps its advice downstream but contributes no money here.
  */
 export function buildGrowthProjectionCandidate(
   rawInput: unknown,
@@ -455,8 +682,11 @@ export function buildGrowthProjectionCandidate(
   }
 
   // The baseline is the trailing reported window ending at the source
-  // cutoff: the observed daily mean over reported days, scaled to a standard
-  // month. Missing days are excluded and named, never filled.
+  // cutoff, assessed per partition (ADR 0069): each partition's observed
+  // daily mean scales to a standard month and the frozen level sums the
+  // qualifying partitions' paces. Missing days are excluded and named, never
+  // filled; a partition that cannot qualify is excluded and named, never a
+  // reason to guess.
   const baseline = input.baselineWindow;
   if (baseline.endDateExclusive > input.period.startDate) {
     return refused("BASELINE_INCOMPLETE", "The baseline ends before the projected period.");
@@ -467,7 +697,7 @@ export function buildGrowthProjectionCandidate(
       "One view reads at most 10000 facts; the total is withheld, not guessed.",
     );
   }
-  const assessed = assessTrailingBaselineWindow({
+  const perPartition = assessPartitionBaselines({
     windowStart: baseline.startDate,
     windowEndExclusive: baseline.endDateExclusive,
     cutoffDate: input.sourceCutoffDate,
@@ -475,35 +705,86 @@ export function buildGrowthProjectionCandidate(
     scopePartitions: input.scopePartitions,
     facts: input.baselineFacts,
   });
-  if (assessed.status === "conflict") {
+  const settled = perPartition.filter((assessment) => assessment.status === "ok");
+  if (settled.length === 0) {
     return refused(
       "BASELINE_INCOMPLETE",
       "Conflicting reports cover the same day, so no total is stated.",
     );
   }
-  if (assessed.reportedDays.length < input.minReportedDays) {
+  const latestOf = (assessment: PartitionBaselineAssessment): string =>
+    assessment.reportedDays[assessment.reportedDays.length - 1]!;
+  const qualifying = settled.filter(
+    (assessment) =>
+      assessment.reportedDays.length >= input.minReportedDays &&
+      daysBetweenLocal(latestOf(assessment), issueLocalDate) <= GROWTH_BASELINE_MAX_AGE_DAYS,
+  );
+  const qualifyingKeys = new Set(qualifying.map((assessment) => assessment.partitionKey));
+  const excludedKeys = input.scopePartitions
+    .map((partition) => partition.partitionKey)
+    .filter((key) => !qualifyingKeys.has(key));
+  if (qualifying.length === 0) {
+    const anyReportedDay = settled.some((assessment) => assessment.reportedDays.length > 0);
+    if (!anyReportedDay) {
+      return refused(
+        "BASELINE_INCOMPLETE",
+        `Fewer than ${input.minReportedDays} reported days precede the cutoff, so no total is stated.`,
+      );
+    }
+    const anyFresh = settled.some(
+      (assessment) =>
+        assessment.reportedDays.length > 0 &&
+        daysBetweenLocal(latestOf(assessment), issueLocalDate) <= GROWTH_BASELINE_MAX_AGE_DAYS,
+    );
+    if (!anyFresh) {
+      return refused("BASELINE_STALE", "The latest reported day ended too long before issue.");
+    }
     return refused(
       "BASELINE_INCOMPLETE",
       `Fewer than ${input.minReportedDays} reported days precede the cutoff, so no total is stated.`,
     );
   }
-  const latestReported = assessed.reportedDays[assessed.reportedDays.length - 1]!;
-  if (daysBetweenLocal(latestReported, issueLocalDate) > GROWTH_BASELINE_MAX_AGE_DAYS) {
-    return refused("BASELINE_STALE", "The latest reported day ended too long before issue.");
+  // Exact combined pace: sum each qualifying partition's daily mean as one
+  // rational, then a single rounding to the monthly level — so one partition
+  // behaves exactly as the old joint mean did.
+  let combinedNumerator = BigInt(0);
+  let combinedDenominator = BigInt(1);
+  let reportedDaysTotal = 0;
+  let unreconciledDaysTotal = 0;
+  let latestReported = qualifying[0]!.reportedDays[0]!;
+  for (const assessment of qualifying) {
+    const days = BigInt(assessment.reportedDays.length);
+    combinedNumerator =
+      combinedNumerator * (assessment.totalDenominator * days) +
+      assessment.totalNumerator * combinedDenominator;
+    combinedDenominator = combinedDenominator * (assessment.totalDenominator * days);
+    const divisor = bigintGcd(combinedNumerator, combinedDenominator);
+    if (divisor > BigInt(1)) {
+      combinedNumerator /= divisor;
+      combinedDenominator /= divisor;
+    }
+    reportedDaysTotal += assessment.reportedDays.length;
+    unreconciledDaysTotal += assessment.unreconciledReportedDays;
+    const latest = latestOf(assessment);
+    if (latest > latestReported) latestReported = latest;
   }
   const monthTotal = toSafeTotal(
     divHalfAway(
-      BigInt(GROWTH_BASELINE_STANDARD_MONTH_DAYS) * assessed.totalNumerator,
-      assessed.totalDenominator * BigInt(assessed.reportedDays.length),
+      BigInt(GROWTH_BASELINE_STANDARD_MONTH_DAYS) * combinedNumerator,
+      combinedDenominator,
     ),
   );
   if (monthTotal === null) {
     return refused("MONEY_OVERFLOW", "A baseline amount left safe integers.");
   }
+  const qualifyingScope = input.scopePartitions.filter((partition) =>
+    qualifyingKeys.has(partition.partitionKey),
+  );
 
-  // Qualify each range against tenant, currency, baseline window and frozen
-  // scope. A range that fails keeps its advice downstream (Task 5) but its
-  // money never enters the frozen curve.
+  // Qualify each range against tenant, currency, baseline window and the
+  // frozen (qualifying-only) scope. A range that fails keeps its advice
+  // downstream but its money never enters the frozen curve — in particular a
+  // basis tied to an excluded partition contributes no money here.
   const basisById = new Map(input.findingBases.map((basis) => [basis.findingId, basis]));
   const qualified: Array<{
     sourceKind: string;
@@ -526,7 +807,7 @@ export function buildGrowthProjectionCandidate(
     ) {
       continue;
     }
-    const scopeMatch = input.scopePartitions.some(
+    const scopeMatch = qualifyingScope.some(
       (partition) =>
         partition.channelId === basis.channelId && partition.branchId === basis.branchId,
     );
@@ -583,7 +864,7 @@ export function buildGrowthProjectionCandidate(
     lastObservationDate: latestReported,
     today: issueLocalDate,
     cutoffNote: `Reports through ${latestReported}.`,
-    coverageNote: `${input.scopePartitions.length} frozen scope partitions · trailing reported-day baseline.`,
+    coverageNote: `${qualifying.length} qualifying scope partitions of ${input.scopePartitions.length} · trailing reported-day baseline.`,
   });
   if (scenario.state !== "ready") {
     return refused("INVALID_INPUT", "The qualified inputs cannot form a scenario.");
@@ -615,7 +896,7 @@ export function buildGrowthProjectionCandidate(
       timeZone: input.timeZone,
       currency: input.currency,
       metricKey: "revenue.gross" as const,
-      scopePartitions: input.scopePartitions,
+      scopePartitions: qualifyingScope.map((partition) => ({ ...partition })),
       baselineWindow: {
         startDate: baseline.startDate,
         endDateExclusive: baseline.endDateExclusive,
@@ -643,7 +924,41 @@ export function buildGrowthProjectionCandidate(
       })),
       limitations: [
         EVEN_PACE_LIMITATION,
-        reportedDaysLimitation(assessed.reportedDays.length, latestReported),
+        reportedDaysLimitation(reportedDaysTotal, latestReported),
+        fitLimitation(
+          scopeCoverageLimitation(
+            qualifying.map(
+              (assessment) =>
+                `${assessment.partitionKey} (${assessment.reportedDays.length} days ending ${assessment.reportedDays[assessment.reportedDays.length - 1]!})`,
+            ),
+            input.scopePartitions.length,
+          ),
+          `Baseline covers ${qualifying.length} of ${input.scopePartitions.length} scope partitions.`,
+        ),
+        ...(excludedKeys.length > 0
+          ? [
+              fitLimitation(
+                scopeExclusionLimitation(excludedKeys),
+                `Excluded partitions with no qualifying baseline: ${excludedKeys.length} partition(s).`,
+              ),
+            ]
+          : []),
+        ...(unreconciledDaysTotal > 0
+          ? [
+              fitLimitation(
+                unreconciledProvenanceLimitation(
+                  unreconciledDaysTotal,
+                  qualifying
+                    .filter((assessment) => assessment.unreconciledReportedDays > 0)
+                    .map(
+                      (assessment) =>
+                        `${assessment.partitionKey} (${assessment.unreconciledReportedDays} days)`,
+                    ),
+                ),
+                `Baseline includes ${unreconciledDaysTotal} reported days from unreconciled rows; treat figures as estimates pending reconciliation.`,
+              ),
+            ]
+          : []),
         ...(qualified.length === 0 ? [BASELINE_ONLY_LIMITATION] : []),
       ],
     };

@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  assessPartitionBaselines,
   BASELINE_ONLY_LIMITATION,
   buildGrowthProjectionCandidate,
   GROWTH_BASELINE_FALLBACK_RUNGS,
   GROWTH_BASELINE_MAX_AGE_DAYS,
   GROWTH_BASELINE_MIN_REPORTED_DAYS,
   resolveTrailingBaselineWindow,
+  type BaselineFact,
   type BuildGrowthProjectionCandidateInput,
 } from "@/modules/organizations/application/growth-projection-builder";
 import { frozenGrowthProjectionSchema } from "@/domain/organizations/growth-progress";
@@ -37,7 +39,7 @@ const SCOPE = [
   },
 ] as const;
 
-function dailyDecemberFacts(amountMinor = 100_000): RevenueFact[] {
+function dailyDecemberFacts(amountMinor = 100_000, partitionKey = "pk-1"): RevenueFact[] {
   const facts: RevenueFact[] = [];
   for (let day = 1; day <= 31; day += 1) {
     const start = `2029-12-${String(day).padStart(2, "0")}`;
@@ -46,7 +48,7 @@ function dailyDecemberFacts(amountMinor = 100_000): RevenueFact[] {
       sourceTable: "normalized_metrics",
       rowId: `day-${day}`,
       organizationId: ORG,
-      partitionKey: "pk-1",
+      partitionKey,
       startDate: start,
       endDateExclusive: end,
       amountMinor,
@@ -57,6 +59,20 @@ function dailyDecemberFacts(amountMinor = 100_000): RevenueFact[] {
   }
   return facts;
 }
+
+const CHANNEL2 = "55555555-5555-4555-8555-555555555555";
+
+const SCOPE_TWO = [
+  ...SCOPE,
+  {
+    partitionKey: "pk-2",
+    channelId: CHANNEL2,
+    branchId: null,
+    metricDefinitionId: DEF,
+    dimensionsDigest: "empty",
+    periodTimezone: "UTC",
+  },
+] as const;
 
 function baseInput(overrides: Partial<BuildGrowthProjectionCandidateInput> = {}) {
   return {
@@ -126,7 +142,7 @@ describe("resolveTrailingBaselineWindow", () => {
 
   it("pins the freshness and minimum-day floors as named constants", () => {
     expect(GROWTH_BASELINE_MAX_AGE_DAYS).toBe(45);
-    expect(GROWTH_BASELINE_MIN_REPORTED_DAYS).toBe(7);
+    expect(GROWTH_BASELINE_MIN_REPORTED_DAYS).toBe(1);
   });
 
   it("names a wider window when the rung reaches further back", () => {
@@ -136,12 +152,12 @@ describe("resolveTrailingBaselineWindow", () => {
     });
   });
 
-  it("pins the fallback ladder: older data earns its place with more of it", () => {
+  it("pins the fallback ladder: every rung builds from 1 reported day", () => {
     expect(GROWTH_BASELINE_FALLBACK_RUNGS).toEqual([
-      { minReportedDays: 7, windowDays: 30 },
-      { minReportedDays: 14, windowDays: 60 },
-      { minReportedDays: 21, windowDays: 90 },
-      { minReportedDays: 28, windowDays: 120 },
+      { minReportedDays: 1, windowDays: 30 },
+      { minReportedDays: 1, windowDays: 60 },
+      { minReportedDays: 1, windowDays: 90 },
+      { minReportedDays: 1, windowDays: 120 },
     ]);
   });
 });
@@ -247,10 +263,36 @@ describe("buildGrowthProjectionCandidate", () => {
     );
   });
 
-  it("refuses fewer than 7 reported days instead of guessing from a sliver", () => {
-    const facts = dailyDecemberFacts().slice(0, 6);
-    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: facts }));
+  it("refuses zero reported days instead of guessing from nothing", () => {
+    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: [] }));
     expect(result).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+  });
+
+  it("publishes a 1-day baseline with its exact-count label", () => {
+    const one: RevenueFact[] = [
+      {
+        sourceTable: "normalized_metrics",
+        rowId: "day-31",
+        organizationId: ORG,
+        partitionKey: "pk-1",
+        startDate: "2029-12-31",
+        endDateExclusive: "2030-01-01",
+        amountMinor: 100_000,
+        currency: "AED",
+        createdAt: "2029-12-31T00:00:00Z",
+        reconciliationDigest: "digest-31",
+      },
+    ];
+    const result = buildGrowthProjectionCandidate(
+      baseInput({ baselineFacts: one, minReportedDays: 1 }),
+    );
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    // One reported day at 100k scales to a 30-day month of 3M, labelled exactly.
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    expect(result.document.monthlyHighMinor).toBe(3_000_000);
+    expect(result.document.limitations.join(" ")).toContain(
+      "Baseline from 1 reported days (ending 2029-12-31)",
+    );
   });
 
   it("honours a higher rung floor instead of the default 7", () => {
@@ -264,6 +306,173 @@ describe("buildGrowthProjectionCandidate", () => {
     );
     if (ready.status !== "ready") throw new Error(`expected ready, got ${ready.status}`);
     expect(ready.document.limitations.join(" ")).toContain("Baseline from 14 reported days");
+  });
+
+  it("assesses partitions independently: days, totals and conflicts per key", () => {
+    const assessed = assessPartitionBaselines({
+      windowStart: "2029-12-01",
+      windowEndExclusive: "2030-01-01",
+      cutoffDate: "2029-12-31",
+      currency: "AED",
+      scopePartitions: [...SCOPE_TWO],
+      facts: dailyDecemberFacts(),
+    });
+    expect(assessed.map((entry) => entry.partitionKey)).toEqual(["pk-1", "pk-2"]);
+    expect(assessed[0]).toMatchObject({ status: "ok", unreconciledReportedDays: 0 });
+    expect(assessed[0]!.reportedDays).toHaveLength(31);
+    expect(assessed[0]!.reportedDays[30]).toBe("2029-12-31");
+    expect(assessed[1]).toMatchObject({ status: "ok", reportedDays: [] });
+  });
+
+  it("publishes the qualifying partition while naming the excluded one", () => {
+    const result = buildGrowthProjectionCandidate(
+      baseInput({
+        scopePartitions: [...SCOPE_TWO],
+        baselineFacts: dailyDecemberFacts(),
+        minReportedDays: 1,
+      }),
+    );
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    // The frozen scope covers exactly the qualifying partition; pk-2 reported
+    // nothing, so it is excluded and named rather than silently dropped.
+    expect(result.document.scopePartitions.map((part) => part.partitionKey)).toEqual(["pk-1"]);
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    const text = result.document.limitations.join(" ");
+    expect(text).toContain("Baseline from 31 reported days (ending 2029-12-31)");
+    expect(text).toContain("Baseline covers 1 of 2 scope partitions");
+    expect(text).toContain("pk-1 (31 days ending 2029-12-31)");
+    expect(text).toContain("Excluded partitions with no qualifying baseline: pk-2");
+  });
+
+  it("sums two qualifying partitions' monthly paces", () => {
+    const result = buildGrowthProjectionCandidate(
+      baseInput({
+        scopePartitions: [...SCOPE_TWO],
+        baselineFacts: [...dailyDecemberFacts(100_000, "pk-1"), ...dailyDecemberFacts(50_000, "pk-2").map((fact, index) => ({ ...fact, rowId: `pk2-day-${index}` }))],
+        minReportedDays: 1,
+      }),
+    );
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    // pk-1 paces 3M/month, pk-2 paces 1.5M/month: the frozen level is their sum.
+    expect(result.document.monthlyLowMinor).toBe(4_500_000);
+    expect(result.document.scopePartitions.map((part) => part.partitionKey)).toEqual([
+      "pk-1",
+      "pk-2",
+    ]);
+    const text = result.document.limitations.join(" ");
+    expect(text).toContain("Baseline from 62 reported days (ending 2029-12-31)");
+    expect(text).toContain("Baseline covers 2 of 2 scope partitions");
+    expect(text).not.toContain("Excluded partitions");
+  });
+
+  it("refuses only the conflicting partition, keeping the clean one", () => {
+    const spans: BaselineFact[] = [3_100_000, 3_100_001].map((amountMinor, index) => ({
+      sourceTable: "exact_range_metric_observations" as const,
+      rowId: `span-${index}`,
+      organizationId: ORG,
+      partitionKey: "pk-2",
+      startDate: "2029-12-01",
+      endDateExclusive: "2030-01-01",
+      amountMinor,
+      currency: "AED",
+      createdAt: "2029-12-15T00:00:00Z",
+      reconciliationDigest: `digest-span-${index}`,
+    }));
+    const result = buildGrowthProjectionCandidate(
+      baseInput({
+        scopePartitions: [...SCOPE_TWO],
+        baselineFacts: [...dailyDecemberFacts(), ...spans],
+        minReportedDays: 1,
+      }),
+    );
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    expect(result.document.scopePartitions.map((part) => part.partitionKey)).toEqual(["pk-1"]);
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    expect(result.document.limitations.join(" ")).toContain(
+      "Excluded partitions with no qualifying baseline: pk-2",
+    );
+  });
+
+  it("refuses when every partition conflicts, keeping the conflict detail", () => {
+    const spans: BaselineFact[] = [3_100_000, 3_100_001].map((amountMinor, index) => ({
+      sourceTable: "exact_range_metric_observations" as const,
+      rowId: `span-${index}`,
+      organizationId: ORG,
+      partitionKey: "pk-1",
+      startDate: "2029-12-01",
+      endDateExclusive: "2030-01-01",
+      amountMinor,
+      currency: "AED",
+      createdAt: "2029-12-15T00:00:00Z",
+      reconciliationDigest: `digest-span-${index}`,
+    }));
+    const result = buildGrowthProjectionCandidate(baseInput({ baselineFacts: spans }));
+    expect(result).toMatchObject({
+      status: "refused",
+      reason: "BASELINE_INCOMPLETE",
+      detail: "Conflicting reports cover the same day, so no total is stated.",
+    });
+  });
+
+  it("labels unreconciled provenance without hiding the estimate", () => {
+    const mixed: BaselineFact[] = dailyDecemberFacts().map((fact, index) => ({
+      ...fact,
+      provenance: index < 3 ? ("unreconciled" as const) : ("reconciled" as const),
+    }));
+    const result = buildGrowthProjectionCandidate(
+      baseInput({ baselineFacts: mixed, minReportedDays: 1 }),
+    );
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    expect(result.document.monthlyLowMinor).toBe(3_000_000);
+    const text = result.document.limitations.join(" ");
+    expect(text).toContain(
+      "Baseline includes 3 reported days from unreconciled rows (pk-1 (3 days))",
+    );
+    expect(text).toContain("treat figures as estimates pending reconciliation");
+    const clean = buildGrowthProjectionCandidate(
+      baseInput({ baselineFacts: dailyDecemberFacts(), minReportedDays: 1 }),
+    );
+    if (clean.status !== "ready") throw new Error(`expected ready, got ${clean.reason}`);
+    expect(clean.document.limitations.join(" ")).not.toContain("unreconciled");
+  });
+
+  it("excludes a stale partition while the fresh one publishes", () => {
+    const staleOnly: BaselineFact[] = [
+      {
+        sourceTable: "normalized_metrics",
+        rowId: "pk2-day-1",
+        organizationId: ORG,
+        partitionKey: "pk-2",
+        startDate: "2029-12-01",
+        endDateExclusive: "2029-12-02",
+        amountMinor: 50_000,
+        currency: "AED",
+        createdAt: "2029-12-15T00:00:00Z",
+        reconciliationDigest: "digest-pk2",
+      },
+    ];
+    const result = buildGrowthProjectionCandidate(
+      baseInput({
+        scheduleOriginDate: "2030-01-01",
+        period: {
+          horizonMonths: 1,
+          cycleIndex: 1,
+          startDate: "2030-02-01",
+          endDateExclusive: "2030-03-01",
+        },
+        issuedAt: "2030-01-16T12:00:00Z",
+        scopePartitions: [...SCOPE_TWO],
+        baselineFacts: [...dailyDecemberFacts(), ...staleOnly],
+        minReportedDays: 1,
+      }),
+    );
+    if (result.status !== "ready") throw new Error(`expected ready, got ${result.reason}`);
+    // pk-2's only day (Dec 1) is 46 days before issue: stale and excluded.
+    // pk-1's latest (Dec 31) is 16 days before issue: fresh and published.
+    expect(result.document.scopePartitions.map((part) => part.partitionKey)).toEqual(["pk-1"]);
+    expect(result.document.limitations.join(" ")).toContain(
+      "Excluded partitions with no qualifying baseline: pk-2",
+    );
   });
 
   it("spreads one weekly span over its own reported days, never inventing money", () => {
