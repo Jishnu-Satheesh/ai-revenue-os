@@ -223,6 +223,10 @@ describe("ready composition", () => {
     expect(view.currency).toBe("AED");
     expect(view.scopeLabel).toBe("Organization total");
     expect(view.sources).toEqual([]);
+    // Middle link of the coverage chain: the frozen document's limitation
+    // lines (which carry the ADR 0069 scope/count/provenance labels) reach
+    // the view the display renders — a break here would silently drop them.
+    expect(view.limitations).toContain("Even-pace estimate.");
   });
 
   it("picks the latest complete endpoint, not the newest single report", async () => {
