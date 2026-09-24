@@ -1276,6 +1276,141 @@ describe("runMarketResearch extraction and admission", () => {
     );
   });
 
+  it("records RETRIEVAL_SOURCES_PARTIAL when sources were banked but coverage is incomplete", async () => {
+    const deps = dependencies({
+      adapter: {
+        availability: { available: true, provider: "test-adapter" },
+        searchAndFetch: vi.fn(async () =>
+          retrievalResult({
+            coverage: [
+              {
+                slotKey: "local_market",
+                kind: "local_market",
+                outcome: "supported",
+                attemptIds: ["10000000-0000-4000-8000-000000000010"],
+                acceptedClaimIds: [],
+              },
+              {
+                slotKey: "topic:late",
+                kind: "topic",
+                outcome: "failed",
+                attemptIds: ["10000000-0000-4000-8000-000000000011"],
+                acceptedClaimIds: [],
+              },
+            ],
+          }),
+        ),
+      },
+    });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({
+      outcome: "partial",
+      retrievalReasonCode: "RETRIEVAL_SOURCES_PARTIAL",
+      retrievalSlotOutcomes: expect.objectContaining({ supported: 1, failed: 1 }),
+    });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.partially_completed",
+        payload: expect.objectContaining({ retrievalReasonCode: "RETRIEVAL_SOURCES_PARTIAL" }),
+      }),
+    );
+  });
+
+  it("names truncated-with-sources coverage without inventing a clean success", () => {
+    const partial = describeRetrievalOutcome({
+      sources: [retrievedSource()],
+      coverage: [
+        {
+          slotKey: "local_market",
+          kind: "local_market",
+          outcome: "supported",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+        {
+          slotKey: "topic:late",
+          kind: "topic",
+          outcome: "not_started",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+      ],
+      excludedSourceCount: 0,
+    });
+    expect(partial.reasonCode).toBe("RETRIEVAL_SOURCES_PARTIAL");
+
+    const clean = describeRetrievalOutcome({
+      sources: [retrievedSource()],
+      coverage: [
+        {
+          slotKey: "local_market",
+          kind: "local_market",
+          outcome: "supported",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+      ],
+      excludedSourceCount: 0,
+    });
+    expect(clean.reasonCode).toBe("RETRIEVAL_SOURCES_RETURNED");
+  });
+
+  it("carries the wired lane summary on the result and completion event", async () => {
+    const laneSummary = {
+      reasonCode: "TINYFISH_SOURCES_RETURNED",
+      sourceCount: 1,
+      slotOutcomeCounts: {
+        not_started: 0,
+        searched_no_usable_evidence: 0,
+        supported: 1,
+        failed: 0,
+        skipped_budget: 0,
+        skipped_policy: 0,
+      },
+      callsIssued: 1,
+      resultsSeen: 1,
+      droppedDuplicates: 0,
+      droppedUnsafe: 0,
+      droppedEmptyExcerpts: 0,
+      stopReason: "completed",
+    };
+    const deps = dependencies({ laneSummaryRef: { current: laneSummary } });
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({
+      outcome: "completed",
+      retrievalReasonCode: "RETRIEVAL_SOURCES_RETURNED",
+      retrievalLaneSummary: laneSummary,
+    });
+    expect(deps.events.publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "market_research.completed",
+        payload: expect.objectContaining({ retrievalLaneSummary: laneSummary }),
+      }),
+    );
+  });
+
+  it("keeps the legacy completion shape when no lane summary is wired", async () => {
+    const deps = dependencies();
+
+    const result = await runMarketResearch(payload, deps);
+
+    expect(result).toMatchObject({ outcome: "completed" });
+    expect(result).not.toHaveProperty("retrievalLaneSummary");
+    const completedCall = deps.events.publish.mock.calls.find(
+      (call) =>
+        ((call as unknown as unknown[])[0] as { eventName: string }).eventName ===
+        "market_research.completed",
+    );
+    expect(completedCall).toBeDefined();
+    expect(
+      ((completedCall as unknown as unknown[])[0] as { payload: Record<string, unknown> }).payload,
+    ).not.toHaveProperty("retrievalLaneSummary");
+  });
+
   it("names full policy exclusion instead of a generic zero-source partial", () => {
     const outcome = describeRetrievalOutcome({
       sources: [],

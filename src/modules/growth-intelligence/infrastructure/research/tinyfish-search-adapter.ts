@@ -8,6 +8,7 @@ import {
   GrowthIntelligenceError,
   type GrowthIntelligenceErrorCode,
 } from "@/domain/growth-intelligence/errors";
+import { logger } from "@/lib/logger";
 import {
   RESEARCH_BUDGET_LIMITS,
   type ResearchAttemptUsage,
@@ -196,9 +197,14 @@ const EMPTY_SLOT_OUTCOME_COUNTS: Record<ResearchCoverageOutcome, number> = {
 };
 
 /**
- * Derives the truthful zero-source reason for a finished run. Pure and
+ * Derives the truthful reason for a finished run. Pure and
  * deterministic: the same result, stop reason, and stats always yield the
  * same code, so unit tests pin it without any provider call.
+ *
+ * A terminal stop (cancelled, claim lost, deadline, budget or policy stop,
+ * attempt/byte/source ceilings) always names itself, even when earlier
+ * slots already banked sources: reporting SOURCES_RETURNED would hide the
+ * truncation behind a clean success.
  */
 export function summarizeTinyfishSearchOutcome(input: {
   result: Pick<ResearchRetrievalResult, "sources" | "coverage">;
@@ -213,7 +219,7 @@ export function summarizeTinyfishSearchOutcome(input: {
   }
   const sourceCount = input.result.sources.length;
   let reasonCode: TinyfishRetrievalReasonCode;
-  if (sourceCount > 0) {
+  if (sourceCount > 0 && input.stopReason === "completed") {
     reasonCode = "TINYFISH_SOURCES_RETURNED";
   } else {
     switch (input.stopReason) {
@@ -915,8 +921,9 @@ export function createTinyfishSearchAdapter(input: {
   /**
    * Truthful-outcome observer, called once per searchAndFetch with the
    * finished run's summary (reason code, slot outcome counts, drop stats).
-   * Retrieval behavior is unchanged: the observer only reads. Defaults to
-   * no observation.
+   * Retrieval behavior is unchanged: the observer only reads, and an
+   * observer that throws is logged and swallowed — telemetry never turns
+   * a successful retrieval into a failure. Defaults to no observation.
    */
   observe?: (summary: TinyfishRetrievalSummary) => void;
 }): ResearchAdapter {
@@ -943,13 +950,21 @@ export function createTinyfishSearchAdapter(input: {
         now: input.now,
         signal: input.signal,
       });
-      input.observe?.(
-        summarizeTinyfishSearchOutcome({
-          result: output.result,
-          stopReason: output.stopReason,
-          stats: output.stats,
-        }),
-      );
+      // Telemetry must never crash retrieval: a throwing observer is
+      // logged and swallowed, so a successful run stays successful.
+      try {
+        input.observe?.(
+          summarizeTinyfishSearchOutcome({
+            result: output.result,
+            stopReason: output.stopReason,
+            stats: output.stats,
+          }),
+        );
+      } catch (error) {
+        logger.warn("growth_intelligence.tinyfish_observe_failed", {
+          errorName: error instanceof Error ? error.name : "unknown",
+        });
+      }
       return output.result;
     },
   };

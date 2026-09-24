@@ -275,6 +275,14 @@ export type MarketResearchDependencies = {
    * fail-closed default — the same direction the lane itself fails.
    */
   laneDiagnostics?: () => MarketResearchLaneDiagnostics;
+  /**
+   * Optional TinyFish lane summary holder (Trigger wires the adapter's
+   * outcome observer into it). Read at completion time, after retrieval
+   * has run: a populated holder rides the completion event payload and
+   * result as `retrievalLaneSummary`. Absent or null keeps the legacy
+   * shape byte-identical.
+   */
+  laneSummaryRef?: { current: MarketResearchRetrievalLaneSummary | null };
   now?: () => Date;
   newClaimToken?: () => string;
   signal?: AbortSignal;
@@ -294,6 +302,30 @@ export type MarketResearchLane = {
   gateOpen: boolean;
   available: boolean;
   provider: string;
+};
+
+/**
+ * Rich TinyFish lane summary for the durable record.
+ *
+ * The adapter computes a per-run summary (reason code, slot outcome
+ * counts, drop stats, stop reason); Trigger captures it through the
+ * adapter's outcome observer into `laneSummaryRef`, and the worker carries
+ * it on the completion event payload and result as the additive
+ * `retrievalLaneSummary` detail field. Structural — not the adapter's own
+ * type — so the workflow never imports infrastructure at runtime. Plain
+ * counts and codes only, never key material. Absent when the lane never
+ * ran (blocked lanes, other adapters, unwired callers).
+ */
+export type MarketResearchRetrievalLaneSummary = {
+  reasonCode: string;
+  sourceCount: number;
+  slotOutcomeCounts: Record<ResearchCoverageOutcome, number>;
+  callsIssued: number;
+  resultsSeen: number;
+  droppedDuplicates: number;
+  droppedUnsafe: number;
+  droppedEmptyExcerpts: number;
+  stopReason: string;
 };
 
 export type MarketResearchResult =
@@ -319,6 +351,12 @@ export type MarketResearchResult =
        */
       retrievalReasonCode: string;
       retrievalSlotOutcomes: Record<ResearchCoverageOutcome, number>;
+      /**
+       * Rich lane summary when the TinyFish lane ran and the caller wired
+       * its observer (see laneSummaryRef). Additive and optional: absent
+       * for blocked lanes, other adapters, and unwired callers.
+       */
+      retrievalLaneSummary?: MarketResearchRetrievalLaneSummary | null;
     }
   | { outcome: "failed"; code: string; runId: string | null; lane?: MarketResearchLane }
   | { outcome: "not_acquired"; claimOutcome: string }
@@ -404,7 +442,10 @@ export function recordMarketResearchLatency(
  * exactly one cause — clean-but-empty provider answers
  * (RETRIEVAL_NO_USABLE_EVIDENCE) are distinct from failed calls
  * (RETRIEVAL_FAILED), policy/budget stops, and full policy exclusion —
- * instead of completing as an undifferentiated partial 0/0.
+ * instead of completing as an undifferentiated partial 0/0. Sources banked
+ * alongside incomplete coverage mean the run was truncated mid-flight, so
+ * the compound RETRIEVAL_SOURCES_PARTIAL names the truncation instead of
+ * the clean SOURCES_RETURNED.
  */
 export function describeRetrievalOutcome(input: {
   sources: readonly unknown[];
@@ -426,7 +467,18 @@ export function describeRetrievalOutcome(input: {
     slotOutcomeCounts[entry.outcome] += 1;
   }
   if (input.sources.length > 0) {
-    return { reasonCode: "RETRIEVAL_SOURCES_RETURNED", slotOutcomeCounts };
+    // Sources banked but coverage incomplete means retrieval stopped early
+    // (cancelled, lost lease, deadline, budget/policy stop, ceilings): a
+    // clean SOURCES_RETURNED would hide the interruption, so the compound
+    // SOURCES_PARTIAL names it instead. Empty coverage keeps the legacy
+    // code: there is no truncation signal to name.
+    const complete =
+      input.coverage.length === 0 ||
+      input.coverage.every((entry) => entry.outcome === "supported");
+    return {
+      reasonCode: complete ? "RETRIEVAL_SOURCES_RETURNED" : "RETRIEVAL_SOURCES_PARTIAL",
+      slotOutcomeCounts,
+    };
   }
   const outcomes = input.coverage.map((entry) => entry.outcome);
   const all = (outcome: ResearchCoverageOutcome) =>
@@ -1048,6 +1100,11 @@ export async function runMarketResearch(
     coverage,
     excludedSourceCount,
   });
+  // Rich lane summary when the TinyFish lane ran and the caller wired its
+  // observer: the holder is populated during adapter.searchAndFetch above,
+  // so reading it here carries the TINYFISH_* detail (drop stats, stop
+  // reason) into the durable record. Null keeps the legacy shape.
+  const retrievalLaneSummary = dependencies.laneSummaryRef?.current ?? null;
 
   if (sources.length > 0) {
     try {
@@ -1099,6 +1156,7 @@ export async function runMarketResearch(
     unknownUsageCount: ledger.unknownCount,
     retrievalReasonCode: retrievalOutcome.reasonCode,
     retrievalSlotOutcomes: retrievalOutcome.slotOutcomeCounts,
+    ...(retrievalLaneSummary ? { retrievalLaneSummary } : {}),
     extractionModel: dependencies.extraction.modelId,
     reviewModel: dependencies.supportReview.modelId,
     ...(brief
@@ -1268,5 +1326,6 @@ export async function runMarketResearch(
     reassessmentEnqueued,
     retrievalReasonCode: retrievalOutcome.reasonCode,
     retrievalSlotOutcomes: retrievalOutcome.slotOutcomeCounts,
+    ...(retrievalLaneSummary ? { retrievalLaneSummary } : {}),
   };
 }

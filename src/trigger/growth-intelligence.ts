@@ -104,6 +104,7 @@ import {
   type ApprovedMarketProfileView,
   type GrowthIntelligenceRequestView,
   type MarketResearchClaim,
+  type MarketResearchRetrievalLaneSummary,
 } from "@/workflows/growth-intelligence/run-market-research";
 import {
   runSynthesis,
@@ -421,12 +422,23 @@ async function createResearchDependencies(
   // its token through newClaimToken below, so the spender records that same
   // token here: reserve_attempt fences spend on the live lease match.
   const spendClaim: { current: string | null } = { current: null };
+  // Rich lane summary holder: the adapter's outcome observer populates it
+  // during the workflow's retrieval call, and the workflow reads it at
+  // completion time into the event payload and result (additive
+  // retrievalLaneSummary detail). Blocked lanes never fire the observer,
+  // so the holder stays null and the durable record keeps its legacy shape.
+  const laneSummaryRef: { current: MarketResearchRetrievalLaneSummary | null } = {
+    current: null,
+  };
   const adapter: ResearchAdapter = await createQualifiedTinyfishResearchAdapter({
     persistence: supabase as unknown as TinyfishResearchPersistence,
     organizationId: scope.organizationId,
     requestId: scope.requestId,
     claimToken: () => spendClaim.current,
     signal,
+    observeResearchOutcome: (summary) => {
+      laneSummaryRef.current = summary;
+    },
   });
   // Task 2: wire the extraction and support-review model phases behind the
   // existing environment names. The single TinyFish lane kill-switch governs
@@ -515,6 +527,9 @@ async function createResearchDependencies(
       keyPresent: readTinyfishSearchApiKey().length > 0,
       gateOpen: isTinyfishResearchGateOpen(),
     }),
+    // Wires the rich TINYFISH_* lane summary into the durable record: the
+    // workflow reads this holder at completion time (see laneSummaryRef).
+    laneSummaryRef,
     extraction: wireExtraction
       ? {
           transport: createWiredResearchModelTransport({

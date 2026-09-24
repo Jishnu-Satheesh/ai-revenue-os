@@ -773,8 +773,7 @@ describe("TinyFish research assembly (Task 5)", () => {
     });
   });
 
-  it("never calls the observer on blocked lanes that issue no retrieval", async () => {
-    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    it("never calls the observer on blocked lanes that issue no retrieval", async () => {    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
     const { persistence } = persistenceFor({
       provider: "tinyfish",
       available: true,
@@ -797,5 +796,42 @@ describe("TinyFish research assembly (Task 5)", () => {
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
     expect(observed).toHaveLength(0);
+  });
+
+  it("still returns sources when the wired observer throws", async () => {
+    process.env.TINYFISH_SEARCH_API_KEY = FAKE_KEY;
+    process.env.TINYFISH_MARKET_RESEARCH_ENABLED = "true";
+    const { persistence } = persistenceFor({
+      provider: "tinyfish",
+      available: true,
+      blockers: [],
+    });
+    const fetchImpl = (async (url: string) => {
+      const parsed = new URL(url);
+      const body = tinyfishPage(
+        parsed.searchParams.get("query") ?? "q",
+        Number(parsed.searchParams.get("page") ?? "0"),
+        5,
+      );
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof globalThis.fetch;
+
+    const adapter = await createQualifiedTinyfishResearchAdapter({
+      persistence,
+      organizationId: ORGANIZATION_ID,
+      requestId: REQUEST_ID,
+      claimToken: () => CLAIM_TOKEN,
+      fetchImpl,
+      observeResearchOutcome: () => {
+        throw new Error("telemetry boom");
+      },
+    });
+
+    const result = await adapter.searchAndFetch(validRequest());
+
+    expect(result.sources.length).toBeGreaterThan(0);
   });
 });

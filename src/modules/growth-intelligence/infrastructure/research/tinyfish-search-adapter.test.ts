@@ -1409,4 +1409,107 @@ describe("retrieval outcome summary and observer", () => {
     expect(summary.droppedUnsafe).toBe(2);
     expect(summary.droppedEmptyExcerpts).toBe(1);
   });
+
+  it("names the terminal stop even when earlier slots already banked sources", () => {
+    const banked = {
+      sources: [
+        {
+          sourceUrl: "https://guide.example/kept",
+          domain: "guide.example",
+          excerptText: "A bounded synthetic snippet.",
+          excerptDigest: "d".repeat(64),
+          retrievedAt: "2026-09-08T10:00:00.000Z",
+        },
+      ],
+      coverage: [
+        {
+          slotKey: "local_market",
+          kind: "local_market",
+          outcome: "supported",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+        {
+          slotKey: "topic:late",
+          kind: "topic",
+          outcome: "not_started",
+          attemptIds: [],
+          acceptedClaimIds: [],
+        },
+      ],
+    } as unknown as Parameters<typeof summarizeTinyfishSearchOutcome>[0]["result"];
+    const stats = {
+      callsIssued: 1,
+      bytesReceived: 128,
+      resultsSeen: 1,
+      duplicatesDropped: 0,
+      unsafeDropped: 0,
+      emptyExcerptsDropped: 0,
+    };
+    const cases = [
+      { stopReason: "cancelled", reasonCode: "TINYFISH_CANCELLED" },
+      { stopReason: "claim_lost", reasonCode: "TINYFISH_CLAIM_LOST" },
+      { stopReason: "deadline", reasonCode: "TINYFISH_DEADLINE_EXCEEDED" },
+      { stopReason: "budget_exhausted", reasonCode: "TINYFISH_BUDGET_EXHAUSTED" },
+      { stopReason: "policy_revoked", reasonCode: "TINYFISH_POLICY_REVOKED" },
+      { stopReason: "source_budget", reasonCode: "TINYFISH_SOURCE_BUDGET_EXCEEDED" },
+    ] as const;
+    for (const { stopReason, reasonCode } of cases) {
+      expect(
+        summarizeTinyfishSearchOutcome({ result: banked, stopReason, stats }).reasonCode,
+      ).toBe(reasonCode);
+    }
+    // A clean finish with sources keeps the success code.
+    expect(summarizeTinyfishSearchOutcome({ result: banked, stopReason: "completed", stats }).reasonCode).toBe(
+      "TINYFISH_SOURCES_RETURNED",
+    );
+  });
+
+  it("surfaces mid-run policy revocation with banked sources through the observer", async () => {
+    let open = true;
+    const seen: TinyfishRetrievalSummary[] = [];
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport((call) => {
+      open = false;
+      return tinyfishResponse([validResult(`https://guide.example/revoked-${call}`)]);
+    });
+    const adapter = createTinyfishSearchAdapter({
+      transport,
+      spender,
+      gate: { isAvailable: () => open },
+      now: () => FIXED_NOW,
+      observe: (summary) => seen.push(summary),
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources.length).toBeGreaterThan(0);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({
+      reasonCode: "TINYFISH_POLICY_REVOKED",
+      sourceCount: result.sources.length,
+      stopReason: "policy_revoked",
+    });
+  });
+
+  it("never lets a throwing observer fail retrieval", async () => {
+    const { spender } = createFakeSpender();
+    const transport = createProgrammedTransport((call) =>
+      tinyfishResponse([validResult(`https://guide.example/observed-${call}`)]),
+    );
+    const adapter = createTinyfishSearchAdapter({
+      transport,
+      spender,
+      gate: gate(true),
+      now: () => FIXED_NOW,
+      observe: () => {
+        throw new Error("telemetry boom");
+      },
+    });
+
+    const result = await adapter.searchAndFetch(baseRequest());
+
+    expect(result.sources.length).toBeGreaterThan(0);
+    expect(result.coverage.every((entry) => entry.outcome === "supported")).toBe(true);
+  });
 });
