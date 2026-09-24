@@ -456,8 +456,11 @@ describe("publishDueGrowthProjections over the live dev-org profile", () => {
   // The fixture mirrors that composition at a smaller scale: 88 trailing-120d
   // normalized rows, 60 digest-null (a 68% majority, live 73%), 28
   // digest-present across 28 distinct days, 0 exact_range rows. Recent days
-  // are deliberately thin (5 present in the trailing 30) so the real ladder
-  // must widen past the 7-in-30 rung to the 14-in-60 rung.
+  // are deliberately thin (5 digest-present in the trailing 30): under the old
+  // 7-in-30 rule the real ladder had to widen to the 14-in-60 rung, while
+  // under ADR 0069 (floor 1 at every rung, digest-null rows admitted as
+  // unreconciled evidence) rung 1 builds on its own from 18 reported days,
+  // 15 of them from unreconciled rows.
   const LIVE_RECENT_DAYS = [
     "2026-08-25",
     "2026-08-26",
@@ -514,8 +517,9 @@ describe("publishDueGrowthProjections over the live dev-org profile", () => {
    * only stub in these tests. It answers the exact query vocabulary the real
    * readers use (eq/or/is/not/in/gte/lt/order/range/limit/maybeSingle) with
    * PostgREST-like semantics, so the real definition, coordinate and fact
-   * readers — quality, reconciliation, digest, measured and currency
-   * filtering included — run un-bypassed above it.
+   * readers — membership, window, measured and currency filtering included,
+   * with digest-null rows admitted as unreconciled evidence per ADR 0069 —
+   * run un-bypassed above it.
    */
   class LiveLedgerQuery {
     private readonly tests: Array<(row: LiveLedgerRow) => boolean> = [];
@@ -718,16 +722,37 @@ describe("publishDueGrowthProjections over the live dev-org profile", () => {
     }
     expect(seen).toHaveLength(4);
     for (const document of seen) {
-      // Only 5 days report in the trailing 30, so the 7-in-30 rung cannot
-      // qualify: the ladder widened to the 14-in-60 rung (16 reported days)
-      // and froze that window — the ladder ran, it was not bypassed.
+      // Floor 1 at every rung (ADR 0069): rung 1 builds on its own from its
+      // 18 reported days instead of widening — the ladder ran, it was not
+      // bypassed, and the first rung with >=1 reported day won.
       expect(document.baselineWindow).toEqual({
-        startDate: "2026-07-01",
+        startDate: "2026-07-31",
         endDateExclusive: "2026-08-30",
       });
       expect(document.monthlyLowMinor).toBe(3000000);
       expect(document.monthlyHighMinor).toBe(3000000);
       expect(document.currency).toBe("AED");
+      // Published horizons carry scope + provenance to the display layer: the
+      // qualifying scope partition, the exact reported-day count with latest
+      // date, and the unreconciled share — labelled, never hidden.
+      expect(document.scopePartitions).toHaveLength(1);
+      expect(document.scopePartitions[0]).toMatchObject({
+        partitionKey: "organization-total",
+        channelId: null,
+        branchId: null,
+      });
+      expect(document.limitations).toContain(
+        "Baseline from 18 reported days (ending 2026-08-29); missing days excluded, monthly pace scaled from the observed daily mean.",
+      );
+      expect(document.limitations).toContain(
+        "Baseline covers 1 of 1 scope partitions: organization-total (18 days ending 2026-08-29).",
+      );
+      expect(document.limitations).toContain(
+        "Baseline includes 15 reported days from unreconciled rows (organization-total (15 days)); treat figures as estimates pending reconciliation.",
+      );
+      expect(
+        document.limitations.some((line) => line.startsWith("Excluded partitions")),
+      ).toBe(false);
       expect(document.limitations).toContain("Action impact is not included in this estimate.");
     }
     expect(new Set(seen.map((document) => document.horizonMonths))).toEqual(
@@ -813,17 +838,19 @@ describe("publishDueGrowthProjections over the live dev-org profile", () => {
 
   it("keeps neighboring publications when one horizon's write fails", async () => {
     const { client } = fakeLiveClient();
+    const seen: FrozenGrowthProjection[] = [];
     const deps = dependencies({
       buildCandidate: liveBuildCandidate(client),
-      publish: vi.fn(async ({ document }: { document: FrozenGrowthProjection }) =>
-        document.horizonMonths === 6
+      publish: vi.fn(async ({ document }: { document: FrozenGrowthProjection }) => {
+        seen.push(document);
+        return document.horizonMonths === 6
           ? Promise.reject({ code: "PERIOD_ALREADY_STARTED" })
           : {
               projectionId: "33333333-3333-4333-8333-333333333333",
               digest: DIGEST,
               published: true,
-            },
-      ),
+            };
+      }),
     });
     const result = await publishDueGrowthProjections(liveInput(), deps);
 
@@ -838,5 +865,23 @@ describe("publishDueGrowthProjections over the live dev-org profile", () => {
     });
     expect(result.results[3]).toMatchObject({ horizonMonths: 12, status: "published" });
     expect(deps.publish).toHaveBeenCalledTimes(4);
+    // Mixed horizons differentiate fully: every horizon built the same
+    // rung-1 baseline, so each built document carries the scope and
+    // provenance coverage — the failed horizon's write code never dilutes it.
+    expect(seen).toHaveLength(4);
+    for (const document of seen) {
+      expect(document.scopePartitions.map((partition) => partition.partitionKey)).toEqual([
+        "organization-total",
+      ]);
+      expect(document.limitations.join(" ")).toContain(
+        "Baseline from 18 reported days (ending 2026-08-29)",
+      );
+      expect(document.limitations.join(" ")).toContain(
+        "Baseline covers 1 of 1 scope partitions",
+      );
+      expect(document.limitations.join(" ")).toContain(
+        "Baseline includes 15 reported days from unreconciled rows",
+      );
+    }
   });
 });

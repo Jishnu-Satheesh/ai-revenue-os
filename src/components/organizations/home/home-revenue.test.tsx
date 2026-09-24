@@ -513,6 +513,42 @@ describe("HomeRevenue growth section", () => {
     expect(screen.getByText("Below the projection")).toBeTruthy();
   });
 
+  it("states the baseline coverage next to the projected figures", () => {
+    const section = buildBehindGrowthSection(ORG_ID);
+    if (section.state !== "ready") throw new Error("fixture must be ready");
+    // ADR 0069 coverage lines in the builder's verbatim shape: scope
+    // partitions, exact reported-day counts with latest date, and the
+    // unreconciled share.
+    const grown = {
+      ...section,
+      views: {
+        ...section.views,
+        1: {
+          ...section.views[1],
+          limitations: [
+            "Baseline from 18 reported days (ending 2026-08-29); missing days excluded, monthly pace scaled from the observed daily mean.",
+            "Baseline covers 1 of 1 scope partitions: organization-total (18 days ending 2026-08-29).",
+            "Baseline includes 15 reported days from unreconciled rows (organization-total (15 days)); treat figures as estimates pending reconciliation.",
+          ],
+        },
+      },
+    };
+    render(
+      <HomeRevenue organizationId={ORG_ID} section={{ status: "disabled" }} growth={grown} />,
+    );
+
+    // The verdict and its coverage share one surface: the footer beneath
+    // the chart states what the figures rest on — never a separate page.
+    expect(screen.getByText("Below the projection")).toBeTruthy();
+    expect(
+      screen.getByText(/Baseline from 18 reported days \(ending 2026-08-29\)/),
+    ).toBeTruthy();
+    expect(screen.getByText(/Baseline covers 1 of 1 scope partitions/)).toBeTruthy();
+    expect(
+      screen.getByText(/Baseline includes 15 reported days from unreconciled rows/),
+    ).toBeTruthy();
+  });
+
   describe("GrowthProjectionTrigger", () => {
     function sectionWithTrigger(canTrigger: boolean) {
       const section = buildBehindGrowthSection(ORG_ID);
