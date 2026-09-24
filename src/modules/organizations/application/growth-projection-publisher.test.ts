@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 
 import type { FrozenGrowthProjection } from "@/domain/organizations/growth-progress";
+import { frozenGrowthProjectionSchema } from "@/domain/organizations/growth-progress";
 import type { RevenueScenarioInput } from "@/domain/organizations/revenue-scenario";
+import { assembleLedgerBaselineCandidate } from "@/modules/organizations/application/growth-candidate-assembly";
 import {
   publishDueGrowthProjections,
   type GrowthCandidateBuildContext,
@@ -428,5 +430,161 @@ describe("publishDueGrowthProjections idempotency", () => {
       status: "failed",
       reasonCode: "PUBLISH_FAILED",
     });
+  });
+});
+
+describe("publishDueGrowthProjections with the ledger-bound assembly", () => {
+  const DEFINITION_ID = "a1a1a1a1-1111-4111-8111-111111111111";
+  const FACT_DIGEST = "d".repeat(64);
+  /** Dubai local 2026-09-21: bootstrap origin becomes 2026-09-22, all horizons due. */
+  const NIGHTLY_NOW_ISO = "2026-09-20T20:00:00.000Z";
+
+  function nightlyFacts() {
+    const facts = [];
+    for (let day = 1; day <= 21; day += 1) {
+      const date = `2026-09-${String(day).padStart(2, "0")}`;
+      const next = day === 21 ? "2026-09-22" : `2026-09-${String(day + 1).padStart(2, "0")}`;
+      facts.push({
+        sourceTable: "normalized_metrics" as const,
+        rowId: `nightly-fact-${date}`,
+        organizationId: ORG_ID,
+        partitionKey: "organization-total",
+        startDate: date,
+        endDateExclusive: next,
+        amountMinor: 100000,
+        currency: "AED",
+        createdAt: "2026-09-21T00:00:00.000Z",
+        reconciliationDigest: FACT_DIGEST,
+      });
+    }
+    return facts;
+  }
+
+  function assemblyBuildCandidate(
+    overrides: {
+      resolveRevenueDefinitionId?: () => Promise<string | null>;
+    } = {},
+  ) {
+    const facts = nightlyFacts();
+    return async (
+      nightlyMaterial: RevenueScenarioInput,
+      context: GrowthCandidateBuildContext,
+    ) =>
+      assembleLedgerBaselineCandidate(nightlyMaterial, context, {
+        resolveRevenueDefinitionId:
+          overrides.resolveRevenueDefinitionId ?? (async () => DEFINITION_ID),
+        listBaselineCoordinates: async () => [{ channelId: null, branchId: null }],
+        readBaselineFacts: async () => ({ status: "ready" as const, facts: [...facts] }),
+      });
+  }
+
+  function nightlyInput(overrides: Record<string, unknown> = {}) {
+    return input({ nowIso: NIGHTLY_NOW_ISO, ...overrides });
+  }
+
+  it("publishes due horizons from real baseline facts, not a blanket skip", async () => {
+    const seen: FrozenGrowthProjection[] = [];
+    const deps = dependencies({
+      buildCandidate: assemblyBuildCandidate(),
+      publish: vi.fn(async ({ document }: { document: FrozenGrowthProjection }) => {
+        // The nightly composition hands the RPC a schema-valid frozen
+        // document: the publication boundary revalidates the same shape.
+        expect(frozenGrowthProjectionSchema.safeParse(document).success).toBe(true);
+        seen.push(document);
+        return {
+          projectionId: "33333333-3333-4333-8333-333333333333",
+          digest: DIGEST,
+          published: true,
+        };
+      }),
+    });
+    const result = await publishDueGrowthProjections(nightlyInput(), deps);
+
+    for (const entry of result.results) {
+      expect(entry).toMatchObject({ status: "published", reasonCode: null });
+    }
+    expect(seen).toHaveLength(4);
+    for (const document of seen) {
+      expect(document.monthlyLowMinor).toBe(3000000);
+      expect(document.monthlyHighMinor).toBe(3000000);
+      expect(document.limitations).toContain(
+        "Action impact is not included in this estimate.",
+      );
+    }
+    expect(new Set(seen.map((document) => document.horizonMonths))).toEqual(
+      new Set([1, 3, 6, 12]),
+    );
+  });
+
+  it("publishes only the due horizon while quieter horizons skip", async () => {
+    const buildCandidate = vi.fn(assemblyBuildCandidate());
+    const deps = dependencies({
+      readSchedule: vi.fn(async (): Promise<GrowthScheduleSnapshot> => ({
+        status: "ready",
+        origins: ["2026-08-22"],
+      })),
+      buildCandidate,
+      publish: vi.fn(async () => ({
+        projectionId: "33333333-3333-4333-8333-333333333333",
+        digest: DIGEST,
+        published: true,
+      })),
+    });
+    const result = await publishDueGrowthProjections(nightlyInput(), deps);
+
+    // Only the 1-month horizon opens a period on 2026-09-22: longer horizons
+    // stay quiet with their own code instead of sharing one blanket skip.
+    expect(result.results[0]).toMatchObject({ horizonMonths: 1, status: "published" });
+    expect(result.results.slice(1)).toMatchObject([
+      { horizonMonths: 3, status: "skipped", reasonCode: "NOT_DUE" },
+      { horizonMonths: 6, status: "skipped", reasonCode: "NOT_DUE" },
+      { horizonMonths: 12, status: "skipped", reasonCode: "NOT_DUE" },
+    ]);
+    expect(buildCandidate).toHaveBeenCalledTimes(1);
+  });
+
+  it("records the true blocker per horizon when no revenue definition binds the org", async () => {
+    const deps = dependencies({
+      buildCandidate: assemblyBuildCandidate({
+        resolveRevenueDefinitionId: async () => null,
+      }),
+      publish: vi.fn(async () => ({
+        projectionId: "33333333-3333-4333-8333-333333333333",
+        digest: DIGEST,
+        published: true,
+      })),
+    });
+    const result = await publishDueGrowthProjections(nightlyInput(), deps);
+
+    for (const entry of result.results) {
+      expect(entry).toMatchObject({
+        status: "skipped",
+        reasonCode: "CANDIDATE_BASELINE_INCOMPLETE",
+      });
+    }
+    expect(deps.publish).not.toHaveBeenCalled();
+
+    // The refusal names the missing binding, not a vague baseline complaint.
+    const direct = await assembleLedgerBaselineCandidate(
+      material().input,
+      {
+        organizationId: ORG_ID,
+        scheduleOriginDate: "2026-09-22",
+        horizonMonths: 1,
+        cycleIndex: 0,
+        issuedAt: NIGHTLY_NOW_ISO,
+        sourceCutoffDate: "2026-09-21",
+        timeZone: "Asia/Dubai",
+      },
+      {
+        resolveRevenueDefinitionId: async () => null,
+        listBaselineCoordinates: async () => [{ channelId: null, branchId: null }],
+        readBaselineFacts: async () => ({ status: "ready" as const, facts: nightlyFacts() }),
+      },
+    );
+    expect(direct).toMatchObject({ status: "refused", reason: "BASELINE_INCOMPLETE" });
+    if (direct.status === "refused") {
+      expect(direct.detail).toContain("revenue definition");
+    }
   });
 });
