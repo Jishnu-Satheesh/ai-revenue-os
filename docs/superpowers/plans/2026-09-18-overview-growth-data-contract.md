@@ -1,6 +1,6 @@
 # Overview growth — data, calculation and persistence contract
 
-> 2026-09-24 pointer (user-approved): per-partition baselines from available reported days supersede the D03 baseline floors and evidence gates below — see ADR 0069 (`adrs/0069-per-partition-baseline-from-available-reported-days.md`). D03 text is intentionally left unchanged until Tasks 2–4 implement it.
+> 2026-09-24 pointer (user-approved): per-partition baselines from available reported days supersede the D03 baseline floors and evidence gates below — see ADR 0069 (`adrs/0069-per-partition-baseline-from-available-reported-days.md`). Tasks 2–4 have now implemented it (commits a4ec7bc, 6034c42, 9e860b2, f5d3791); D03 text is intentionally left unchanged as the superseded record.
 
 ## D00 — Status and naming
 

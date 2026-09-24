@@ -16,7 +16,6 @@ import {
   scopePartitionSchema,
   GrowthProgressError,
   type FrozenGrowthProjection,
-  type RevenueFact,
   type ScopePartition,
 } from "@/domain/organizations/growth-progress";
 import {
@@ -293,123 +292,6 @@ function divHalfAway(numerator: bigint, denominator: bigint): bigint {
   if (doubled >= denominator) return quotient + BigInt(1);
   if (doubled <= -denominator) return quotient - BigInt(1);
   return quotient;
-}
-
-export type TrailingBaselineAssessment =
-  | {
-      status: "ok";
-      reportedDays: string[];
-      totalNumerator: bigint;
-      totalDenominator: bigint;
-    }
-  | { status: "conflict" };
-
-/**
- * Assesses the trailing reported window day by day (data contract D03).
- * Exported so the assembly can test fallback rungs without building: same
- * inputs always give the same assessment.
- *
- * Facts outside the window are ignored, never clipped into it — the reader
- * drops crossing rows in production, and this matches that boundary wherever
- * facts arrive pre-bounded. A day is reported only when every frozen
- * partition covers it exactly once at the finest granularity available: an
- * exact day cover wins over a coarser containing span (which is then ignored
- * for that day); a single containing span contributes its amount spread
- * evenly over its own reported days; two disagreeing covers of one day mark
- * the whole assessment conflicting. A foreign-currency edge taints the days
- * it spans for its partition, mirroring the D05 taint rule.
- *
- * The running total stays an exact reduced rational, so a weekly span of
- * 700 over 7 days contributes exactly 100 a day — mean arithmetic only. No
- * daily observation is created, stored or drawn from this; D05 still governs
- * what the blue line may show.
- */
-export function assessTrailingBaselineWindow(args: {
-  windowStart: string;
-  windowEndExclusive: string;
-  cutoffDate: string;
-  currency: string;
-  scopePartitions: readonly ScopePartition[];
-  facts: readonly RevenueFact[];
-}): TrailingBaselineAssessment {
-  const { windowStart, windowEndExclusive, cutoffDate, currency, scopePartitions, facts } = args;
-  const keys = scopePartitions.map((partition) => partition.partitionKey);
-  const byPartition = new Map<string, RevenueFact[]>();
-  for (const key of keys) byPartition.set(key, []);
-  for (const fact of facts) {
-    const bucket = byPartition.get(fact.partitionKey);
-    if (!bucket) continue;
-    if (fact.startDate < windowStart || fact.endDateExclusive > windowEndExclusive) continue;
-    bucket.push(fact);
-  }
-  // Only dates the source vouches for: inside the window and at/before cutoff.
-  let lastDate = addLocalDays(windowEndExclusive, -1);
-  if (lastDate > cutoffDate) lastDate = cutoffDate;
-  const reportedDays: string[] = [];
-  let totalNumerator = BigInt(0);
-  let totalDenominator = BigInt(1);
-  for (let date = windowStart; date <= lastDate; date = addLocalDays(date, 1)) {
-    const nextDay = addLocalDays(date, 1);
-    let dayNumerator = BigInt(0);
-    let dayDenominator = BigInt(1);
-    let covered = true;
-    for (const key of keys) {
-      const containing = (byPartition.get(key) ?? []).filter(
-        (fact) => fact.startDate <= date && date < fact.endDateExclusive,
-      );
-      if (containing.some((fact) => fact.currency !== currency)) {
-        covered = false;
-        break;
-      }
-      const seen = new Set<string>();
-      const edges: RevenueFact[] = [];
-      for (const fact of containing) {
-        const identity = `${fact.sourceTable}\n${fact.rowId}`;
-        if (seen.has(identity)) continue;
-        seen.add(identity);
-        edges.push(fact);
-      }
-      const exact = edges.filter(
-        (fact) => fact.startDate === date && fact.endDateExclusive === nextDay,
-      );
-      let amount: bigint;
-      let spanDays: bigint;
-      if (exact.length > 0) {
-        const amounts = new Set(exact.map((fact) => fact.amountMinor));
-        if (amounts.size !== 1) return { status: "conflict" };
-        amount = BigInt(exact[0]!.amountMinor);
-        spanDays = BigInt(1);
-      } else if (edges.length === 0) {
-        covered = false;
-        break;
-      } else {
-        const shapes = new Set(
-          edges.map((fact) => `${fact.startDate}|${fact.endDateExclusive}|${fact.amountMinor}`),
-        );
-        if (shapes.size !== 1) return { status: "conflict" };
-        const only = edges[0]!;
-        amount = BigInt(only.amountMinor);
-        spanDays = BigInt(daysBetweenLocal(only.startDate, only.endDateExclusive));
-      }
-      dayNumerator = dayNumerator * spanDays + amount * dayDenominator;
-      dayDenominator = dayDenominator * spanDays;
-      const divisor = bigintGcd(dayNumerator, dayDenominator);
-      if (divisor > BigInt(1)) {
-        dayNumerator /= divisor;
-        dayDenominator /= divisor;
-      }
-    }
-    if (!covered) continue;
-    reportedDays.push(date);
-    totalNumerator = totalNumerator * dayDenominator + dayNumerator * totalDenominator;
-    totalDenominator = totalDenominator * dayDenominator;
-    const totalDivisor = bigintGcd(totalNumerator, totalDenominator);
-    if (totalDivisor > BigInt(1)) {
-      totalNumerator /= totalDivisor;
-      totalDenominator /= totalDivisor;
-    }
-  }
-  return { status: "ok", reportedDays, totalNumerator, totalDenominator };
 }
 
 /**
