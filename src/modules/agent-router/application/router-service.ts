@@ -206,6 +206,15 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
             required: true,
             helpText: "Routing is unavailable right now, so answers stay read-only.",
           },
+          // Spec section 13 (ruling T3b): every fail-closed answer carries
+          // an explicit DeepThink-retry offer, never just a dead end.
+          {
+            key: "retry_deepthink",
+            label: "Retry as DeepThink?",
+            kind: "confirm",
+            required: false,
+            helpText: "Runs one bounded research task with honest progress.",
+          },
         ],
       },
       reasonCodes: ["PROVIDER_FAIL_CLOSED"],
@@ -282,6 +291,15 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
             required: true,
             helpText: "One sentence is enough to route this correctly.",
           },
+          // Spec section 13 (ruling T3b): the low-confidence fallback also
+          // offers the DeepThink retry, so an unsure read is recoverable.
+          {
+            key: "retry_deepthink",
+            label: "Retry as DeepThink?",
+            kind: "confirm",
+            required: false,
+            helpText: "Runs one bounded research task with honest progress.",
+          },
         ],
       },
       reasonCodes: ["LOW_CONFIDENCE_FALLBACK"],
@@ -290,6 +308,39 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
 
   const missingFields = proposal.missing.slice(0, MAX_MISSING_FIELDS);
   const capped = proposal.missing.length > MAX_MISSING_FIELDS;
+
+  // Quick-mode research guard (ruling T3a): Quick never spends. A Quick
+  // thread whose message judges as needing research gets an upgrade nudge
+  // with a cost/transparency note — the user confirms before any spend.
+  // Sits after the gates (a denied caller stays denied) and after the
+  // low-confidence fallback (an unsure read is never judged as research).
+  // Only research_once is guarded: watch/campaign/profile executors own
+  // their own permission and confirmation fences downstream.
+  if (parsed.threadMode === "quick" && proposal.intent === "research_once") {
+    return finish({
+      ...shared,
+      intent: "research_once",
+      confidence: proposal.confidence,
+      missingFields,
+      questionnaire: {
+        kind: "deepthink_upgrade",
+        title: "Research needed — switch to DeepThink?",
+        resumeKey: resumeKey("research_once", parsed.page, parsed.contextDigest),
+        items: [
+          {
+            key: "confirm_upgrade",
+            label: "Switch this thread to DeepThink?",
+            kind: "confirm",
+            required: true,
+            helpText: "DeepThink may run one bounded research task. Quick never spends.",
+          },
+        ],
+      },
+      reasonCodes: capped
+        ? ["DEEPTHINK_UPGRADE_REQUIRED", "MISSING_FIELDS_CAPPED"]
+        : ["DEEPTHINK_UPGRADE_REQUIRED"],
+    });
+  }
 
   // Duplicate-watch card: a similar active scope already exists.
   if (proposal.intent === "watch" && parsed.activeWatches.length > 0) {
@@ -326,10 +377,14 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
   }
 
   // Missing-fields card (watch / research_once / profile scope / campaign window).
+  // Ruling T3c: the campaign card kind follows the missing set — the
+  // `evidence_window` picker only when the window is what is missing,
+  // otherwise the generic missing-fields card.
   if (missingFields.length > 0 && proposal.intent !== "answer_memory") {
-    const kind = proposal.intent === "campaign_advice" ? "evidence_window" : "missing_fields";
-    const title =
-      proposal.intent === "campaign_advice" ? "Evidence window needed" : "One more detail";
+    const campaignNeedsWindow =
+      proposal.intent === "campaign_advice" && missingFields.includes("evidence_window");
+    const kind = campaignNeedsWindow ? "evidence_window" : "missing_fields";
+    const title = campaignNeedsWindow ? "Evidence window needed" : "One more detail";
     return finish({
       ...shared,
       intent: proposal.intent,

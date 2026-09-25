@@ -1,0 +1,214 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  createThreadService,
+  permissionsForRole,
+  routingContextDigest,
+} from "@/modules/agent-chat/application/thread-service";
+import type { ThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
+import { DomainError } from "@/lib/errors";
+
+const THREAD = {
+  id: "t1",
+  organizationId: "o",
+  title: "Hi",
+  mode: "quick",
+  status: "open",
+  linkedResearchProjectId: null,
+  linkedRequestId: null,
+  linkedDraftRequestId: null,
+  linkedCampaignId: null,
+  createdAt: "2026-09-25T10:00:00.000Z",
+  updatedAt: "2026-09-25T10:00:00.000Z",
+} as const;
+
+const MESSAGE = {
+  id: "m1",
+  threadId: "t1",
+  role: "user",
+  body: "research the downtown lunch crowd",
+  questionnaireAnswers: null,
+  markerReceipts: null,
+  citations: null,
+  createdAt: "2026-09-25T10:01:00.000Z",
+} as const;
+
+function mockThreads(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> = {}) {
+  return {
+    createThreadKeyed: vi.fn(async () => ({ threadId: "t1", status: "open", replayed: false })),
+    appendMessageKeyed: vi.fn(async () => ({ messageId: "m1", threadId: "t1", replayed: false })),
+    getThread: vi.fn(async () => ({ ...THREAD })),
+    getMessage: vi.fn(async () => ({ ...MESSAGE })),
+    latestUserMessage: vi.fn(async () => ({ ...MESSAGE })),
+    listThreads: vi.fn(async () => ({ threads: [{ ...THREAD }], nextCursor: null })),
+    listMessages: vi.fn(async () => ({ messages: [{ ...MESSAGE }], nextCursor: null })),
+    ...overrides,
+  } as unknown as ThreadRepository;
+}
+
+describe("thread service", () => {
+  it("refuses thread creation for viewers before touching persistence", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({ threads });
+    await expect(
+      service.createThread({
+        organizationId: "o",
+        actorId: "u",
+        role: "viewer",
+        idempotencyKey: "k-1234567890123456",
+        mode: "quick",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
+    expect(threads.createThreadKeyed).not.toHaveBeenCalled();
+  });
+
+  it("publishes agent_thread.opened only for fresh threads", async () => {
+    const publish = vi.fn(async () => {});
+    const threads = mockThreads();
+    const fresh = createThreadService({ threads, events: { publish }, correlationId: "c" });
+    const out = await fresh.createThread({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      idempotencyKey: "k-1234567890123456",
+      mode: "quick",
+    });
+    expect(out.replayed).toBe(false);
+    expect(out.thread.id).toBe("t1");
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({ eventName: "agent_thread.opened" }),
+    );
+
+    const replayedThreads = mockThreads({
+      createThreadKeyed: vi.fn(async () => ({ threadId: "t1", status: "open", replayed: true })),
+    });
+    const replayed = createThreadService({ threads: replayedThreads, events: { publish } });
+    await replayed.createThread({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      idempotencyKey: "k-1234567890123456",
+      mode: "quick",
+    });
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("appends as the user role and reads back the kept row", async () => {
+    const publish = vi.fn(async () => {});
+    const threads = mockThreads();
+    const service = createThreadService({ threads, events: { publish } });
+    const out = await service.appendUserMessage({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      idempotencyKey: "k-1234567890123456",
+      body: "Hello",
+    });
+    expect(threads.appendMessageKeyed).toHaveBeenCalledWith(
+      expect.objectContaining({ role: "user", body: "Hello" }),
+    );
+    expect(out.message.id).toBe("m1");
+    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ eventName: "agent_message.appended" }));
+  });
+
+  it("reads nothing for a foreign thread", async () => {
+    const threads = mockThreads({ getThread: vi.fn(async () => null) });
+    const service = createThreadService({ threads });
+    await expect(
+      service.appendUserMessage({
+        organizationId: "o",
+        actorId: "u",
+        role: "operator",
+        threadId: "foreign",
+        idempotencyKey: "k-1234567890123456",
+        body: "Hello",
+      }),
+    ).rejects.toMatchObject({ code: "TENANT_SCOPE_ERROR" });
+  });
+
+  it("routes the newest user message with the thread mode attached", async () => {
+    const publish = vi.fn(async () => {});
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      events: { publish },
+      proposeRouter: async () => ({ intent: "research_once", confidence: "high", missing: [] }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+    // Quick thread + research judgment: the upgrade nudge, not execution.
+    expect(out.intent).toBe("research_once");
+    expect(out.questionnaire?.kind).toBe("deepthink_upgrade");
+    expect(out.thread.id).toBe("t1");
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "agent_thread.routed",
+        payload: expect.objectContaining({ intent: "research_once" }),
+      }),
+    );
+  });
+
+  it("routes with no watch candidates, so no duplicate card can over-trigger", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      proposeRouter: async () => ({ intent: "answer_memory", confidence: "high", missing: [] }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "viewer",
+      threadId: "t1",
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.routingNote).toContain("active_watches=none");
+  });
+
+  it("fails closed when the proposer throws", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      proposeRouter: async () => {
+        throw new Error("provider down");
+      },
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.questionnaire?.kind).toBe("clarify");
+  });
+
+  it("refuses to route a thread with no readable message", async () => {
+    const threads = mockThreads({ latestUserMessage: vi.fn(async () => null) });
+    const service = createThreadService({ threads });
+    await expect(
+      service.routeLatest({ organizationId: "o", actorId: "u", role: "operator", threadId: "t1" }),
+    ).rejects.toBeInstanceOf(DomainError);
+  });
+
+  it("derives permissions from the role, never from client claims", () => {
+    expect(permissionsForRole("viewer")).toEqual([]);
+    expect(permissionsForRole("operator")).toEqual(["growth_intelligence.manage", "campaign.create"]);
+    expect(permissionsForRole("owner")).toEqual(["growth_intelligence.manage", "campaign.create"]);
+  });
+
+  it("mints a stable opaque digest per message", () => {
+    const first = routingContextDigest({ organizationId: "o", threadId: "t1", messageId: "m1" });
+    const second = routingContextDigest({ organizationId: "o", threadId: "t1", messageId: "m1" });
+    const other = routingContextDigest({ organizationId: "o", threadId: "t1", messageId: "m2" });
+    expect(first).toBe(second);
+    expect(first).toMatch(/^[0-9a-f]{16}$/);
+    expect(other).not.toBe(first);
+  });
+});
