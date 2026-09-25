@@ -51,6 +51,17 @@ const isoTimestampSchema = z
  * approved expires, and the digest of an approval would change when nothing
  * about the content did.
  */
+export const studioVersionSourceSchema = z.strictObject({
+  kind: z.literal("studio_version"),
+  /** The immutable Studio version whose exact bytes publish as they stand. */
+  studioVersionId: uuidSchema,
+  /** Null selects the native provider bytes; otherwise the reviewed export. */
+  studioExportId: uuidSchema.nullable(),
+  /** The hash of the finished bytes. What a review is bound to. */
+  contentHash: sha256HexSchema,
+});
+export type StudioVersionSource = z.infer<typeof studioVersionSourceSchema>;
+
 export const deliverableSourceSchema = z.discriminatedUnion("kind", [
   z.strictObject({
     kind: z.literal("finished_poster"),
@@ -70,6 +81,7 @@ export const deliverableSourceSchema = z.discriminatedUnion("kind", [
      */
     chosenAsFinal: z.literal(true),
   }),
+  studioVersionSourceSchema,
 ]);
 export type DeliverableSource = z.infer<typeof deliverableSourceSchema>;
 
@@ -103,30 +115,104 @@ export const deliverableRenderInputsSchema = z.strictObject({
 });
 export type DeliverableRenderInputs = z.infer<typeof deliverableRenderInputsSchema>;
 
+/**
+ * The Studio full-poster render inputs: a finished image, not a composition
+ * recipe. Every digest that could change the pixels is pinned — copy,
+ * substitutions, references, profile and export transform — and the envelope
+ * is versioned so readers can tell it apart from the legacy compositor arm.
+ * There are deliberately no template, font-manifest or plate fields here:
+ * inventing them would pretend a finished poster was composed.
+ */
+export const STUDIO_FULL_POSTER_RENDER_INPUTS_SCHEMA_VERSION = 2 as const;
+
+export const studioFullPosterRenderInputsSchema = z.strictObject({
+  schemaVersion: z.literal(STUDIO_FULL_POSTER_RENDER_INPUTS_SCHEMA_VERSION),
+  kind: z.literal("studio_full_poster"),
+  studioVersionId: uuidSchema,
+  studioExportId: uuidSchema.nullable(),
+  contentHash: sha256HexSchema,
+  inputDigest: sha256HexSchema,
+  providerProfileId: uuidSchema,
+  textCopyDigest: sha256HexSchema,
+  channelLogoSubstitutionDigest: sha256HexSchema,
+  referenceManifestDigest: sha256HexSchema,
+  exportTransformDigest: sha256HexSchema.nullable(),
+});
+export type StudioFullPosterRenderInputs = z.infer<typeof studioFullPosterRenderInputsSchema>;
+
+/**
+ * Legacy untagged compositor object first, so it parses exactly as it always
+ * has — no discriminator is added to old objects and old digests never move.
+ */
+export const deliverableRenderInputsUnionSchema = z.union([
+  deliverableRenderInputsSchema,
+  studioFullPosterRenderInputsSchema,
+]);
+export type DeliverableRenderInputsUnion = z.infer<typeof deliverableRenderInputsUnionSchema>;
+
 export const CAMPAIGN_DELIVERABLE_VERSION_SCHEMA_VERSION = 1 as const;
 
-export const campaignDeliverableVersionSchema = z.strictObject({
-  schemaVersion: z.literal(CAMPAIGN_DELIVERABLE_VERSION_SCHEMA_VERSION),
-  id: uuidSchema,
-  organizationId: uuidSchema,
-  campaignId: uuidSchema,
-  deliverableId: uuidSchema,
-  version: z.number().int().positive(),
-  /** The exact bundle version whose approval this output was prepared under. */
-  bundleVersionId: uuidSchema,
-  directionKey: uuidSchema,
-  /** Present when this output came from a variant rather than the base direction. */
-  creativeVariantId: uuidSchema.nullable(),
-  source: deliverableSourceSchema,
-  channel: z.string().trim().min(1).max(60),
-  placement: z.string().trim().min(1).max(60),
-  language: z.string().trim().min(1).max(40),
-  copy: deliverableCopySchema,
-  renderInputs: deliverableRenderInputsSchema,
-  /** The hash of the finished bytes. What a review is bound to. */
-  contentHash: sha256HexSchema,
-  createdAt: isoTimestampSchema,
-});
+export const campaignDeliverableVersionSchema = z
+  .strictObject({
+    schemaVersion: z.union([
+      z.literal(CAMPAIGN_DELIVERABLE_VERSION_SCHEMA_VERSION),
+      z.literal(STUDIO_FULL_POSTER_RENDER_INPUTS_SCHEMA_VERSION),
+    ]),
+    id: uuidSchema,
+    organizationId: uuidSchema,
+    campaignId: uuidSchema,
+    deliverableId: uuidSchema,
+    version: z.number().int().positive(),
+    /** The exact bundle version whose approval this output was prepared under. */
+    bundleVersionId: uuidSchema,
+    directionKey: uuidSchema,
+    /** Present when this output came from a variant rather than the base direction. */
+    creativeVariantId: uuidSchema.nullable(),
+    source: deliverableSourceSchema,
+    channel: z.string().trim().min(1).max(60),
+    placement: z.string().trim().min(1).max(60),
+    language: z.string().trim().min(1).max(40),
+    copy: deliverableCopySchema,
+    renderInputs: deliverableRenderInputsUnionSchema,
+    /** The hash of the finished bytes. What a review is bound to. */
+    contentHash: sha256HexSchema,
+    createdAt: isoTimestampSchema,
+  })
+  .superRefine((version, ctx) => {
+    const fail = (message: string) =>
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message });
+    if (version.schemaVersion === CAMPAIGN_DELIVERABLE_VERSION_SCHEMA_VERSION) {
+      if (version.source.kind === "studio_version") {
+        fail("A version-1 envelope carries a legacy source, never a studio_version source.");
+      }
+      if ("schemaVersion" in version.renderInputs) {
+        fail("A version-1 envelope carries untagged legacy render inputs, never a v2 studio arm.");
+      }
+      return;
+    }
+    if (version.source.kind !== "studio_version") {
+      fail("A version-2 envelope requires a studio_version source.");
+      return;
+    }
+    if (
+      !("schemaVersion" in version.renderInputs) ||
+      version.renderInputs.schemaVersion !== STUDIO_FULL_POSTER_RENDER_INPUTS_SCHEMA_VERSION
+    ) {
+      fail("A version-2 envelope requires studio_full_poster render inputs.");
+      return;
+    }
+    const source = version.source;
+    const renderInputs = version.renderInputs;
+    if (
+      renderInputs.studioVersionId !== source.studioVersionId ||
+      renderInputs.studioExportId !== source.studioExportId ||
+      renderInputs.contentHash !== source.contentHash
+    ) {
+      fail(
+        "The version-2 source and render inputs disagree on version, export or hash: they do not describe the same finished bytes.",
+      );
+    }
+  });
 export type CampaignDeliverableVersion = z.infer<typeof campaignDeliverableVersionSchema>;
 
 export const CAMPAIGN_DELIVERABLE_REVIEW_DECISIONS = ["approved", "rejected"] as const;
@@ -160,8 +246,10 @@ export type CampaignDeliverableReview = z.infer<typeof campaignDeliverableReview
  * same picture twice. Any change to any input produces a different digest and
  * therefore a new version, which is unreviewed.
  */
-export function deliverableRenderDigest(inputs: DeliverableRenderInputs): string {
-  return canonicalJson(deliverableRenderInputsSchema.parse(inputs), "$");
+export function deliverableRenderDigest(
+  inputs: DeliverableRenderInputs | StudioFullPosterRenderInputs,
+): string {
+  return canonicalJson(deliverableRenderInputsUnionSchema.parse(inputs), "$");
 }
 
 /**

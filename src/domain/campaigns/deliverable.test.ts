@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  STUDIO_FULL_POSTER_RENDER_INPUTS_SCHEMA_VERSION,
   campaignDeliverableVersionSchema,
   deliverableCompletion,
   deliverableRenderDigest,
+  deliverableRenderInputsUnionSchema,
   deliverableSourceSchema,
+  studioFullPosterRenderInputsSchema,
   publicationEligibility,
   type CampaignDeliverableReview,
   type DeliverableRenderInputs,
+  type StudioFullPosterRenderInputs,
 } from "@/domain/campaigns/deliverable";
 
 const ORGANIZATION = "11111111-1111-4111-8111-111111111111";
@@ -16,6 +20,25 @@ const DELIVERABLE = "33333333-3333-4333-8333-333333333333";
 const VERSION = "44444444-4444-4444-8444-444444444444";
 const HASH_A = "a".repeat(64);
 const HASH_B = "b".repeat(64);
+const STUDIO_VERSION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const STUDIO_PROFILE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+
+function studioInputs(overrides: Partial<StudioFullPosterRenderInputs> = {}): StudioFullPosterRenderInputs {
+  return {
+    schemaVersion: 2,
+    kind: "studio_full_poster",
+    studioVersionId: STUDIO_VERSION,
+    studioExportId: null,
+    contentHash: HASH_A,
+    inputDigest: "e".repeat(64),
+    providerProfileId: STUDIO_PROFILE,
+    textCopyDigest: "f".repeat(64),
+    channelLogoSubstitutionDigest: "0".repeat(64),
+    referenceManifestDigest: "1".repeat(64),
+    exportTransformDigest: null,
+    ...overrides,
+  };
+}
 
 function renderInputs(overrides: Partial<DeliverableRenderInputs> = {}): DeliverableRenderInputs {
   return {
@@ -122,6 +145,192 @@ describe("the render digest", () => {
     expect(deliverableRenderDigest(renderInputs({ brandMarkVersionId: CAMPAIGN }))).not.toBe(
       deliverableRenderDigest(renderInputs()),
     );
+  });
+
+  it("keeps fixed pre-change legacy fixtures byte-identical", () => {
+    // Captured before the v2 union landed. If either string moves, the legacy
+    // canonicalization changed and existing approvals stop matching records.
+    expect(deliverableRenderDigest(renderInputs())).toBe(
+      '{"brandMarkVersionId":null,"fontManifestVersion":"2026.09.1","freeLine":null,"plateContentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","renderEngineVersion":"resvg-0.44","script":"Latn","slotValues":{"headline":"Weekday lunch","price":"AED 35"},"templateVersion":3}',
+    );
+    expect(
+      deliverableRenderDigest(
+        renderInputs({
+          freeLine: "Served until 4pm",
+          slotValues: { headline: "കേരള മീൻ കറി", price: "AED 35" },
+        }),
+      ),
+    ).toBe(
+      '{"brandMarkVersionId":null,"fontManifestVersion":"2026.09.1","freeLine":"Served until 4pm","plateContentHash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","renderEngineVersion":"resvg-0.44","script":"Latn","slotValues":{"headline":"കേരള മീൻ കറി","price":"AED 35"},"templateVersion":3}',
+    );
+  });
+
+  it("parses an untagged legacy object as the legacy arm: no discriminator added", () => {
+    const parsed = deliverableRenderInputsUnionSchema.parse(renderInputs());
+
+    expect("plateContentHash" in parsed).toBe(true);
+    expect("schemaVersion" in parsed).toBe(false);
+  });
+});
+
+describe("the studio full-poster render inputs", () => {
+  it("is a versioned v2 envelope", () => {
+    expect(STUDIO_FULL_POSTER_RENDER_INPUTS_SCHEMA_VERSION).toBe(2);
+    expect(studioFullPosterRenderInputsSchema.safeParse(studioInputs()).success).toBe(true);
+  });
+
+  it("carries no fake template, font or plate values", () => {
+    const parsed = studioFullPosterRenderInputsSchema.safeParse({
+      ...studioInputs(),
+      templateKey: "core.feed.square",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("changes the digest when the source, hash, copy or references change", () => {
+    const base = deliverableRenderDigest(studioInputs());
+
+    expect(deliverableRenderDigest(studioInputs({ contentHash: HASH_B }))).not.toBe(base);
+    expect(deliverableRenderDigest(studioInputs({ textCopyDigest: HASH_B }))).not.toBe(base);
+    expect(deliverableRenderDigest(studioInputs({ referenceManifestDigest: HASH_B }))).not.toBe(
+      base,
+    );
+    expect(
+      deliverableRenderDigest(studioInputs({ studioVersionId: STUDIO_PROFILE })),
+    ).not.toBe(base);
+    expect(
+      deliverableRenderDigest(
+        studioInputs({ studioExportId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }),
+      ),
+    ).not.toBe(base);
+  });
+
+  it("is stable for identical v2 inputs", () => {
+    expect(deliverableRenderDigest(studioInputs())).toBe(deliverableRenderDigest(studioInputs()));
+  });
+
+  it("accepts a studio_version source and refuses it a signed URL", () => {
+    expect(
+      deliverableSourceSchema.safeParse({
+        kind: "studio_version",
+        studioVersionId: STUDIO_VERSION,
+        studioExportId: null,
+        contentHash: HASH_A,
+      }).success,
+    ).toBe(true);
+    expect(
+      deliverableSourceSchema.safeParse({
+        kind: "studio_version",
+        studioVersionId: STUDIO_VERSION,
+        studioExportId: null,
+        contentHash: HASH_A,
+        signedUrl: "https://storage.example/signed?token=abc",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects cross-arm envelopes: v1 with a studio source, v2 with legacy inputs", () => {
+    const version = {
+      id: VERSION,
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+      deliverableId: DELIVERABLE,
+      version: 1,
+      bundleVersionId: CAMPAIGN,
+      directionKey: CAMPAIGN,
+      creativeVariantId: null,
+      channel: "instagram",
+      placement: "feed",
+      language: "en",
+      copy: { caption: "Lunch is on.", hashtags: [], callToAction: "", destinationUrl: null },
+      contentHash: HASH_A,
+      createdAt: "2026-09-13T10:00:00.000Z",
+    };
+
+    const v1WithStudioSource = campaignDeliverableVersionSchema.safeParse({
+      ...version,
+      schemaVersion: 1,
+      source: {
+        kind: "studio_version",
+        studioVersionId: STUDIO_VERSION,
+        studioExportId: null,
+        contentHash: HASH_A,
+      },
+      renderInputs: renderInputs(),
+    });
+    expect(v1WithStudioSource.success).toBe(false);
+
+    const v2WithLegacyInputs = campaignDeliverableVersionSchema.safeParse({
+      ...version,
+      schemaVersion: 2,
+      source: {
+        kind: "studio_version",
+        studioVersionId: STUDIO_VERSION,
+        studioExportId: null,
+        contentHash: HASH_A,
+      },
+      renderInputs: renderInputs(),
+    });
+    expect(v2WithLegacyInputs.success).toBe(false);
+  });
+
+  it("rejects a v2 envelope whose source and inputs disagree on version or hash", () => {
+    const version = {
+      schemaVersion: 2,
+      id: VERSION,
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+      deliverableId: DELIVERABLE,
+      version: 1,
+      bundleVersionId: CAMPAIGN,
+      directionKey: CAMPAIGN,
+      creativeVariantId: null,
+      source: {
+        kind: "studio_version",
+        studioVersionId: STUDIO_VERSION,
+        studioExportId: null,
+        contentHash: HASH_A,
+      },
+      channel: "instagram",
+      placement: "feed",
+      language: "en",
+      copy: { caption: "Lunch is on.", hashtags: [], callToAction: "", destinationUrl: null },
+      renderInputs: studioInputs({ contentHash: HASH_B }),
+      contentHash: HASH_A,
+      createdAt: "2026-09-13T10:00:00.000Z",
+    };
+
+    expect(campaignDeliverableVersionSchema.safeParse(version).success).toBe(false);
+  });
+
+  it("accepts a matching v2 envelope", () => {
+    const version = {
+      schemaVersion: 2,
+      id: VERSION,
+      organizationId: ORGANIZATION,
+      campaignId: CAMPAIGN,
+      deliverableId: DELIVERABLE,
+      version: 1,
+      bundleVersionId: CAMPAIGN,
+      directionKey: CAMPAIGN,
+      creativeVariantId: null,
+      source: {
+        kind: "studio_version",
+        studioVersionId: STUDIO_VERSION,
+        studioExportId: null,
+        contentHash: HASH_A,
+      },
+      channel: "instagram",
+      placement: "feed",
+      language: "en",
+      copy: { caption: "Lunch is on.", hashtags: [], callToAction: "", destinationUrl: null },
+      renderInputs: studioInputs(),
+      contentHash: HASH_A,
+      createdAt: "2026-09-13T10:00:00.000Z",
+    };
+
+    expect(campaignDeliverableVersionSchema.safeParse(version).success).toBe(true);
   });
 });
 

@@ -1,12 +1,21 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  deliverableRenderDigest,
+  type StudioFullPosterRenderInputs,
+} from "@/domain/campaigns/deliverable";
+import {
   POSTER_DELIVERABLE_ORDINAL,
   resolvePosterDeliverableIdentity,
   PosterDeliverableIdentityError,
   type PosterDeliverableIdentityReason,
 } from "@/domain/campaigns/deliverable-identity";
 import type { CampaignPosterPlan } from "@/domain/campaigns/schemas";
+
+const STUDIO_VERSION = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const STUDIO_EXPORT = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+const STUDIO_PROFILE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+const HASH_A = "a".repeat(64);
 
 function plan(): CampaignPosterPlan {
   return {
@@ -111,5 +120,50 @@ describe("resolvePosterDeliverableIdentity", () => {
         }),
       ),
     ).toBe("poster_plan_missing");
+  });
+});
+
+describe("studio export identity", () => {
+  function studioInputs(exportId: string | null): StudioFullPosterRenderInputs {
+    return {
+      schemaVersion: 2,
+      kind: "studio_full_poster",
+      studioVersionId: STUDIO_VERSION,
+      studioExportId: exportId,
+      contentHash: HASH_A,
+      inputDigest: "e".repeat(64),
+      providerProfileId: STUDIO_PROFILE,
+      textCopyDigest: "f".repeat(64),
+      channelLogoSubstitutionDigest: "0".repeat(64),
+      referenceManifestDigest: "1".repeat(64),
+      exportTransformDigest: null,
+    };
+  }
+
+  it("treats the native bytes and a transformed export as different identities", () => {
+    expect(deliverableRenderDigest(studioInputs(null))).not.toBe(
+      deliverableRenderDigest(studioInputs(STUDIO_EXPORT)),
+    );
+  });
+
+  it("keeps each export identity stable across identical reads", () => {
+    expect(deliverableRenderDigest(studioInputs(STUDIO_EXPORT))).toBe(
+      deliverableRenderDigest(studioInputs(STUDIO_EXPORT)),
+    );
+  });
+
+  it("leaves legacy poster identity resolution untouched by studio inputs", () => {
+    // Studio selections resolve through resolveDeliverableSource, never through
+    // the compositor plan — the plan path still refuses what it always refused.
+    expect(
+      reasonFor(() =>
+        resolvePosterDeliverableIdentity({
+          posterPlan: plan(),
+          templateKey: "core_feed_headline",
+          templateVersion: 1,
+          script: "Arab",
+        }),
+      ),
+    ).toBe("script_not_in_poster_plan");
   });
 });
