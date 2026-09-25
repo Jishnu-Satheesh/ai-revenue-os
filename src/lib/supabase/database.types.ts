@@ -363,6 +363,20 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      growth_intelligence_project_schedule_update_keys: {
+        Row: {
+          id: string;
+          organization_id: string;
+          idempotency_key: string;
+          project_id: string;
+          body_digest: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       growth_intelligence_reports: {
         Row: {
           id: string;

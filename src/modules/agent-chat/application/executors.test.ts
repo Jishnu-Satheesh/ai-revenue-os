@@ -22,6 +22,7 @@ import {
   validateQuestionnaireAnswers,
 } from "@/modules/agent-chat/application/executors";
 import { MONITORING_COVERAGE_STATUSES } from "@/modules/growth-intelligence/application/market-monitoring-update";
+import { fingerprintMonitoringScope } from "@/modules/growth-intelligence/application/market-monitoring-update";
 import type { QuestionnaireSpec } from "@/domain/agent-router/contracts";
 
 describe("research once gating", () => {
@@ -356,6 +357,48 @@ describe("executeWatchCreate", () => {
     expect(out.card.kind).toBe("duplicate_watch");
   });
 
+  it("pre-empts a same-fingerprint sibling under another title (finding 2)", async () => {
+    const sibling = {
+      projectId: "p9",
+      title: "A differently worded watch",
+      question: "Something else entirely?",
+      mode: "recurring" as const,
+      scopeFingerprint: null as string | null,
+    };
+    const createKeyed = vi.fn(async () => ({ projectId: "p2", replayed: false }));
+    const created = await executeWatchCreate(
+      WATCH,
+      { listActive: async () => [sibling], createKeyed },
+    );
+    // A null fingerprint cannot match: creation proceeds to the keyed
+    // fence, which stays authoritative.
+    expect(created.outcome).toBe("created");
+
+    const sameScope = fingerprintMonitoringScope({
+      organizationId: WATCH.organizationId,
+      branchId: WATCH.branchId,
+      title: WATCH.question,
+      question: WATCH.question,
+      mode: WATCH.mode,
+      schedule: WATCH.schedule,
+      researchArea: WATCH.researchArea,
+      competitors: WATCH.competitors,
+      investigationAreas: [...WATCH.investigationAreas],
+      businessContextSnapshotId: "00000000-0000-0000-0000-000000000000",
+      frequency: "weekly",
+    });
+    const fingerprinted = { ...sibling, scopeFingerprint: sameScope };
+    const createKeyedAgain = vi.fn(async () => ({ projectId: "p2", replayed: false }));
+    const out = await executeWatchCreate(
+      WATCH,
+      { listActive: async () => [fingerprinted], createKeyed: createKeyedAgain },
+    );
+    expect(out.outcome).toBe("duplicate");
+    if (out.outcome !== "duplicate") throw new Error("expected duplicate");
+    expect(createKeyedAgain).not.toHaveBeenCalled();
+    expect(out.card.kind).toBe("duplicate_watch");
+  });
+
   function outcomeIs(out: { outcome: string }, want: string): boolean {
     return out.outcome === want;
   }
@@ -409,10 +452,22 @@ const BRIEF = {
 };
 
 describe("executeWatchUpdate scope rule", () => {
+  const PROJECT = {
+    title: "National Day watch",
+    question: "What are nearby competitors offering?",
+    mode: "recurring" as const,
+    branchId: "22222222-2222-4222-8222-222222222222",
+    schedule: {
+      cadence: "weekly" as const,
+      localTime: "09:00",
+      timeZone: "UTC",
+    },
+  };
   const head = {
     organizationId: BRIEF.organizationId,
     actorId: "actor-1",
     projectId: BRIEF.projectId,
+    project: PROJECT,
     brief: BRIEF,
     idempotencyKey: "watch-update-key-00000000000001",
   };
@@ -437,15 +492,55 @@ describe("executeWatchUpdate scope rule", () => {
     expect(out.proposal.addedTopics).toEqual(["offers"]);
   });
 
-  it("fails closed on in-place edits without a fenced update RPC", async () => {
-    const out = await executeWatchUpdate({
-      ...head,
-      edits: { frequency: "daily", endDate: "2026-12-31" },
-    });
+  it("applies in-place edits through the fenced update seam", async () => {
+    const updateWatch = vi.fn(async () => ({
+      projectId: BRIEF.projectId,
+      revisionNumber: 2,
+      replayed: false,
+    }));
+    const out = await executeWatchUpdate(
+      { ...head, edits: { frequency: "daily", endDate: "2026-12-31" } },
+      { updateWatch },
+    );
+    expect(out.outcome).toBe("updated");
+    if (out.outcome !== "updated") throw new Error("expected updated");
+    expect(out.appliedFields).toEqual(["frequency", "endDate"]);
+    expect(out.revisionNumber).toBe(2);
+    expect(out.scopeFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(updateWatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schedule: expect.objectContaining({ cadence: "daily", endDate: "2026-12-31" }),
+        branchId: PROJECT.branchId,
+        scopeFingerprint: out.scopeFingerprint,
+      }),
+    );
+  });
+
+  it("short-circuits a no-change update without touching the seam", async () => {
+    const updateWatch = vi.fn();
+    const out = await executeWatchUpdate({ ...head, edits: {} }, { updateWatch });
+    expect(out.outcome).toBe("updated");
+    if (out.outcome !== "updated") throw new Error("expected updated");
+    expect(out.replayed).toBe(true);
+    expect(out.appliedFields).toEqual([]);
+    expect(updateWatch).not.toHaveBeenCalled();
+  });
+
+  it("fails closed without an update seam", async () => {
+    const out = await executeWatchUpdate({ ...head, edits: { frequency: "daily" } });
     expect(out.outcome).toBe("update_blocked");
     if (out.outcome !== "update_blocked") throw new Error("expected blocked");
     expect(out.reasonCode).toBe("WATCH_UPDATE_UNAVAILABLE");
-    expect(out.validatedEdits).toEqual({ frequency: "daily", endDate: "2026-12-31" });
+  });
+
+  it("refuses schedule edits on one-time watches", async () => {
+    await expect(
+      executeWatchUpdate({
+        ...head,
+        project: { ...PROJECT, mode: "one-time" },
+        edits: { frequency: "daily" },
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
   });
 
   it("detects research-area moves as widening", () => {

@@ -396,16 +396,16 @@ export const agentWatchCreateTask = schemaTask({
       {
         listActive: async (input) => {
           const rows = await projects.listActiveProjects(input);
-          // Twin scope for the duplicate card: the keyed create below
-          // converges identical fingerprints at the database fence, so a
-          // same-scope sibling under another title still replays instead
-          // of forking paid work.
+          // Live fingerprints ride through: the fingerprint-equality
+          // branch pre-empts same-scope siblings (not just twins) with
+          // the duplicate card, while the keyed create stays the
+          // authoritative fence underneath.
           return rows.map((row) => ({
             projectId: row.projectId,
             title: row.title,
             question: row.question,
             mode: row.mode,
-            scopeFingerprint: "",
+            scopeFingerprint: row.scopeFingerprint,
           }));
         },
         createKeyed: (input) => projects.createProject(input),
@@ -450,6 +450,45 @@ async function readLatestBriefRevision(
   return parsed.success ? parsed.data : null;
 }
 
+type AgentWatchProject = {
+  title: string;
+  question: string;
+  mode: "one-time" | "recurring";
+  branchId: string;
+  schedule: {
+    cadence: "daily" | "weekly" | "monthly";
+    localTime: string;
+    timeZone: string;
+    endDate?: string;
+  };
+};
+
+async function readWatchProject(
+  supabase: WorkerClient,
+  organizationId: string,
+  projectId: string,
+): Promise<AgentWatchProject | null> {
+  const { data, error } = await supabase
+    .from("growth_intelligence_research_projects")
+    .select("title,question,mode,branch_id,schedule")
+    .eq("organization_id", organizationId)
+    .eq("id", projectId)
+    .maybeSingle();
+  if (error || !data) return null;
+  if (data.mode !== "one-time" && data.mode !== "recurring") return null;
+  if (typeof data.branch_id !== "string") return null;
+  const schedule = data.schedule as AgentWatchProject["schedule"] | null;
+  if (!schedule || typeof schedule !== "object") return null;
+  if (typeof data.title !== "string" || typeof data.question !== "string") return null;
+  return {
+    title: data.title,
+    question: data.question,
+    mode: data.mode,
+    branchId: data.branch_id,
+    schedule,
+  };
+}
+
 export const agentWatchUpdateTask = schemaTask({
   id: "agent-chat.watch-update",
   schema: agentWatchUpdatePayloadSchema,
@@ -459,6 +498,7 @@ export const agentWatchUpdateTask = schemaTask({
   run: async (payload) => {
     const parsed = agentWatchUpdatePayloadSchema.parse(payload);
     const supabase = createGrowthIntelligenceWorkerServiceClient();
+    const projects = createAuthenticatedResearchProjectRepository(supabase);
     const brief = await readLatestBriefRevision(supabase, parsed.organizationId, parsed.projectId);
     if (!brief) {
       return {
@@ -469,19 +509,31 @@ export const agentWatchUpdateTask = schemaTask({
         validatedEdits: {},
       };
     }
-    // No writes on this path in V1: new competitors/topics return the
+    const project = await readWatchProject(supabase, parsed.organizationId, parsed.projectId);
+    if (!project) {
+      throw new Error("The watch could not be loaded.");
+    }
+    // Scope widening never writes: new competitors/topics return the
     // profile_scope_change proposal for the Market Profile approve flow
-    // (the drawer submits it to market-profile/proposals), and in-place
-    // edits fail closed until the fenced schedule-update RPC exists.
-    // Terminal discipline holds trivially: nothing here reopens rows.
-    const outcome = await executeWatchUpdate({
-      organizationId: parsed.organizationId,
-      actorId: parsed.actorId,
-      projectId: parsed.projectId,
-      brief,
-      edits: parsed.edits,
-      idempotencyKey: parsed.idempotencyKey,
-    });
+    // (the drawer submits it to market-profile/proposals). In-place edits
+    // apply through the fenced keyed schedule-update RPC, which moves the
+    // project row and — where the cadence or branch moved — a new brief
+    // revision atomically. Terminal discipline holds: archived projects
+    // are refused inside the RPC, never reopened.
+    const outcome = await executeWatchUpdate(
+      {
+        organizationId: parsed.organizationId,
+        actorId: parsed.actorId,
+        projectId: parsed.projectId,
+        project,
+        brief,
+        edits: parsed.edits,
+        idempotencyKey: parsed.idempotencyKey,
+      },
+      {
+        updateWatch: (input) => projects.updateProjectSchedule(input),
+      },
+    );
     logger.info("agent_chat.watch_update_finished", {
       organizationId: parsed.organizationId,
       correlationId: parsed.correlationId,

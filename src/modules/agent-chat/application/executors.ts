@@ -741,7 +741,12 @@ export type WatchCandidate = {
   title: string;
   question: string;
   mode: "one-time" | "recurring";
-  scopeFingerprint: string;
+  /**
+   * Live fingerprint from the scope registry, or null when the project
+   * holds none. Null never matches: twin comparison still applies, and
+   * the keyed create stays the authoritative fence.
+   */
+  scopeFingerprint: string | null;
 };
 
 export type WatchProjectSeams = {
@@ -949,6 +954,14 @@ export function buildDuplicateWatchCard(input: {
 // Watch update + scope rule
 // ---------------------------------------------------------------------------
 
+const calendarDateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/)
+  .refine((value) => {
+    const parsed = new Date(`${value}T00:00:00.000Z`);
+    return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+  }, "End date must be a real calendar date (YYYY-MM-DD).");
+
 export const watchUpdateEditsSchema = z
   .object({
     frequency: z.enum(BRIEF_FREQUENCIES).optional(),
@@ -956,13 +969,28 @@ export const watchUpdateEditsSchema = z
     researchArea: z.string().trim().min(1).max(160).optional(),
     competitors: z.array(watchCompetitorSchema).max(20).optional(),
     investigationAreas: z.array(z.enum(BRIEF_INVESTIGATION_AREAS)).min(1).max(5).optional(),
-    endDate: z
+    /**
+     * New monitoring end date; null clears it. An empty string keeps the
+     * current value (the card submits empty for "no change").
+     */
+    endDate: calendarDateSchema.nullable().optional(),
+    localTime: z
       .string()
-      .regex(/^\d{4}-\d{2}-\d{2}$/)
-      .refine((value) => {
-        const parsed = new Date(`${value}T00:00:00.000Z`);
-        return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
-      }, "End date must be a real calendar date (YYYY-MM-DD).")
+      .regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/, "Local time must be HH:MM.")
+      .optional(),
+    timeZone: z
+      .string()
+      .trim()
+      .min(1)
+      .max(100)
+      .refine((timeZone) => {
+        try {
+          new Intl.DateTimeFormat("en", { timeZone }).format();
+          return true;
+        } catch {
+          return false;
+        }
+      }, "Timezone must be a valid IANA timezone.")
       .optional(),
   })
   .strict();
@@ -1005,6 +1033,18 @@ export function detectScopeWidening(
   return { widened, addedCompetitors, addedTopics, researchAreaChanged };
 }
 
+export const watchUpdateProjectSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200),
+    question: z.string().trim().min(1).max(2000),
+    mode: z.enum(["one-time", "recurring"]),
+    branchId: z.string().uuid(),
+    schedule: researchProjectScheduleSchema,
+  })
+  .strict();
+
+export type WatchUpdateProject = z.infer<typeof watchUpdateProjectSchema>;
+
 export type WatchUpdateOutcome =
   | {
       outcome: "profile_scope_change";
@@ -1018,6 +1058,14 @@ export type WatchUpdateOutcome =
       };
     }
   | {
+      outcome: "updated";
+      projectId: string;
+      revisionNumber: number | null;
+      replayed: boolean;
+      appliedFields: string[];
+      scopeFingerprint: string;
+    }
+  | {
       outcome: "update_blocked";
       projectId: string;
       reasonCode: "WATCH_UPDATE_UNAVAILABLE";
@@ -1025,29 +1073,52 @@ export type WatchUpdateOutcome =
       validatedEdits: WatchUpdateEdits;
     };
 
+export type WatchUpdateSeams = {
+  /**
+   * Applies the merged schedule through the fenced
+   * `update_research_project_schedule_keyed` RPC: the project row and —
+   * where the cadence or branch moved — a new brief revision move
+   * atomically, and the scope registry follows the new fingerprint.
+   */
+  updateWatch?(input: {
+    organizationId: string;
+    actorId: string;
+    projectId: string;
+    schedule: z.infer<typeof researchProjectScheduleSchema>;
+    branchId: string;
+    idempotencyKey: string;
+    scopeFingerprint: string;
+  }): Promise<{ projectId: string; revisionNumber: number | null; replayed: boolean }>;
+};
+
 /**
  * Applies watch edits. New competitors/topics (or a moved research area)
  * never apply in place: they return the `profile_scope_change` proposal for
- * the Market Profile approve flow. Frequency/branch/end-date edits are
- * validated here, but this tree has no fenced project-schedule update RPC
- * yet (the schedule lives on the project row, written only at create), so
- * in-place application fails closed with `WATCH_UPDATE_UNAVAILABLE` rather
- * than diverging the brief from the project row. The validated edits travel
- * in the outcome so the future fenced update can apply them unchanged.
+ * the Market Profile approve flow. Frequency/branch/end-date (plus
+ * local-time/timezone) edits merge onto the current schedule and apply
+ * through the fenced keyed schedule-update RPC, which moves the project
+ * row and — where the cadence or branch moved — a new brief revision
+ * atomically, and re-points the scope registry at the new fingerprint.
+ * Recurring never silently widens scope.
  */
-export async function executeWatchUpdate(input: {
-  organizationId: string;
-  actorId: string;
-  projectId: string;
-  brief: BriefRevision;
-  edits: WatchUpdateEdits;
-  idempotencyKey: string;
-}): Promise<WatchUpdateOutcome> {
+export async function executeWatchUpdate(
+  input: {
+    organizationId: string;
+    actorId: string;
+    projectId: string;
+    project: WatchUpdateProject;
+    brief: BriefRevision;
+    edits: WatchUpdateEdits;
+    idempotencyKey: string;
+  },
+  seams: WatchUpdateSeams = {},
+): Promise<WatchUpdateOutcome> {
   const head = z
     .object({
       organizationId: z.string().uuid(),
       actorId: z.string().trim().min(1).max(200),
       projectId: z.string().uuid(),
+      project: watchUpdateProjectSchema,
       brief: briefRevisionSchema,
       idempotencyKey: z.string().trim().min(16).max(200),
     })
@@ -1056,10 +1127,15 @@ export async function executeWatchUpdate(input: {
       organizationId: input.organizationId,
       actorId: input.actorId,
       projectId: input.projectId,
+      project: input.project,
       brief: input.brief,
       idempotencyKey: input.idempotencyKey,
     });
-  const edits = watchUpdateEditsSchema.parse(input.edits);
+  const rawEdits = watchUpdateEditsSchema.parse(input.edits);
+  // The card submits an empty end date for "no change"; only an explicit
+  // null clears the date.
+  const edits: WatchUpdateEdits = { ...rawEdits };
+  if (edits.endDate === "") delete edits.endDate;
   if (
     head.brief.organizationId !== head.organizationId ||
     head.brief.projectId !== head.projectId
@@ -1080,12 +1156,95 @@ export async function executeWatchUpdate(input: {
       },
     };
   }
-  return {
-    outcome: "update_blocked",
+
+  const scheduleAffecting =
+    edits.frequency !== undefined ||
+    edits.endDate !== undefined ||
+    edits.localTime !== undefined ||
+    edits.timeZone !== undefined;
+  if (head.project.mode !== "recurring" && (scheduleAffecting || edits.branchId !== undefined)) {
+    throw new DomainError(
+      "VALIDATION_ERROR",
+      "A one-time project runs on explicit starts and carries no schedule.",
+    );
+  }
+  if (edits.frequency === "once") {
+    throw new DomainError(
+      "VALIDATION_ERROR",
+      "A recurring watch cannot run once; archive it instead.",
+    );
+  }
+
+  const current = head.project.schedule;
+  const schedule: z.infer<typeof researchProjectScheduleSchema> = {
+    cadence: edits.frequency ?? current.cadence,
+    localTime: edits.localTime ?? current.localTime,
+    timeZone: edits.timeZone ?? current.timeZone,
+    ...(edits.endDate !== undefined
+      ? edits.endDate === null
+        ? {}
+        : { endDate: edits.endDate }
+      : current.endDate !== undefined
+        ? { endDate: current.endDate }
+        : {}),
+  };
+  const branchId = edits.branchId ?? head.project.branchId;
+  const appliedFields: string[] = [];
+  if (schedule.cadence !== current.cadence) appliedFields.push("frequency");
+  if (schedule.localTime !== current.localTime) appliedFields.push("localTime");
+  if (schedule.timeZone !== current.timeZone) appliedFields.push("timeZone");
+  if ((schedule.endDate ?? null) !== (current.endDate ?? null)) appliedFields.push("endDate");
+  if (branchId !== head.project.branchId) appliedFields.push("branch");
+
+  const scopeFingerprint = fingerprintMonitoringScope({
+    organizationId: head.organizationId,
+    branchId,
+    title: head.project.title,
+    question: head.project.question,
+    mode: head.project.mode,
+    schedule,
+    researchArea: head.brief.researchArea,
+    competitors: head.brief.competitors,
+    investigationAreas: head.brief.investigationAreas,
+    businessContextSnapshotId: head.brief.businessContextSnapshotId,
+    frequency: head.project.mode === "one-time" ? "once" : schedule.cadence,
+  });
+
+  if (appliedFields.length === 0) {
+    return {
+      outcome: "updated",
+      projectId: head.projectId,
+      revisionNumber: null,
+      replayed: true,
+      appliedFields,
+      scopeFingerprint,
+    };
+  }
+  if (!seams.updateWatch) {
+    return {
+      outcome: "update_blocked",
+      projectId: head.projectId,
+      reasonCode: "WATCH_UPDATE_UNAVAILABLE",
+      copy: "Watch schedule changes need a project update that is not available yet; nothing was changed.",
+      validatedEdits: edits,
+    };
+  }
+  const updated = await seams.updateWatch({
+    organizationId: head.organizationId,
+    actorId: head.actorId,
     projectId: head.projectId,
-    reasonCode: "WATCH_UPDATE_UNAVAILABLE",
-    copy: "Watch schedule changes need a project update that is not available yet; nothing was changed.",
-    validatedEdits: edits,
+    schedule,
+    branchId,
+    idempotencyKey: head.idempotencyKey,
+    scopeFingerprint,
+  });
+  return {
+    outcome: "updated",
+    projectId: updated.projectId,
+    revisionNumber: updated.revisionNumber,
+    replayed: updated.replayed,
+    appliedFields,
+    scopeFingerprint,
   };
 }
 

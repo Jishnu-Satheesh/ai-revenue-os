@@ -106,6 +106,16 @@ const projectRowSchema = z
   .strict()
   .passthrough();
 
+const scopeRowSchema = z
+  .object({
+    project_id: z.string().uuid(),
+    scope_fingerprint: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/),
+  })
+  .strict()
+  .passthrough();
+
 const briefRevisionRowSchema = z
   .object({
     id: z.string().uuid(),
@@ -151,6 +161,13 @@ export type ResearchProjectSummary = {
   mode: "one-time" | "recurring";
   lifecycle: (typeof RESEARCH_PROJECT_LIFECYCLES)[number];
   createdAt: string;
+  /**
+   * Live scope fingerprint from the monitoring scope registry, or null when
+   * the project holds none. Lets callers pre-empt same-scope duplicates
+   * without a second round trip; the keyed RPCs stay the authoritative
+   * fence either way.
+   */
+  scopeFingerprint: string | null;
 };
 
 export type BriefRevisionSummary = {
@@ -263,6 +280,26 @@ const createProjectInputSchema = z
       });
     }
   });
+
+const updateProjectScheduleInputSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    projectId: z.string().uuid(),
+    schedule: researchProjectScheduleSchema,
+    branchId: z.string().uuid().optional(),
+    actorId: z.string().uuid(),
+    /**
+     * Keyed schedule update: the same key with the same body replays the
+     * kept update, the same key with another body conflicts honestly
+     * through the existing DOMAIN_ERROR mapping.
+     */
+    idempotencyKey: z.string().trim().min(16).max(200),
+    scopeFingerprint: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
+  })
+  .strict();
 
 const saveBriefRevisionInputSchema = z
   .object({
@@ -415,10 +452,11 @@ async function publishResearchEvent(
   input: {
     organizationId: string;
     actorId: string;
-    eventName:
-      | "market_research.project_created"
-      | "market_research.brief_revision_saved"
-      | "market_research.report_ready";
+      eventName:
+        | "market_research.project_created"
+        | "market_research.brief_revision_saved"
+        | "market_research.project_schedule_updated"
+        | "market_research.report_ready";
     payload: Record<string, unknown>;
   },
 ): Promise<void> {
@@ -462,6 +500,25 @@ export type ResearchProjectRepository = {
     },
     options?: ResearchProjectEventOptions,
   ): Promise<{ revisionId: string; revisionNumber: number; replayed: boolean }>;
+  /**
+   * In-place schedule update for a recurring watch through the fenced
+   * `update_research_project_schedule_keyed` RPC (spec 10.2). The project
+   * row and — where the cadence or branch moved — a new brief revision
+   * move atomically; timing-only edits append no revision. Replays return
+   * the kept update with a null revision number.
+   */
+  updateProjectSchedule(
+    input: {
+      organizationId: string;
+      projectId: string;
+      schedule: z.infer<typeof researchProjectScheduleSchema>;
+      branchId?: string;
+      actorId: string;
+      idempotencyKey: string;
+      scopeFingerprint?: string;
+    },
+    options?: ResearchProjectEventOptions,
+  ): Promise<{ projectId: string; revisionNumber: number | null; replayed: boolean }>;
   persistReportVersion(
     input: {
       organizationId: string;
@@ -657,6 +714,45 @@ export function createAuthenticatedResearchProjectRepository(
       return saved;
     },
 
+    async updateProjectSchedule(input, options) {
+      const parsed = updateProjectScheduleInputSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new DomainError("VALIDATION_ERROR", "The schedule update could not be understood.");
+      }
+      const row = await callRpc(
+        persistence,
+        "update_research_project_schedule_keyed",
+        {
+          p_organization_id: parsed.data.organizationId,
+          p_actor_id: parsed.data.actorId,
+          p_project_id: parsed.data.projectId,
+          p_schedule: parsed.data.schedule,
+          p_branch_id: parsed.data.branchId ?? null,
+          p_idempotency_key: parsed.data.idempotencyKey,
+          p_scope_fingerprint: parsed.data.scopeFingerprint ?? null,
+        },
+        "watch schedule",
+      );
+      const revisionNumber = row["revisionNumber"];
+      const updated = {
+        projectId: stringField(row, "projectId"),
+        revisionNumber:
+          typeof revisionNumber === "number" && Number.isInteger(revisionNumber)
+            ? revisionNumber
+            : null,
+        replayed: booleanField(row, "replayed"),
+      };
+      if (!updated.replayed) {
+        await publishResearchEvent(options, {
+          organizationId: parsed.data.organizationId,
+          actorId: parsed.data.actorId,
+          eventName: "market_research.project_schedule_updated",
+          payload: { projectId: updated.projectId },
+        });
+      }
+      return updated;
+    },
+
     async persistReportVersion(input, options) {
       const parsed = persistReportVersionInputSchema.safeParse(input);
       if (!parsed.success) {
@@ -754,7 +850,35 @@ export function createAuthenticatedResearchProjectRepository(
         .order("id", { ascending: false })
         .limit(limit);
       if (result.error) readFailure();
-      return (result.data ?? []).slice(0, limit).map((row) => {
+      const rows = (result.data ?? []).slice(0, limit);
+      // One scope-registry read for the whole page: live fingerprints let
+      // callers pre-empt same-scope duplicates (duplicate-watch card) while
+      // the keyed RPCs stay the authoritative fence. A malformed scope row
+      // degrades to null for that project — never fails the list.
+      const fingerprints = new Map<string, string>();
+      const projectIds = new Set<string>();
+      for (const row of rows) {
+        const parsedRow = projectRowSchema.safeParse(row);
+        if (parsedRow.success) projectIds.add(parsedRow.data.id);
+      }
+      if (projectIds.size > 0) {
+        const scopes = await query<Record<string, unknown>[]>(
+          persistence,
+          "growth_intelligence_monitoring_active_scopes",
+        )
+          .select("project_id,scope_fingerprint")
+          .eq("organization_id", parsed.data.organizationId)
+          .in("project_id", [...projectIds])
+          .limit(projectIds.size);
+        if (scopes.error) readFailure();
+        for (const row of (scopes.data ?? []) as unknown[]) {
+          const parsedScope = scopeRowSchema.safeParse(row);
+          if (parsedScope.success) {
+            fingerprints.set(parsedScope.data.project_id, parsedScope.data.scope_fingerprint);
+          }
+        }
+      }
+      return rows.map((row) => {
         const parsedRow = projectRowSchema.safeParse(row);
         if (!parsedRow.success) readFailure();
         const data = parsedRow.data;
@@ -767,6 +891,7 @@ export function createAuthenticatedResearchProjectRepository(
           mode: data.mode,
           lifecycle: data.lifecycle,
           createdAt: data.created_at,
+          scopeFingerprint: fingerprints.get(data.id) ?? null,
         };
       });
     },

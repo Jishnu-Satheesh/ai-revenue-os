@@ -438,8 +438,7 @@ describe("bounded reads", () => {
     expect(call?.filters).toContainEqual(["lifecycle", ["active", "paused"]]);
   });
 
-  it("lists one project's brief history scoped to organization and project", async () => {
-    const { client, calls } = persistence({
+  it("lists one project's brief history scoped to organization and project", async () => {    const { client, calls } = persistence({
       growth_intelligence_brief_revisions: [
         {
           data: [
@@ -616,6 +615,147 @@ describe("keyed project create (Slice 7)", () => {
         actorId,
         idempotencyKey: "project-key-2",
         scopeFingerprint: "not-a-fingerprint",
+      }),
+    ).rejects.toThrow();
+    expect(rpcCalls).toEqual([]);
+  });
+});
+
+describe("schedule fingerprint passthrough (finding 2)", () => {
+  function projectRow(overrides: Record<string, unknown> = {}) {
+    return {
+      id: projectId,
+      organization_id: organizationId,
+      branch_id: branchId,
+      title: "Marina Friday dinner",
+      question: "What do Marina families want for Friday dinner?",
+      mode: "recurring",
+      schedule: { cadence: "weekly", localTime: "09:00", timeZone: "UTC" },
+      lifecycle: "active",
+      created_at: "2026-09-13T10:00:00.000Z",
+      updated_at: "2026-09-13T10:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("attaches the live scope fingerprint to each listed project", async () => {
+    const { client } = persistence({
+      growth_intelligence_research_projects: [{ data: [projectRow()], error: null }],
+      growth_intelligence_monitoring_active_scopes: [
+        {
+          data: [{ project_id: projectId, scope_fingerprint: SCOPE_FINGERPRINT }],
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const projects = await repository.listActiveProjects({ organizationId, branchId });
+
+    expect(projects).toHaveLength(1);
+    expect(projects[0]).toMatchObject({ projectId, scopeFingerprint: SCOPE_FINGERPRINT });
+  });
+
+  it("reads null fingerprints when the scope registry holds none", async () => {
+    const { client } = persistence({
+      growth_intelligence_research_projects: [{ data: [projectRow()], error: null }],
+      growth_intelligence_monitoring_active_scopes: [{ data: [], error: null }],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const projects = await repository.listActiveProjects({ organizationId, branchId });
+
+    expect(projects[0]).toMatchObject({ projectId, scopeFingerprint: null });
+  });
+});
+
+describe("keyed schedule update", () => {
+  const schedule = { cadence: "weekly" as const, localTime: "09:00", timeZone: "UTC" };
+
+  it("routes the update through the fenced keyed RPC", async () => {
+    const { client, rpcCalls } = persistence({
+      "rpc:update_research_project_schedule_keyed": [
+        { data: { projectId, revisionNumber: 2, replayed: false }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const outcome = await repository.updateProjectSchedule({
+      organizationId,
+      projectId,
+      schedule,
+      branchId,
+      actorId,
+      idempotencyKey: "schedule-key-00000000000001",
+      scopeFingerprint: SCOPE_FINGERPRINT,
+    });
+
+    expect(outcome).toEqual({ projectId, revisionNumber: 2, replayed: false });
+    expect(rpcCalls).toHaveLength(1);
+    expect(rpcCalls[0]).toEqual({
+      name: "update_research_project_schedule_keyed",
+      args: {
+        p_organization_id: organizationId,
+        p_actor_id: actorId,
+        p_project_id: projectId,
+        p_schedule: schedule,
+        p_branch_id: branchId,
+        p_idempotency_key: "schedule-key-00000000000001",
+        p_scope_fingerprint: SCOPE_FINGERPRINT,
+      },
+    });
+  });
+
+  it("maps replayed updates with a null revision number", async () => {
+    const { client } = persistence({
+      "rpc:update_research_project_schedule_keyed": [
+        { data: { projectId, revisionNumber: null, replayed: true }, error: null },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const outcome = await repository.updateProjectSchedule({
+      organizationId,
+      projectId,
+      schedule,
+      actorId,
+      idempotencyKey: "schedule-key-00000000000002",
+    });
+
+    expect(outcome).toEqual({ projectId, revisionNumber: null, replayed: true });
+  });
+
+  it("maps key conflicts honestly without exposing internals", async () => {
+    const { client, rpcCalls } = persistence({
+      "rpc:update_research_project_schedule_keyed": [
+        { data: null, error: { message: "research_project_schedule_key_conflict" } },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    await expect(
+      repository.updateProjectSchedule({
+        organizationId,
+        projectId,
+        schedule,
+        actorId,
+        idempotencyKey: "schedule-key-00000000000003",
+      }),
+    ).rejects.toMatchObject({ code: "DOMAIN_ERROR" });
+    expect(rpcCalls).toHaveLength(1);
+  });
+
+  it("validates the schedule before any tenant call", async () => {
+    const { client, rpcCalls } = persistence({});
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    await expect(
+      repository.updateProjectSchedule({
+        organizationId,
+        projectId,
+        schedule: { cadence: "hourly", localTime: "09:00", timeZone: "UTC" } as never,
+        actorId,
+        idempotencyKey: "schedule-key-00000000000004",
       }),
     ).rejects.toThrow();
     expect(rpcCalls).toEqual([]);
