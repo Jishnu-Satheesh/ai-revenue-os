@@ -110,7 +110,9 @@ describe("thread service", () => {
       expect.objectContaining({ role: "user", body: "Hello" }),
     );
     expect(out.message.id).toBe("m1");
-    expect(publish).toHaveBeenCalledWith(expect.objectContaining({ eventName: "agent_message.appended" }));
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({ eventName: "agent_message.appended" }),
+    );
   });
 
   it("reads nothing for a foreign thread", async () => {
@@ -199,7 +201,10 @@ describe("thread service", () => {
 
   it("derives permissions from the role, never from client claims", () => {
     expect(permissionsForRole("viewer")).toEqual([]);
-    expect(permissionsForRole("operator")).toEqual(["growth_intelligence.manage", "campaign.create"]);
+    expect(permissionsForRole("operator")).toEqual([
+      "growth_intelligence.manage",
+      "campaign.create",
+    ]);
     expect(permissionsForRole("owner")).toEqual(["growth_intelligence.manage", "campaign.create"]);
   });
 
@@ -210,5 +215,129 @@ describe("thread service", () => {
     expect(first).toBe(second);
     expect(first).toMatch(/^[0-9a-f]{16}$/);
     expect(other).not.toBe(first);
+  });
+
+  it("digests the real pack when readers are bound (shape stable, values shift)", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      proposeRouter: async () => ({ intent: "answer_memory", confidence: "high", missing: [] }),
+      contextReaders: {
+        getIdentityFacts: async () => [
+          { id: "f1", statement: "Confirmed trading name.", verified: true, source: "profile" },
+        ],
+      },
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "viewer",
+      threadId: "t1",
+    });
+    expect(out.replayed).toBe(false);
+    expect(out.routingNote).toMatch(/context_digest=[0-9a-f]{16}/);
+    // The pack digest means something now: it differs from the V1
+    // per-message placeholder for the same thread + message.
+    expect(out.routingNote).not.toContain(
+      `context_digest=${routingContextDigest({ organizationId: "o", threadId: "t1", messageId: "m1" })}`,
+    );
+  });
+
+  it("dedups route redispatch on the carried idempotency token (L4)", async () => {
+    const publish = vi.fn(async () => {});
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      events: { publish },
+      proposeRouter: async () => ({ intent: "answer_memory", confidence: "high", missing: [] }),
+    });
+    const first = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "viewer",
+      threadId: "t1",
+      idempotencyKey: "route-token-000000000000001",
+    });
+    const second = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "viewer",
+      threadId: "t1",
+      idempotencyKey: "route-token-000000000000001",
+    });
+    expect(first.replayed).toBe(false);
+    expect(second.replayed).toBe(true);
+    expect(second.intent).toBe(first.intent);
+    expect(publish).toHaveBeenCalledTimes(1);
+  });
+
+  it("persists questionnaire answers server-side and re-routes (F2)", async () => {
+    const publish = vi.fn(async () => {});
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      events: { publish },
+      proposeRouter: async () => ({ intent: "answer_memory", confidence: "high", missing: [] }),
+    });
+    const spec = {
+      kind: "missing_fields" as const,
+      title: "One more detail",
+      resumeKey: "router:watch:overview:abcdef1234567890",
+      items: [
+        {
+          key: "frequency",
+          label: "How often?",
+          kind: "single_select" as const,
+          required: true,
+          options: [
+            { value: "daily", label: "Daily" },
+            { value: "weekly", label: "Weekly" },
+          ],
+        },
+      ],
+    };
+    const out = await service.submitAnswers({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      spec,
+      answers: { frequency: "weekly" },
+      idempotencyKey: "answers-key-0000000000000001",
+      page: "overview",
+    });
+    expect(threads.appendMessageKeyed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        role: "user",
+        body: "[answers missing_fields]\nfrequency: weekly",
+        idempotencyKey: "answers-key-0000000000000001",
+      }),
+    );
+    expect(out.answers).toEqual({ frequency: "weekly" });
+    expect(out.intent).toBe("answer_memory");
+    // The answers append and the reroute each publish once.
+    expect(publish).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses answer submission for viewers before touching persistence", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({ threads });
+    await expect(
+      service.submitAnswers({
+        organizationId: "o",
+        actorId: "u",
+        role: "viewer",
+        threadId: "t1",
+        spec: {
+          kind: "missing_fields" as const,
+          title: "One more detail",
+          resumeKey: "router:watch:overview:abcdef1234567890",
+          items: [{ key: "frequency", label: "How often?", kind: "text" as const, required: true }],
+        },
+        answers: { frequency: "weekly" },
+        idempotencyKey: "answers-key-0000000000000002",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
+    expect(threads.appendMessageKeyed).not.toHaveBeenCalled();
   });
 });

@@ -8,6 +8,12 @@ import {
 } from "@/domain/agent-router/contracts";
 import { routeAgentMessage } from "@/modules/agent-router/application/router-service";
 import { DomainError } from "@/lib/errors";
+import type { ContextPackReaders } from "@/modules/agent-chat/application/context-pack";
+import {
+  encodeQuestionnaireAnswerBody,
+  resolvePackContextDigest,
+  validateQuestionnaireAnswers,
+} from "@/modules/agent-chat/application/executors";
 import type {
   ThreadMessageView,
   ThreadMode,
@@ -42,7 +48,56 @@ export type ThreadServiceDeps = {
   events?: EventPublisher;
   proposeRouter?: RouterProposer;
   correlationId?: string;
+  /**
+   * Real context-pack readers (Task 6 swap). When present, `routeLatest`
+   * digests the deterministic HEAVY pack instead of the V1 placeholder:
+   * the digest format is unchanged (`/^[0-9a-f]{16}$/`), only the values
+   * shift, because the digest now means something (Task 5 report). When
+   * absent, routing keeps the stable per-message placeholder.
+   */
+  contextReaders?: ContextPackReaders;
+  /**
+   * Route-redispatch dedup (ruling L4). Re-route with the same carried
+   * idempotency token for the same thread + message returns the kept
+   * routing without emitting a duplicate `agent_thread.routed` event.
+   * Defaults to a process-local capped cache; inject a fake in tests.
+   */
+  routeDedup?: RouteDedupStore;
 };
+
+/**
+ * Per-process redispatch guard for classify-only routes. Classification is
+ * read-only, so the only side effect worth deduping is the routed audit
+ * event. Bounded FIFO: the oldest token is evicted past the cap, so a
+ * long-lived process cannot grow this without limit.
+ */
+export type RouteDedupHit = {
+  intent: string;
+  questionnaire: QuestionnaireSpec | null;
+  routingNote: string;
+  thread: ThreadSummary;
+};
+
+export type RouteDedupStore = {
+  get(key: string): RouteDedupHit | undefined;
+  set(key: string, hit: RouteDedupHit): void;
+};
+
+const ROUTE_DEDUP_CAP = 500;
+const sharedRouteDedup = (() => {
+  const seen = new Map<string, RouteDedupHit>();
+  const store: RouteDedupStore = {
+    get: (key) => seen.get(key),
+    set: (key, hit) => {
+      if (!seen.has(key) && seen.size >= ROUTE_DEDUP_CAP) {
+        const oldest = seen.keys().next();
+        if (!oldest.done) seen.delete(oldest.value);
+      }
+      seen.set(key, hit);
+    },
+  };
+  return store;
+})();
 
 /**
  * Permissions the router understands, derived from the caller's org role
@@ -148,7 +203,10 @@ export function createThreadService(deps: ThreadServiceDeps) {
         threadId: input.threadId,
       });
       if (!thread) {
-        throw new DomainError("TENANT_SCOPE_ERROR", "This chat was not found in your organization.");
+        throw new DomainError(
+          "TENANT_SCOPE_ERROR",
+          "This chat was not found in your organization.",
+        );
       }
       return deps.threads.listMessages(input);
     },
@@ -201,7 +259,10 @@ export function createThreadService(deps: ThreadServiceDeps) {
         threadId: input.threadId,
       });
       if (!thread) {
-        throw new DomainError("TENANT_SCOPE_ERROR", "This chat was not found in your organization.");
+        throw new DomainError(
+          "TENANT_SCOPE_ERROR",
+          "This chat was not found in your organization.",
+        );
       }
       const appended = await deps.threads.appendMessageKeyed({
         organizationId: input.organizationId,
@@ -237,6 +298,10 @@ export function createThreadService(deps: ThreadServiceDeps) {
      * rows the router must never see; the watch lane compares them when
      * it owns creation. No duplicate-watch card can over-trigger on an
      * empty candidate list.
+     *
+     * Task 6: digests the real HEAVY pack when `contextReaders` are bound
+     * (V1 placeholder otherwise), and dedups redispatch on the carried
+     * idempotency token (ruling L4).
      */
     async routeLatest(input: {
       organizationId: string;
@@ -248,7 +313,8 @@ export function createThreadService(deps: ThreadServiceDeps) {
        * Client token for the later executor dispatch. Classification is
        * read-only and unkeyed; the token is carried in the audit event so
        * the future keyed dispatch can dedup on the token that produced
-       * this routing.
+       * this routing — and a repeated route with the same token replays
+       * the kept routing without a duplicate event.
        */
       idempotencyKey?: string;
     }): Promise<{
@@ -256,13 +322,17 @@ export function createThreadService(deps: ThreadServiceDeps) {
       questionnaire: QuestionnaireSpec | null;
       routingNote: string;
       thread: ThreadSummary;
+      replayed: boolean;
     }> {
       const thread = await deps.threads.getThread({
         organizationId: input.organizationId,
         threadId: input.threadId,
       });
       if (!thread) {
-        throw new DomainError("TENANT_SCOPE_ERROR", "This chat was not found in your organization.");
+        throw new DomainError(
+          "TENANT_SCOPE_ERROR",
+          "This chat was not found in your organization.",
+        );
       }
       const message = await deps.threads.latestUserMessage({
         organizationId: input.organizationId,
@@ -275,11 +345,31 @@ export function createThreadService(deps: ThreadServiceDeps) {
       if (page.length < 1 || page.length > 120) {
         throw new DomainError("VALIDATION_ERROR", "Please check the submitted fields.");
       }
-      const contextDigest = routingContextDigest({
-        organizationId: input.organizationId,
-        threadId: thread.id,
-        messageId: message.id,
-      });
+      const dedup = deps.routeDedup ?? sharedRouteDedup;
+      const dedupKey = input.idempotencyKey
+        ? `${input.organizationId}:${thread.id}:${message.id}:${input.idempotencyKey}`
+        : null;
+      if (dedupKey) {
+        const kept = dedup.get(dedupKey);
+        if (kept) {
+          return { ...kept, replayed: true };
+        }
+      }
+      const contextDigest = deps.contextReaders
+        ? (
+            await resolvePackContextDigest({
+              organizationId: input.organizationId,
+              userId: input.actorId,
+              windowDays: 30,
+              page,
+              readers: deps.contextReaders,
+            })
+          ).digest
+        : routingContextDigest({
+            organizationId: input.organizationId,
+            threadId: thread.id,
+            messageId: message.id,
+          });
       const proposal = await resolveProposal(deps, { text: message.body, page, contextDigest });
       const output = routeAgentMessage({
         text: message.body,
@@ -292,7 +382,12 @@ export function createThreadService(deps: ThreadServiceDeps) {
         model:
           proposal === null
             ? { kind: "live" }
-            : { kind: "stub", intent: proposal.intent, confidence: proposal.confidence, missing: proposal.missing },
+            : {
+                kind: "stub",
+                intent: proposal.intent,
+                confidence: proposal.confidence,
+                missing: proposal.missing,
+              },
       });
       await publishAgentEvent(deps, {
         organizationId: input.organizationId,
@@ -308,11 +403,89 @@ export function createThreadService(deps: ThreadServiceDeps) {
           ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
         },
       });
-      return {
+      const routed = {
         intent: output.intent,
         questionnaire: output.questionnaire,
         routingNote: output.routingNote,
         thread,
+      };
+      if (dedupKey) dedup.set(dedupKey, routed);
+      return { ...routed, replayed: false };
+    },
+
+    /**
+     * Questionnaire-answer persistence + re-route (ruling F2). Submitted
+     * answers reach the server — appended to thread messages through the
+     * fenced keyed RPC — and re-trigger routing in the same call. Viewers
+     * are refused before persistence; the reroute carries a derived key
+     * (`<answersKey>:reroute`) so it never collides with the original
+     * route token (ruling L4).
+     */
+    async submitAnswers(input: {
+      organizationId: string;
+      actorId: string;
+      role: OrganizationRole;
+      threadId: string;
+      spec: QuestionnaireSpec;
+      answers: unknown;
+      idempotencyKey: string;
+      page?: string;
+    }): Promise<{
+      message: ThreadMessageView;
+      replayed: boolean;
+      answers: Record<string, string>;
+      intent: string;
+      questionnaire: QuestionnaireSpec | null;
+    }> {
+      requireOperatorPlus(input.role);
+      const normalized = validateQuestionnaireAnswers(input.spec, input.answers);
+      const thread = await deps.threads.getThread({
+        organizationId: input.organizationId,
+        threadId: input.threadId,
+      });
+      if (!thread) {
+        throw new DomainError(
+          "TENANT_SCOPE_ERROR",
+          "This chat was not found in your organization.",
+        );
+      }
+      const appended = await deps.threads.appendMessageKeyed({
+        organizationId: input.organizationId,
+        actorId: input.actorId,
+        threadId: input.threadId,
+        role: "user",
+        body: encodeQuestionnaireAnswerBody(input.spec, normalized),
+        idempotencyKey: input.idempotencyKey,
+      });
+      const message = await deps.threads.getMessage({
+        organizationId: input.organizationId,
+        messageId: appended.messageId,
+      });
+      if (!message) {
+        throw new DomainError("DOMAIN_ERROR", "This message could not be saved.");
+      }
+      if (!appended.replayed) {
+        await publishAgentEvent(deps, {
+          organizationId: input.organizationId,
+          actorId: input.actorId,
+          eventName: "agent_message.appended",
+          payload: { threadId: thread.id, messageId: message.id },
+        });
+      }
+      const routed = await this.routeLatest({
+        organizationId: input.organizationId,
+        actorId: input.actorId,
+        role: input.role,
+        threadId: input.threadId,
+        ...(input.page ? { page: input.page } : {}),
+        idempotencyKey: `${input.idempotencyKey}:reroute`,
+      });
+      return {
+        message,
+        replayed: appended.replayed,
+        answers: normalized,
+        intent: routed.intent,
+        questionnaire: routed.questionnaire,
       };
     },
   };

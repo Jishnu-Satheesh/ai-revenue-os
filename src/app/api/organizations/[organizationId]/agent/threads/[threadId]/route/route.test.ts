@@ -92,7 +92,7 @@ describe("agent thread route endpoint", () => {
     const response = await POST(
       request(
         `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/route?page=overview`,
-        { method: "POST", body: JSON.stringify({ idempotencyKey: "k-1234567890123456" }) },
+        { method: "POST", body: JSON.stringify({ idempotencyKey: "k-1111111111111111" }) },
       ),
       params,
     );
@@ -115,7 +115,7 @@ describe("agent thread route endpoint", () => {
     const response = await POST(
       request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/route`, {
         method: "POST",
-        body: JSON.stringify({ idempotencyKey: "k-1234567890123456" }),
+        body: JSON.stringify({ idempotencyKey: "k-2222222222222222" }),
       }),
       params,
     );
@@ -128,7 +128,7 @@ describe("agent thread route endpoint", () => {
     const response = await POST(
       request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/route`, {
         method: "POST",
-        body: JSON.stringify({ idempotencyKey: "k-1234567890123456" }),
+        body: JSON.stringify({ idempotencyKey: "k-3333333333333333" }),
       }),
       params,
     );
@@ -146,7 +146,7 @@ describe("agent thread route endpoint", () => {
     const response = await POST(
       request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/route`, {
         method: "POST",
-        body: JSON.stringify({ idempotencyKey: "k-1234567890123456" }),
+        body: JSON.stringify({ idempotencyKey: "k-4444444444444444" }),
       }),
       params,
     );
@@ -161,7 +161,7 @@ describe("agent thread route endpoint", () => {
     const response = await POST(
       request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/route`, {
         method: "POST",
-        body: JSON.stringify({ idempotencyKey: "k-1234567890123456" }),
+        body: JSON.stringify({ idempotencyKey: "k-5555555555555555" }),
       }),
       params,
     );

@@ -116,6 +116,26 @@ describe("context pack", () => {
     expect(out.lanes.page.branchId).toBe("b1");
   });
 
+  it("preserves the branch-timezone failure flag when the reader throws", async () => {
+    const out = await buildAgentContextPack({
+      organizationId: "o",
+      userId: "u",
+      branchId: "b1",
+      windowDays: 30,
+      page: "overview",
+      now: "2026-09-20T12:00:00.000Z",
+      readers: {
+        resolveBranchTimezone: async () => {
+          throw new Error("timezone store down");
+        },
+      },
+    });
+    expect(out.window.branchTimezone).toBe("UTC");
+    expect(out.limitations).toContain(
+      "Branch timezone unavailable; evidence window labels render in UTC.",
+    );
+  });
+
   it("keeps economics to an availability tier and timeline dates distinct", async () => {
     const out = await buildAgentContextPack({
       organizationId: "o",

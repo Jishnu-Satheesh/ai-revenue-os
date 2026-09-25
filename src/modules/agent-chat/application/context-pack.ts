@@ -418,13 +418,17 @@ export async function buildAgentContextPack(
   const rawTimezone = readers.resolveBranchTimezone
     ? await (async () => {
         try {
-          return await readers.resolveBranchTimezone!(timezoneScope);
+          return { value: await readers.resolveBranchTimezone!(timezoneScope), failed: false };
         } catch {
-          return null;
+          // A throwing timezone reader is a failure, not an absence: the
+          // flag below preserves it through normalization so the pack still
+          // reports the UTC fallback honestly (Task 6 ruling).
+          return { value: null, failed: true };
         }
       })()
-    : "UTC";
-  const { timezone, fallback } = resolveBranchTimezone(rawTimezone ?? "UTC");
+    : { value: "UTC", failed: false };
+  const { timezone, fallback } = resolveBranchTimezone(rawTimezone.value ?? "UTC");
+  const timezoneFallback = fallback || rawTimezone.failed;
   const window: ContextPack["window"] = {
     windowDays: scope.windowDays,
     startUtc,
@@ -456,7 +460,7 @@ export async function buildAgentContextPack(
   }
 
   const limitations: string[] = [];
-  if (fallback) {
+  if (timezoneFallback) {
     limitations.push("Branch timezone unavailable; evidence window labels render in UTC.");
   }
 

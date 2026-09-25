@@ -1,0 +1,194 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+
+const mocks = vi.hoisted(() => ({
+  getOrganizationContext: vi.fn(),
+  createRepo: vi.fn(),
+  propose: vi.fn(),
+  publish: vi.fn(),
+}));
+
+vi.mock("@/lib/api/organization-context", () => ({
+  getOrganizationContext: mocks.getOrganizationContext,
+}));
+vi.mock("@/modules/agent-chat/infrastructure/thread-repository", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/modules/agent-chat/infrastructure/thread-repository")>();
+  return { ...actual, createThreadRepository: mocks.createRepo };
+});
+vi.mock("@/modules/agent-router/infrastructure/light-model-provider", () => ({
+  createLightModelProvider: () => ({ propose: mocks.propose }),
+}));
+vi.mock("@/domain/events/publisher", () => ({
+  createEventPublisher: () => ({ publish: mocks.publish }),
+}));
+vi.mock("@/lib/logger", () => ({
+  logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+}));
+
+import { POST } from "@/app/api/organizations/[organizationId]/agent/threads/[threadId]/answers/route";
+
+const ORGANIZATION = "10000000-0000-4000-8000-000000000001";
+const USER = "70000000-0000-4000-8000-000000000007";
+const THREAD = "80000000-0000-4000-8000-000000000008";
+const CORRELATION = "30000000-0000-4000-8000-000000000003";
+
+const THREAD_ROW = {
+  id: THREAD,
+  organizationId: ORGANIZATION,
+  title: "Hi",
+  mode: "quick",
+  status: "open",
+  linkedResearchProjectId: null,
+  linkedRequestId: null,
+  linkedDraftRequestId: null,
+  linkedCampaignId: null,
+  createdAt: "2026-09-25T10:00:00.000Z",
+  updatedAt: "2026-09-25T10:00:00.000Z",
+};
+
+const ANSWERS_MESSAGE = {
+  id: "90000000-0000-4000-8000-000000000009",
+  threadId: THREAD,
+  role: "user",
+  body: "[answers missing_fields]\nfrequency: weekly",
+  questionnaireAnswers: null,
+  markerReceipts: null,
+  citations: null,
+  createdAt: "2026-09-25T10:01:00.000Z",
+};
+
+const SPEC = {
+  kind: "missing_fields",
+  title: "One more detail",
+  resumeKey: "router:watch:overview:abcdef1234567890",
+  items: [
+    {
+      key: "frequency",
+      label: "How often?",
+      kind: "single_select",
+      required: true,
+      options: [
+        { value: "daily", label: "Daily" },
+        { value: "weekly", label: "Weekly" },
+      ],
+    },
+  ],
+};
+
+function operatorContext() {
+  return {
+    supabase: {},
+    user: { id: USER },
+    organizationId: ORGANIZATION,
+    membership: { role: "operator" },
+  };
+}
+
+function request(url: string, init?: RequestInit) {
+  return new Request(url, {
+    ...init,
+    headers: { "x-correlation-id": CORRELATION, ...(init?.headers ?? {}) },
+  });
+}
+
+const params = { params: Promise.resolve({ organizationId: ORGANIZATION, threadId: THREAD }) };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.getOrganizationContext.mockResolvedValue(operatorContext());
+});
+
+describe("agent thread answers route", () => {
+  it("persists answers and re-routes with 201, replaying with 200", async () => {
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+    });
+    mocks.propose.mockResolvedValue({ intent: "answer_memory", confidence: "high", missing: [] });
+    const created = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "a-1234567890123456",
+            resumeKey: SPEC.resumeKey,
+            spec: SPEC,
+            answers: { frequency: "weekly" },
+          }),
+        },
+      ),
+      params,
+    );
+    expect(created.status).toBe(201);
+    const body = await created.json();
+    expect(body).toMatchObject({
+      replayed: false,
+      answers: { frequency: "weekly" },
+      resumeKey: SPEC.resumeKey,
+      intent: "answer_memory",
+      correlationId: CORRELATION,
+    });
+    expect(created.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("refuses answers for viewers and invalid answers", async () => {
+    mocks.getOrganizationContext.mockResolvedValue({
+      ...operatorContext(),
+      membership: { role: "viewer" },
+    });
+    const forbidden = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "a-1234567890123456",
+            resumeKey: SPEC.resumeKey,
+            spec: SPEC,
+            answers: { frequency: "weekly" },
+          }),
+        },
+      ),
+      params,
+    );
+    expect(forbidden.status).toBe(403);
+    expect(mocks.createRepo).not.toHaveBeenCalled();
+
+    mocks.getOrganizationContext.mockResolvedValue(operatorContext());
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+    });
+    const invalid = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "a-1234567890123456",
+            resumeKey: SPEC.resumeKey,
+            spec: SPEC,
+            answers: { frequency: "hourly" },
+          }),
+        },
+      ),
+      params,
+    );
+    expect(invalid.status).toBe(400);
+  });
+});

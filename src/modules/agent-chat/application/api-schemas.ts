@@ -39,10 +39,29 @@ export type AppendMessageBody = z.infer<typeof appendMessageBodySchema>;
  * accepted now so the later executor dispatch can key on the same
  * client token without a second round trip.
  */
-export const routeThreadBodySchema = z
-  .object({ idempotencyKey: idempotencyKeySchema })
-  .strict();
+export const routeThreadBodySchema = z.object({ idempotencyKey: idempotencyKeySchema }).strict();
 export type RouteThreadBody = z.infer<typeof routeThreadBodySchema>;
+
+/**
+ * Questionnaire-answer submit body (ruling F2). Answers reach the server
+ * and re-trigger routing in one call: the idempotency key owns the
+ * answers append, and the service derives the reroute token from it, so
+ * submission never collides with the original route token (ruling L4).
+ * The spec is echoed so the server validates against what the drawer
+ * rendered; unknown answer keys are ignored by the validator.
+ */
+export const submitAnswersBodySchema = z
+  .object({
+    idempotencyKey: idempotencyKeySchema,
+    resumeKey: z
+      .string()
+      .trim()
+      .regex(/^[a-z0-9:_\-.]{1,160}$/),
+    spec: z.unknown(),
+    answers: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type SubmitAnswersBody = z.infer<typeof submitAnswersBodySchema>;
 
 export const threadListQuerySchema = z
   .object({
