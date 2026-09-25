@@ -1,5 +1,8 @@
+import { Suspense } from "react";
+
 import { createClient } from "@/lib/supabase/server";
 import { recordOrganizationAccess } from "@/modules/organizations/application/landing";
+import { UniversalAgentShellHost } from "@/components/agent/universal-agent-shell";
 
 /**
  * Marks where the reader is so the next landing returns them here.
@@ -18,5 +21,12 @@ export default async function OrganizationLayout({
   const supabase = await createClient();
   await recordOrganizationAccess(supabase, organizationId);
 
-  return children;
+  return (
+    <>
+      {children}
+      <Suspense fallback={null}>
+        <UniversalAgentShellHost organizationId={organizationId} />
+      </Suspense>
+    </>
+  );
 }
