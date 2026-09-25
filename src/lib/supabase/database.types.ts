@@ -1,6 +1,109 @@
 export type Database = {
   public: {
     Tables: {
+      /**
+       * Universal-agent conversations (Task 1). One row per thread: title,
+       * mode, status, safe-id links and history timestamps. Written only
+       * through create_agent_thread_keyed / set_thread_links; members read
+       * their own organization rows through RLS.
+       */
+      agent_threads: {
+        Row: {
+          id: string;
+          organization_id: string;
+          title: string;
+          mode: "quick" | "deepthink";
+          status:
+            | "open"
+            | "awaiting_user"
+            | "running"
+            | "completed"
+            | "cancelled";
+          linked_research_project_id: string | null;
+          linked_request_id: string | null;
+          linked_draft_request_id: string | null;
+          linked_campaign_id: string | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["agent_threads"]["Row"],
+          "id" | "created_at" | "updated_at"
+        > & {
+          title?: string;
+          status?: Database["public"]["Tables"]["agent_threads"]["Row"]["status"];
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["agent_threads"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Universal-agent utterances (Task 1). Body stays nullable only so the
+       * retention purge can scrub content while keeping the audit row.
+       * Written only through append_agent_message.
+       */
+      agent_messages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          thread_id: string;
+          role: "user" | "assistant" | "system_note";
+          body: string | null;
+          questionnaire_answers: Record<string, unknown> | null;
+          marker_receipts: Record<string, unknown> | null;
+          citations: Record<string, unknown> | null;
+          created_by: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["agent_messages"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["agent_messages"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Thread-creation idempotency ledger (Task 1). Same key plus same body
+       * replays the kept thread; same key with another body is a conflict.
+       * Written only through create_agent_thread_keyed.
+       */
+      agent_thread_create_keys: {
+        Row: {
+          id: string;
+          organization_id: string;
+          idempotency_key: string;
+          thread_id: string;
+          body_digest: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /**
+       * Message-append idempotency ledger (Task 1). Same key plus same body
+       * replays the kept message; same key with another body is a conflict.
+       * Written only through append_agent_message.
+       */
+      agent_message_append_keys: {
+        Row: {
+          id: string;
+          organization_id: string;
+          idempotency_key: string;
+          message_id: string;
+          body_digest: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       organizations: {
         Row: {
           id: string;
@@ -3598,6 +3701,63 @@ export type Database = {
       record_public_lead: {
         Args: {
           input_lead: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Member thread creation (operator role or above; viewers read only)
+       * with idempotency-key replay. Returns threadId, status and replayed.
+       */
+      create_agent_thread_keyed: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_idempotency_key: string;
+          p_title: string | null;
+          p_mode: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Member message append (operator role or above; viewers read only)
+       * with idempotency-key replay. Refreshes the parent thread clock.
+       * Returns messageId, threadId and replayed.
+       */
+      append_agent_message: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_thread_id: string;
+          p_role: string;
+          p_body: string;
+          p_idempotency_key: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Governed thread link update (operator role or above, or the worker
+       * under service_role). Fenced to the calling organization. Returns
+       * the kept link ids.
+       */
+      set_thread_links: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_thread_id: string;
+          p_project_id: string | null;
+          p_request_id: string | null;
+          p_draft_request_id: string | null;
+          p_campaign_id: string | null;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Service-only retention scrub: nulls message payloads on threads
+       * older than the cutoff while keeping every audit row.
+       */
+      purge_expired_agent_threads: {
+        Args: {
+          p_older_than: string;
         };
         Returns: Record<string, unknown>;
       };
