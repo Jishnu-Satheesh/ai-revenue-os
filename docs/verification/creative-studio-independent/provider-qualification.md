@@ -7,7 +7,7 @@ proven against the deterministic fake provider.
 
 ## 1. Harness design
 
-- Library: `src/modules/creative-studio/infrastructure/provider-qualification.ts` (+ 16-test suite).
+- Library: `src/modules/creative-studio/infrastructure/provider-qualification.ts` (+ 28-test suite).
   Provisional local types only — Task 2 canonicalizes `src/domain/creative-studio/`, Task 5
   reconciles. No `server-only` import: the same module runs under the `tsx` CLI.
 - Port mirrors technical-contract §2: `generate`/`edit` async-iterables of
@@ -15,10 +15,12 @@ proven against the deterministic fake provider.
   forwarded; only safe IDs, hashes, timings, and codes enter logs or evidence.
 - Frame recorder: each independently decoded preview and final records timestamp, type, index,
   SHA-256, dimensions, MIME, and byte length. Decoding reads the bytes' own leading signature
-  (PNG IHDR, JPEG SOF); the declared MIME is a claim, never evidence. Garbage bytes are
-  `malformed_frame` even when the sender claims `image/*`; only a recognizable but undecodable
-  container (RIFF/WebP) earns `unsupported_format`. Intake intersection enforced: 200–8000 px
-  per edge, 15 MiB default frame ceiling (configurable; probes use a 1 KiB ceiling).
+  (PNG IHDR, JPEG SOF, WebP VP8/VP8L/VP8X — hand-rolled, zero new deps); the declared MIME is
+  a claim, never evidence. Garbage bytes are `malformed_frame` even when the sender claims
+  `image/*`; truncated or corrupt recognized chunks are `malformed_frame`, and only a
+  recognizable container with an unrecognized chunk earns `unsupported_format`. Intake
+  intersection enforced: 200–8000 px per edge, 15 MiB default frame ceiling (configurable;
+  probes use a 1 KiB ceiling).
 - Matrix runner: 4:5, 1:1, 9:16 with copy/product/design/logo fixtures plus typographic and
   multilingual fixtures; per-run time-to-first-preview, preview count, usage, and cost
   (fake: measured 0 spend; paid unknowns would be null, never zero). Fresh-process reload
@@ -30,7 +32,8 @@ proven against the deterministic fake provider.
   interruption, expired continuation, unavailable pinned model.
 - Ceilings: boundary probing at limit−1 / limit / limit+1 for serialized bytes and image
   count, plus measured native dimensions per ratio (fake: 1024×1280, 1024×1024, 1152×2048 —
-  the audit's OpenAI-first candidate targets, measured not assumed).
+  the audit's OpenAI-first candidate targets, measured not assumed). Any ratio whose frame
+  cannot be decoded keeps the assumed candidates with `dimensionsUnmeasured: true`.
 - Retention disclosure captured from the profile (fake: stores nothing; live values BLOCKED).
 - Viewer: `renderEvidenceViewerHtml` renders recorded frame fixtures with FIXTURE labels for
   the browser verifier — it proves the viewer only. App seam deferred to Task 8. Never claim
@@ -57,7 +60,9 @@ Live PASS requires, per the plan: ≥1 real independently decoded pre-final fram
 AND on edit, continuity after reload, same-model contextual edit with older-version branch,
 measured costs within the authorized cap. A final-only fast response is recorded with
 `missing_progressive_preview` and fails progressive acceptance; repeated absence disables the
-profile. If no provider passes, record a blocked capability — never downgrade the requirement.
+profile. `meetsLivePassCriteria` additionally gates PASS on `verifiedByBoundaryProbe: true`
+(plus `dimensionsUnmeasured: false`) so profile declarations are never presented as measured.
+If no provider passes, record a blocked capability — never downgrade the requirement.
 
 ## 3. Evidence schema
 
@@ -69,10 +74,16 @@ bytes, prompts, copy, tokens, or URLs — enforced by a test that scans serializ
 caller-known secret markers, and by `QualificationFrameError` messages that never interpolate
 payloads. Fixture rehearsal output (2026-09-25): 3 ratios, previews 2/1/3, 2 edits with older
 branch OK, 0 failed probes, ceilings verified, spend 0 minor units, evidence digest
-`8eafbad1b3570fec`.
+`c33bc423b6da5a43` (fresh rehearsal 2026-09-25 after the WebP/PASS-gate fix round).
 
 ## 4. Open items for later tasks
 
 - Live adapter + credentials + authorized cap (BLOCKED, see §2).
-- WebP independent decoding (live-qualification scope; currently `unsupported_format`).
+- WebP independent decoding: DONE in-harness (VP8/VP8L/VP8X measured dimensions, one
+  crafted-fixture test per variant plus a truncated-payload test; unknown chunks stay
+  `unsupported_format`). Live frames still to be measured against a real provider once §2 unblocks.
+- Fake-measured circularity: the fake emits the candidate dimensions and discovery reads them
+  back (test named accordingly); live adapters must re-measure real bytes.
+- Opaque-replay proof stays a live follow-up: fake `edit` ignores the continuation token, so
+  reload continuity against a real provider is unproven until §2 unblocks.
 - `src/domain/creative-studio/*` canonicalization (Task 2) and harness reconciliation (Task 5).

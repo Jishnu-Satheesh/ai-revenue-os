@@ -62,7 +62,7 @@ export class QualificationFrameError extends Error {
 }
 
 export interface DecodedFrame {
-  mime: "image/png" | "image/jpeg";
+  mime: "image/png" | "image/jpeg" | "image/webp";
   width: number;
   height: number;
   sha256: string;
@@ -101,6 +101,73 @@ function parseJpegDimensions(bytes: Uint8Array): { width: number; height: number
   return null;
 }
 
+function isWebPContainer(bytes: Uint8Array): boolean {
+  return (
+    bytes.length >= 12 &&
+    bytes[0] === 82 && // R
+    bytes[1] === 73 && // I
+    bytes[2] === 70 && // F
+    bytes[3] === 70 && // F
+    bytes[8] === 87 && // W
+    bytes[9] === 69 && // E
+    bytes[10] === 66 && // B
+    bytes[11] === 80 // P
+  );
+}
+
+// Hand-rolled WebP dimension parsing (pure TS, zero new deps — same pattern
+// as the PNG/JPEG parsers above). Covers the three container variants:
+// VP8 (lossy), VP8L (lossless), VP8X (extended canvas). Returns null only
+// when the chunk is unrecognized; throws malformed_frame when a recognized
+// chunk is truncated or corrupt.
+function parseWebPDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (!isWebPContainer(bytes) || bytes.length < 20) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const fourcc =
+    String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]);
+  const chunkSize = view.getUint32(16, true);
+  const payloadOffset = 20;
+  if (fourcc === "VP8 ") {
+    // Lossy bitstream: 3-byte frame tag, 3-byte start code 0x9d012a,
+    // then 14-bit LE width and height (top 2 bits are scale, masked off).
+    if (bytes.length < payloadOffset + 10) {
+      throw new QualificationFrameError("malformed_frame", "truncated VP8 lossy payload");
+    }
+    if (bytes[payloadOffset + 3] !== 0x9d || bytes[payloadOffset + 4] !== 0x01 || bytes[payloadOffset + 5] !== 0x2a) {
+      throw new QualificationFrameError("malformed_frame", "VP8 lossy start code missing");
+    }
+    const width = view.getUint16(payloadOffset + 6, true) & 0x3fff;
+    const height = view.getUint16(payloadOffset + 8, true) & 0x3fff;
+    return { width, height };
+  }
+  if (fourcc === "VP8L") {
+    // Lossless bitstream: 1-byte signature 0x2f, then a 32-bit LE field
+    // holding 14-bit (width - 1), 14-bit (height - 1), 1-bit alpha flag,
+    // 3-bit version.
+    if (bytes.length < payloadOffset + 5) {
+      throw new QualificationFrameError("malformed_frame", "truncated VP8L lossless payload");
+    }
+    if (bytes[payloadOffset] !== 0x2f) {
+      throw new QualificationFrameError("malformed_frame", "VP8L lossless signature missing");
+    }
+    const bits = view.getUint32(payloadOffset + 1, true);
+    return { width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 };
+  }
+  if (fourcc === "VP8X") {
+    // Extended container: 1 flag byte, 3 reserved bytes, then 24-bit LE
+    // (canvas width - 1) and 24-bit LE (canvas height - 1).
+    if (chunkSize < 10 || bytes.length < payloadOffset + 10) {
+      throw new QualificationFrameError("malformed_frame", "truncated VP8X extended payload");
+    }
+    const widthMinusOne =
+      bytes[payloadOffset + 4] | (bytes[payloadOffset + 5] << 8) | (bytes[payloadOffset + 6] << 16);
+    const heightMinusOne =
+      bytes[payloadOffset + 7] | (bytes[payloadOffset + 8] << 8) | (bytes[payloadOffset + 9] << 16);
+    return { width: widthMinusOne + 1, height: heightMinusOne + 1 };
+  }
+  return null;
+}
+
 // Independently decodes a provider frame from its own leading signature.
 // The declared MIME is treated as a claim, never as evidence.
 export function decodeImageFrame(bytes: Uint8Array, declaredMime: string): DecodedFrame {
@@ -117,11 +184,23 @@ export function decodeImageFrame(bytes: Uint8Array, declaredMime: string): Decod
     assertDimensions(jpeg.width, jpeg.height);
     return { mime: "image/jpeg", ...jpeg, sha256: sha256Hex(bytes), byteLength: bytes.length };
   }
+  if (isWebPContainer(bytes)) {
+    // A recognized WebP chunk decodes to measured dimensions; a truncated
+    // or corrupt recognized chunk throws malformed_frame from the parser.
+    const webp = parseWebPDimensions(bytes);
+    if (webp) {
+      assertDimensions(webp.width, webp.height);
+      return { mime: "image/webp", ...webp, sha256: sha256Hex(bytes), byteLength: bytes.length };
+    }
+    // Recognizable container with an unrecognized chunk: undecodable.
+    throw new QualificationFrameError(
+      "unsupported_format",
+      `frame format not independently decodable (declared ${declaredMime})`,
+    );
+  }
   // A declared MIME is a claim, never evidence: unrecognizable bytes stay
-  // malformed even when the sender claims image/*. Only a recognizable
-  // container this harness cannot decode (RIFF/WebP) earns unsupported_format.
-  const isRiffContainer = bytes[0] === 82 && bytes[1] === 73 && bytes[2] === 70 && bytes[3] === 70;
-  if (isRiffContainer || (bytes[0] === 0xff && declaredMime === "image/webp")) {
+  // malformed even when the sender claims image/*.
+  if (bytes[0] === 0xff && declaredMime === "image/webp") {
     throw new QualificationFrameError(
       "unsupported_format",
       `frame format not independently decodable (declared ${declaredMime})`,
@@ -619,7 +698,7 @@ export async function runFailureProbes(
       if (error instanceof QualificationStreamError) {
         results.push({ probe, code: error.code, certainty: error.certainty, recoveredWithoutSilentLoss: true });
       } else {
-        results.push({ probe: "expired_continuation", code: "interrupted", certainty: "unknown", recoveredWithoutSilentLoss: true });
+        results.push({ probe, code: "interrupted", certainty: "unknown", recoveredWithoutSilentLoss: true });
       }
     }
   }
@@ -652,6 +731,9 @@ export interface CeilingReport {
   maxImages: number;
   nativeDimensions: Record<QualificationRatio, { width: number; height: number }>;
   verifiedByBoundaryProbe: boolean;
+  // True whenever any supported ratio fell back to the assumed candidate
+  // dimensions because its frame could not be independently decoded.
+  dimensionsUnmeasured: boolean;
 }
 
 export async function discoverCeilings(
@@ -675,17 +757,61 @@ export async function discoverCeilings(
     verifiedByBoundaryProbe = acceptsBelow && acceptsAt && refusesAbove && countOk;
   }
   const nativeDimensions = { ...CANDIDATE_NATIVE_DIMENSIONS };
+  let dimensionsUnmeasured = false;
   for (const ratio of QUALIFICATION_RATIOS) {
     if (!profile.supportedRatios.includes(ratio)) continue;
     const frame = await firstDecodedFrame(provider, ratio);
-    if (frame) nativeDimensions[ratio] = { width: frame.width, height: frame.height };
+    if (frame) {
+      nativeDimensions[ratio] = { width: frame.width, height: frame.height };
+    } else {
+      // Fallback keeps the assumed candidate dimensions and says so.
+      dimensionsUnmeasured = true;
+    }
   }
   return {
     maxSerializedRequestBytes: profile.maxInputBytes,
     maxImages: profile.maxImages,
     nativeDimensions,
     verifiedByBoundaryProbe,
+    dimensionsUnmeasured,
   };
+}
+
+// Live PASS gate: declarations are never presented as measured. A provider
+// passes only with boundary-probed ceilings, independently measured native
+// dimensions, progressive pre-final frames on every run, and spend within
+// the authorized cap.
+export interface LivePassInput {
+  ratioResults: RatioRunResult[];
+  ceilings: CeilingReport;
+  spendWithinCap: boolean;
+}
+
+export interface LivePassDecision {
+  pass: boolean;
+  reasons: string[];
+}
+
+export function meetsLivePassCriteria(input: LivePassInput): LivePassDecision {
+  const reasons: string[] = [];
+  if (!input.ceilings.verifiedByBoundaryProbe) {
+    reasons.push("ceilings_unverified: boundary probe did not confirm declared ceilings");
+  }
+  if (input.ceilings.dimensionsUnmeasured) {
+    reasons.push("dimensions_unmeasured: native dimensions fell back to assumed candidates");
+  }
+  if (input.ratioResults.length === 0) {
+    reasons.push("no_ratio_runs");
+  }
+  for (const result of input.ratioResults) {
+    if (result.previewCount === 0 || result.missingProgressivePreview) {
+      reasons.push(`missing_progressive_preview:${result.ratio}`);
+    }
+  }
+  if (!input.spendWithinCap) {
+    reasons.push("spend_exceeds_cap");
+  }
+  return { pass: reasons.length === 0, reasons };
 }
 
 async function firstDecodedFrame(
@@ -844,7 +970,12 @@ export function renderEvidenceViewerHtml(input: { title: string; frames: ViewerF
 }
 
 function escapeHtml(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 // --- Deterministic fake provider (zero network; offline tests only) ---
