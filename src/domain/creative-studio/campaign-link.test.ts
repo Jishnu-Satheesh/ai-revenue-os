@@ -161,4 +161,18 @@ describe("resolveDeliverableSource", () => {
       ),
     ).toBe("hash_mismatch");
   });
+
+  it("rejects corrupt bytes behind a stale-but-matching hash record: the bytes are hashed, not trusted", () => {
+    const tampered = new TextEncoder().encode("studio-final-poster-BYTES");
+
+    expect(
+      resolutionReason(() =>
+        resolveDeliverableSource({
+          source: source(),
+          renderInputs: renderInputs(),
+          artifact: { bytes: tampered, mime: "image/png", contentHash: KNOWN_HASH },
+        }),
+      ),
+    ).toBe("hash_mismatch");
+  });
 });

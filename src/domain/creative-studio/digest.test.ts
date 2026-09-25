@@ -66,6 +66,19 @@ describe("studio digests", () => {
     );
   });
 
+  it("digests a manifest with duplicate reference ids deterministically", () => {
+    const first = { kind: "product", referenceId: "dup", versionId: "v", contentHash: "a".repeat(64) };
+    const second = { kind: "product", referenceId: "dup", versionId: "v", contentHash: "b".repeat(64) };
+
+    expect(studioReferenceManifestDigest([first, second])).toBe(
+      studioReferenceManifestDigest([first, second]),
+    );
+    expect(studioReferenceManifestDigest([first, second])).toMatch(/^[0-9a-f]{64}$/);
+    expect(studioReferenceManifestDigest([first, second])).not.toBe(
+      studioReferenceManifestDigest([first]),
+    );
+  });
+
   it("digests the logo substitution manifest: a moved range is a new manifest", () => {
     const substitution = {
       start: 9,
@@ -85,6 +98,29 @@ describe("studio digests", () => {
     );
     expect(studioLogoSubstitutionDigest([])).not.toBe(
       studioLogoSubstitutionDigest([substitution]),
+    );
+  });
+
+  it("digests the logo substitution manifest independently of chip order", () => {
+    const first = {
+      start: 9,
+      end: 16,
+      phrase: "Talabat",
+      channelId: "talabat",
+      logoAssetVersionId: "v",
+      logoContentHash: "a".repeat(64),
+    };
+    const second = {
+      start: 20,
+      end: 29,
+      phrase: "Deliveroo",
+      channelId: "deliveroo",
+      logoAssetVersionId: "v",
+      logoContentHash: "b".repeat(64),
+    };
+
+    expect(studioLogoSubstitutionDigest([first, second])).toBe(
+      studioLogoSubstitutionDigest([second, first]),
     );
   });
 

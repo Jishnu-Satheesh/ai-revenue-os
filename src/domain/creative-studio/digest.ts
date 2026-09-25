@@ -135,7 +135,9 @@ export function studioReferenceManifestDigest(
   references: readonly { referenceId: string; kind: string; contentHash: string }[],
 ): string {
   const manifest = [...references]
-    .sort((left, right) => (left.referenceId < right.referenceId ? -1 : 1))
+    .sort((left, right) =>
+      left.referenceId < right.referenceId ? -1 : left.referenceId > right.referenceId ? 1 : 0,
+    )
     .map((reference) => ({
       contentHash: reference.contentHash,
       kind: reference.kind,
@@ -144,7 +146,12 @@ export function studioReferenceManifestDigest(
   return sha256HexCanonical(manifest);
 }
 
-/** The channel-logo substitution manifest: a moved range is a new manifest. */
+/**
+ * The channel-logo substitution manifest: a moved range is a new manifest.
+ * Sorted by (start, end, channel, phrase, logo) so chip order is not
+ * identity — two chips at different ranges commute, and reordering the array
+ * must not mint a new identity or a replay conflict.
+ */
 export function studioLogoSubstitutionDigest(
   substitutions: readonly {
     start: number;
@@ -155,7 +162,25 @@ export function studioLogoSubstitutionDigest(
     logoContentHash: string;
   }[],
 ): string {
-  return sha256HexCanonical(substitutions);
+  const manifest = [...substitutions]
+    .sort((left, right) => {
+      if (left.start !== right.start) return left.start - right.start;
+      if (left.end !== right.end) return left.end - right.end;
+      for (const key of ["channelId", "phrase", "logoAssetVersionId", "logoContentHash"] as const) {
+        if (left[key] < right[key]) return -1;
+        if (left[key] > right[key]) return 1;
+      }
+      return 0;
+    })
+    .map((substitution) => ({
+      channelId: substitution.channelId,
+      end: substitution.end,
+      logoAssetVersionId: substitution.logoAssetVersionId,
+      logoContentHash: substitution.logoContentHash,
+      phrase: substitution.phrase,
+      start: substitution.start,
+    }));
+  return sha256HexCanonical(manifest);
 }
 
 /**

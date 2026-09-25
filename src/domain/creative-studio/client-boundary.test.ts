@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -30,20 +30,33 @@ function sourceFiles(directory: string): string[] {
   return found;
 }
 
-const IMPORT_PATTERN = /^[ \t]*import\s+(type\s+)?[^;]*?from\s+"([^"]+)"/gm;
+// Static import/export-from in either quote style (type-only forms are
+// erased at compile time, so they cannot drag a Node built-in into the
+// browser bundle and are skipped), side-effect imports, and dynamic imports.
+const STATIC_FROM_PATTERN = /^[ \t]*(?:import|export)\s+(type\s+)?[^;]*?\bfrom\s+["']([^"']+)["']/gm;
+const SIDE_EFFECT_PATTERN = /^[ \t]*import\s+["']([^"']+)["']/gm;
+const DYNAMIC_IMPORT_PATTERN = /\bimport\(\s*["']([^"']+)["']\s*\)/g;
 
 function runtimeImports(source: string): string[] {
   const specifiers: string[] = [];
-  for (const match of source.matchAll(IMPORT_PATTERN)) {
+  for (const match of source.matchAll(STATIC_FROM_PATTERN)) {
     if (match[1]) continue;
     specifiers.push(match[2]!);
+  }
+  for (const match of source.matchAll(SIDE_EFFECT_PATTERN)) {
+    specifiers.push(match[1]!);
+  }
+  for (const match of source.matchAll(DYNAMIC_IMPORT_PATTERN)) {
+    specifiers.push(match[1]!);
   }
   return specifiers;
 }
 
 /**
  * Files reachable from the supported module index through relative or `@/`
- * imports. The Task 1 qualification harness under
+ * imports — anywhere under `src/`, so a future `node:` import smuggled via
+ * `@/lib/*` is traversed and fails this suite instead of evading it. The
+ * Task 1 qualification harness under
  * `src/modules/creative-studio/infrastructure/` is deliberately NOT in this
  * set: it is a server/CLI-only adapter and must never join the supported
  * browser surface.
@@ -69,10 +82,7 @@ function reachableFromIndex(): string[] {
     const fromDir = join(current, "..");
     for (const specifier of runtimeImports(readFileSync(current, "utf8"))) {
       for (const resolved of candidates(specifier, fromDir)) {
-        if (
-          !resolved.startsWith(join(REPO_ROOT, "src/domain/")) &&
-          resolved !== join(REPO_ROOT, "src/modules/creative-studio/index.ts")
-        ) {
+        if (!resolved.startsWith(join(REPO_ROOT, "src/"))) {
           continue;
         }
         try {
@@ -91,6 +101,25 @@ function reachableFromIndex(): string[] {
   return [...seen];
 }
 
+/**
+ * The exact reachable set, pinned so a future import that pulls a new file
+ * into the supported browser surface fails loudly here instead of slipping
+ * in unnoticed. Legitimate growth updates this list deliberately.
+ */
+const PINNED_REACHABLE_FILES = [
+  "src/domain/campaigns/canonical-json.ts",
+  "src/domain/campaigns/deliverable.ts",
+  "src/domain/campaigns/errors.ts",
+  "src/domain/creative-studio/campaign-link.ts",
+  "src/domain/creative-studio/digest.ts",
+  "src/domain/creative-studio/events.ts",
+  "src/domain/creative-studio/index.ts",
+  "src/domain/creative-studio/policy.ts",
+  "src/domain/creative-studio/provider.ts",
+  "src/domain/creative-studio/schemas.ts",
+  "src/modules/creative-studio/index.ts",
+];
+
 describe("studio client boundary", () => {
   it("keeps the domain contracts and the supported module surface free of node: imports", () => {
     const files = [...sourceFiles(DOMAIN_DIR.pathname), ...reachableFromIndex()];
@@ -100,7 +129,16 @@ describe("studio client boundary", () => {
       const source = readFileSync(file, "utf8");
       expect(source, file).not.toMatch(/from\s+["']node:/);
       expect(source, file).not.toMatch(/require\(\s*["']node:/);
+      expect(source, file).not.toMatch(/import\(\s*["']node:/);
     }
+  });
+
+  it("pins the exact reachable set behind the supported module index", () => {
+    const actual = reachableFromIndex()
+      .map((file) => relative(REPO_ROOT, file))
+      .sort();
+
+    expect(actual).toEqual(PINNED_REACHABLE_FILES);
   });
 
   it("exposes the supported contracts through the module index", async () => {

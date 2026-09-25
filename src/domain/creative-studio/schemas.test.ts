@@ -543,6 +543,39 @@ describe("generation reference caps", () => {
     expect(outcome).toMatchObject({ admitted: false, code: "too_many_design_references" });
   });
 
+  it("refuses a fourth product reference", () => {
+    const outcome = admitGenerationReferences({
+      references: [
+        { kind: "product", referenceId: "ref-product-1", versionId: VERSION, contentHash: HASH_A },
+        { kind: "product", referenceId: "ref-product-2", versionId: VERSION, contentHash: HASH_A },
+        { kind: "product", referenceId: "ref-product-3", versionId: VERSION, contentHash: HASH_A },
+        { kind: "product", referenceId: "ref-product-4", versionId: VERSION, contentHash: HASH_A },
+      ],
+      parentImageCount: 0,
+      markerOverlayCount: 0,
+      estimatedInputBytes: 1_000,
+      profile,
+    });
+
+    expect(outcome).toMatchObject({ admitted: false, code: "too_many_product_references" });
+  });
+
+  it("refuses a third brand mark", () => {
+    const outcome = admitGenerationReferences({
+      references: [
+        { kind: "brand_mark", referenceId: "ref-mark-1", versionId: VERSION, contentHash: HASH_A },
+        { kind: "brand_mark", referenceId: "ref-mark-2", versionId: VERSION, contentHash: HASH_A },
+        { kind: "brand_mark", referenceId: "ref-mark-3", versionId: VERSION, contentHash: HASH_A },
+      ],
+      parentImageCount: 0,
+      markerOverlayCount: 0,
+      estimatedInputBytes: 1_000,
+      profile,
+    });
+
+    expect(outcome).toMatchObject({ admitted: false, code: "too_many_brand_marks" });
+  });
+
   it("counts the parent and the marker overlay against the provider image cap", () => {
     const outcome = admitGenerationReferences({
       references: [approvedReference(), uploadedReference()],

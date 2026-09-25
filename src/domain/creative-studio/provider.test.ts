@@ -54,7 +54,7 @@ describe("provider profile", () => {
     expect(studioProviderProfileSchema.safeParse(profile()).success).toBe(true);
   });
 
-  it("pins the exact model id: no silent fallback mid-session", () => {
+  it("requires a non-empty exact model id (immutability is enforced by admitStudioEdit, not here)", () => {
     expect(
       studioProviderProfileSchema.safeParse(profile({ exactModelId: "latest" })).success,
     ).toBe(true);

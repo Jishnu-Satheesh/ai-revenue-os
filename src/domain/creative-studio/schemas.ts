@@ -80,6 +80,9 @@ export const DEFAULT_ASPECT_PRESET: AspectPreset = "instagram_feed";
 export const studioModeSchema = z.enum(["exact_design", "take_inspiration"]);
 export type StudioMode = z.infer<typeof studioModeSchema>;
 
+// Task 2 decision: manifest reference ids are capped at 120 chars. The contract
+// (§2) requires uniqueness/immutability but names no length bound; this cap is a
+// transport/DB guardrail only — align with Task 3/4/9/10 DB validators.
 const referenceIdSchema = z.string().min(1).max(120);
 
 /**
@@ -128,6 +131,10 @@ export const channelLogoSubstitutionSchema = z.strictObject({
   start: z.number().int().nonnegative(),
   /** Exclusive end in Unicode code points. */
   end: z.number().int().positive(),
+  // Task 2 decision: phrase ≤200 chars, channel id ≤80 chars. The contract
+  // (§2) bounds ranges/phrases by the copy itself and channels by known-id
+  // membership, with no length bound; these caps are transport/DB guardrails
+  // only — align with Task 3/4/9/10 DB validators.
   /** The exact copy slice [start, end). Checked, never assumed. */
   phrase: z.string().min(1).max(200),
   channelId: z.string().trim().min(1).max(80),

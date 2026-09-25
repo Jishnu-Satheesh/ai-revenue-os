@@ -6,6 +6,7 @@ import {
   type StudioFullPosterRenderInputs,
   type StudioVersionSource,
 } from "@/domain/campaigns/deliverable";
+import { sha256HexBytes } from "@/domain/creative-studio/digest";
 
 /**
  * The Campaign handoff: selecting an exact finished Studio revision for a
@@ -32,6 +33,10 @@ export const selectStudioCampaignCreativeSchema = z.strictObject({
   studioVersionId: z.string().uuid(),
   studioExportId: z.string().uuid().nullable(),
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
+  // Task 2 decision: idempotency keys are 8..200 chars. The contract (§3/§5)
+  // requires key+digest replay semantics but names no length bound; this range
+  // rejects empty/accidental keys while staying a transport/DB guardrail only —
+  // align with Task 3/4/9/10 DB validators.
   idempotencyKey: z.string().trim().min(8).max(200),
 });
 export type SelectStudioCampaignCreative = z.infer<typeof selectStudioCampaignCreativeSchema>;
@@ -70,7 +75,8 @@ export type StudioArtifact = {
  * Resolves a studio_version deliverable source to the exact bytes a person
  * previews, downloads or reviews. Three identities must agree: the source
  * arm, the v2 render-inputs arm (same version, same export, same hash), and
- * the stored artifact's own hash. Anything else is a refusal, never a best
+ * the hash of the stored bytes themselves (recomputed here, never trusted
+ * from the caller's record). Anything else is a refusal, never a best
  * effort — resolving the wrong bytes under an approval would publish
  * something nobody agreed to.
  */
@@ -104,6 +110,16 @@ export function resolveDeliverableSource(input: {
     throw new StudioSourceResolutionError(
       "hash_mismatch",
       "The stored bytes no longer match the selected hash: the approval would point at something its approver never saw.",
+    );
+  }
+
+  // The record above is defense-in-depth only: the bytes themselves are
+  // hashed, so corrupt/wrong-object bytes behind a stale-but-matching
+  // record still refuse instead of resolving under someone else's approval.
+  if (sha256HexBytes(input.artifact.bytes) !== source.contentHash) {
+    throw new StudioSourceResolutionError(
+      "hash_mismatch",
+      "The stored bytes hash to a different value than the selected hash: the approval would point at something its approver never saw.",
     );
   }
 

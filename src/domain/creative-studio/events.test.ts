@@ -6,11 +6,13 @@ import {
   isTerminalRunState,
   toSafeFailure,
   transitionRunState,
+  type StudioRunEvent,
+  type StudioRunState,
 } from "@/domain/creative-studio/events";
 
-function transitionReason(from: string, event: string): string | null {
+function transitionReason(from: StudioRunState, event: StudioRunEvent): string | null {
   try {
-    transitionRunState(from as never, event as never);
+    transitionRunState(from, event);
   } catch (error) {
     expect(error).toBeInstanceOf(StudioRunTransitionError);
     return (error as StudioRunTransitionError).from;
@@ -33,8 +35,10 @@ describe("run stage transitions", () => {
     expect(transitionRunState("generating", "studio.run.output_validated")).toBe("validating");
   });
 
-  it("records a missing-preview capability failure without fabricating one", () => {
-    // The run still completes honestly; qualification is a separate concern.
+  it("completes the no-preview run end to end: generating straight through to ready", () => {
+    // No missing-preview record exists at this layer (worker/DB concern per
+    // contract §5); the run simply completes honestly without ever previewing.
+    expect(transitionRunState("generating", "studio.run.output_validated")).toBe("validating");
     expect(transitionRunState("validating", "studio.run.completed")).toBe("ready");
   });
 
