@@ -100,7 +100,12 @@ function itemFor(field: MissingField): QuestionnaireItem {
 
 function resumeKey(intent: AgentIntent, page: string, contextDigest: string): string {
   const digestPart = contextDigest.trim().slice(0, 16).replace(/[^a-z0-9]/gi, "x").toLowerCase();
-  return `router:${intent}:${page}:${digestPart}`;
+  const pagePart = page
+    .trim()
+    .slice(0, 60)
+    .replace(/[^a-z0-9]/gi, "x")
+    .toLowerCase();
+  return `router:${intent}:${pagePart}:${digestPart}`;
 }
 
 function routingNote(args: {
