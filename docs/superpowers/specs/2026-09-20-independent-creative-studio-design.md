@@ -1,6 +1,6 @@
 # Independent Creative Studio — proposed design specification
 
-Status: **PROPOSED — design review, not implementation approval.** Started September 20; resumed September 21, 2026. This package changes no production application, database or worker. The referenced wireframe was not visible in this conversation; the design is derived from the written requirements. Do not claim sketch fidelity or freeze a final visual baseline until the sketch is supplied and compared, or the user explicitly accepts the prototype as the replacement reference.
+Status: **APPROVED for implementation 2026-09-25.** User granted explicit Tier 3 approval ("implement this plan"); prior PROPOSED state ended on that date. Started September 20; resumed September 21, 2026. The user explicitly accepted the prototype as the replacement visual reference on September 24, 2026; its frozen hashes are recorded in `docs/design/creative-studio-independent/reference-manifest.json` (prototype SHA-256 `9bdef5dc39342f1f1425149233766003e0ae05bb9535963288b00ad60fb41672`, visual approval 2026-09-24). Scoped architectural authority: `adrs/0070-independent-full-poster-studio.md` (accepted 2026-09-25).
 
 ## 1. Outcome and binding decisions
 

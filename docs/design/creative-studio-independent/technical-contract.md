@@ -1,6 +1,6 @@
 # Independent Creative Studio — proposed technical contract
 
-Status: PROPOSED, awaiting user approval of the design and execution plan. Updated 2026-09-21. Every new table, RPC, permission, event and API below is a proposal, not a claim about deployed capabilities. Read with `docs/superpowers/specs/2026-09-20-independent-creative-studio-design.md`, `current-studio-audit.md` and `provider-and-assets-audit.md`.
+Status: APPROVED for implementation 2026-09-25. The visual prototype was approved as the replacement visual reference on 2026-09-24 (hashes frozen in `reference-manifest.json`); the specification and Tier 3 execution plan received explicit implementation approval on 2026-09-25 ("implement this plan"), with scoped architectural authority in `adrs/0070-independent-full-poster-studio.md`. Every new table, RPC, permission, event and API below is approved design, not a claim about deployed capabilities. Read with `docs/superpowers/specs/2026-09-20-independent-creative-studio-design.md`, `current-studio-audit.md` and `provider-and-assets-audit.md`.
 
 ## 1. Binding product boundaries
 
