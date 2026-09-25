@@ -54,12 +54,23 @@ const CHANNELS = [
   { value: "facebook", label: "Facebook" },
 ] as const;
 
-export function NewCampaignBrief({ organizationId }: Readonly<{ organizationId: string }>) {
+export function NewCampaignBrief({
+  organizationId,
+  initialObjective = "",
+  initialAudience = "",
+  initialOffer = "",
+}: Readonly<{
+  organizationId: string;
+  /** Prefilled intent (e.g. from the agent advice handoff). Fully editable, never a decision. */
+  initialObjective?: string;
+  initialAudience?: string;
+  initialOffer?: string;
+}>) {
   const router = useRouter();
   const [title, setTitle] = useState("");
-  const [objective, setObjective] = useState("");
-  const [audience, setAudience] = useState("");
-  const [offer, setOffer] = useState("");
+  const [objective, setObjective] = useState(initialObjective);
+  const [audience, setAudience] = useState(initialAudience);
+  const [offer, setOffer] = useState(initialOffer);
   const [channels, setChannels] = useState<string[]>(["instagram"]);
   const [profile, setProfile] = useState<string>("brand_guided");
   const [pending, setPending] = useState(false);

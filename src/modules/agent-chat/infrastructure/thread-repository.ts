@@ -82,6 +82,28 @@ const appendMessageInputSchema = z
   })
   .strict();
 
+const setThreadLinksInputSchema = z
+  .object({
+    organizationId: idSchema,
+    actorId: idSchema,
+    threadId: idSchema,
+    projectId: z.string().uuid().nullable().optional(),
+    requestId: z.string().uuid().nullable().optional(),
+    draftRequestId: z.string().uuid().nullable().optional(),
+    campaignId: z.string().uuid().nullable().optional(),
+  })
+  .strict();
+
+export type SetThreadLinksInput = z.infer<typeof setThreadLinksInputSchema>;
+
+export type ThreadLinkIds = {
+  threadId: string;
+  projectId: string | null;
+  requestId: string | null;
+  draftRequestId: string | null;
+  campaignId: string | null;
+};
+
 const listInputSchema = z
   .object({
     organizationId: idSchema,
@@ -264,6 +286,15 @@ function booleanField(row: Record<string, unknown>, key: string, scope: string):
   return value;
 }
 
+function nullableIdField(row: Record<string, unknown>, key: string): string | null {
+  const value = row[key];
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") {
+    throw new DomainError("DOMAIN_ERROR", "These chat links could not be saved.");
+  }
+  return value;
+}
+
 function requireReads(persistence: ThreadPersistence): NonNullable<ThreadPersistence["from"]> {
   if (!persistence.from) {
     throw new DomainError("DOMAIN_ERROR", "This chat could not be loaded.");
@@ -402,6 +433,41 @@ export function createThreadRepository(persistence: ThreadPersistence) {
         messageId: stringField(row, ["messageId", "id"], "message"),
         threadId: stringField(row, ["threadId", "thread_id"], "message"),
         replayed: booleanField(row, "replayed", "message"),
+      };
+    },
+
+    /**
+     * Governed thread link update through the Task 1 fenced
+     * `set_thread_links` RPC (operator role or above; the function
+     * rechecks inside, fenced to the calling organization). Link targets
+     * stay safe ids verified by readers at use time; passing all four as
+     * null clears them.
+     */
+    async setThreadLinks(input: SetThreadLinksInput): Promise<ThreadLinkIds> {
+      const parsed = setThreadLinksInputSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new DomainError("VALIDATION_ERROR", "Please check the submitted fields.");
+      }
+      const row = await callKeyedRpc(
+        persistence,
+        "set_thread_links",
+        {
+          p_organization_id: parsed.data.organizationId,
+          p_actor_id: parsed.data.actorId,
+          p_thread_id: parsed.data.threadId,
+          p_project_id: parsed.data.projectId ?? null,
+          p_request_id: parsed.data.requestId ?? null,
+          p_draft_request_id: parsed.data.draftRequestId ?? null,
+          p_campaign_id: parsed.data.campaignId ?? null,
+        },
+        "chat links",
+      );
+      return {
+        threadId: stringField(row, ["threadId"], "chat links"),
+        projectId: nullableIdField(row, "projectId"),
+        requestId: nullableIdField(row, "requestId"),
+        draftRequestId: nullableIdField(row, "draftRequestId"),
+        campaignId: nullableIdField(row, "campaignId"),
       };
     },
 

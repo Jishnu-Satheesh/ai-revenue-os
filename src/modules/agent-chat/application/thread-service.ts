@@ -488,6 +488,53 @@ export function createThreadService(deps: ThreadServiceDeps) {
         questionnaire: routed.questionnaire,
       };
     },
+
+    /**
+     * Governed thread link update (spec section 11 audit chain). Links
+     * thread → research project / request / draft request / campaign
+     * through the fenced `set_thread_links` RPC. Viewers are refused
+     * before persistence; foreign threads read as not-found. The
+     * campaign-advice handoff calls this after admitting a draft request
+     * so thread, draft request, and (once the worker completes it)
+     * campaign stay identifier-linked.
+     */
+    async setThreadLinks(input: {
+      organizationId: string;
+      actorId: string;
+      role: OrganizationRole;
+      threadId: string;
+      projectId?: string | null;
+      requestId?: string | null;
+      draftRequestId?: string | null;
+      campaignId?: string | null;
+    }): Promise<{
+      threadId: string;
+      projectId: string | null;
+      requestId: string | null;
+      draftRequestId: string | null;
+      campaignId: string | null;
+    }> {
+      requireOperatorPlus(input.role);
+      const thread = await deps.threads.getThread({
+        organizationId: input.organizationId,
+        threadId: input.threadId,
+      });
+      if (!thread) {
+        throw new DomainError(
+          "TENANT_SCOPE_ERROR",
+          "This chat was not found in your organization.",
+        );
+      }
+      return deps.threads.setThreadLinks({
+        organizationId: input.organizationId,
+        actorId: input.actorId,
+        threadId: input.threadId,
+        ...(input.projectId ? { projectId: input.projectId } : {}),
+        ...(input.requestId ? { requestId: input.requestId } : {}),
+        ...(input.draftRequestId ? { draftRequestId: input.draftRequestId } : {}),
+        ...(input.campaignId ? { campaignId: input.campaignId } : {}),
+      });
+    },
   };
 }
 

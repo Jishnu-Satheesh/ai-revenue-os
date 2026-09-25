@@ -245,3 +245,68 @@ describe("thread repo replay", () => {
     await expect(repo.listThreads({ organizationId: "o" })).rejects.toBeInstanceOf(DomainError);
   });
 });
+
+describe("thread repo links", () => {
+  const DRAFT_REQUEST = "44444444-4444-4444-8444-444444444444";
+
+  it("writes thread links through the fenced RPC and returns the kept ids", async () => {
+    const rpc = vi.fn(async () => ({
+      data: {
+        threadId: "t1",
+        projectId: null,
+        requestId: null,
+        draftRequestId: DRAFT_REQUEST,
+        campaignId: null,
+        replayed: false,
+      },
+      error: null,
+    }));
+    const repo = createThreadRepository({ rpc });
+    const out = await repo.setThreadLinks({
+      organizationId: "o",
+      actorId: "u",
+      threadId: "t1",
+      draftRequestId: DRAFT_REQUEST,
+    });
+    expect(rpc).toHaveBeenCalledWith("set_thread_links", {
+      p_organization_id: "o",
+      p_actor_id: "u",
+      p_thread_id: "t1",
+      p_project_id: null,
+      p_request_id: null,
+      p_draft_request_id: DRAFT_REQUEST,
+      p_campaign_id: null,
+    });
+    expect(out).toEqual({
+      threadId: "t1",
+      projectId: null,
+      requestId: null,
+      draftRequestId: DRAFT_REQUEST,
+      campaignId: null,
+    });
+  });
+
+  it("refuses a malformed link id before touching the RPC", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const repo = createThreadRepository({ rpc });
+    await expect(
+      repo.setThreadLinks({
+        organizationId: "o",
+        actorId: "u",
+        threadId: "t1",
+        draftRequestId: "not-a-uuid",
+      }),
+    ).rejects.toBeInstanceOf(DomainError);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("maps a forbidden link write to an authorization error", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: "agent_thread_links_forbidden" }));
+    const repo = createThreadRepository({ rpc });
+    const error = await repo
+      .setThreadLinks({ organizationId: "o", actorId: "u", threadId: "t1" })
+      .catch((cause: unknown) => cause);
+    expect(error).toBeInstanceOf(DomainError);
+    expect((error as DomainError).code).toBe("AUTHORIZATION_ERROR");
+  });
+});

@@ -264,7 +264,7 @@ describe("draft advice gating", () => {
     );
   });
 
-  it("keeps draft actions disabled for permitted roles until the handoff slice lands", async () => {
+  it("enables the handoff for permitted roles and resolves to a prefilled brief with no bound opportunity", async () => {
     globalThis.fetch = mockAgentFetch({ route: campaignRoute }) as never;
     const user = userEvent.setup();
     render(
@@ -273,8 +273,21 @@ describe("draft advice gating", () => {
     expect(await screen.findByText("What do we know?")).toBeInTheDocument();
     await user.click(screen.getByRole("tab", { name: "Draft advice" }));
     const initiate = screen.getByRole("button", { name: /initiate campaign draft/i });
+    // The handoff slice landed: the button asks for intent instead of staying parked.
     expect(initiate).toBeDisabled();
-    expect(initiate).toHaveAttribute("title", expect.stringMatching(/later slice/));
+    expect(initiate).toHaveAttribute("title", expect.stringMatching(/objective and audience/));
+
+    await user.type(screen.getByLabelText("Objective"), "Lift weekday demand");
+    await user.type(screen.getByLabelText("Audience"), "Nearby families");
+    expect(screen.getByRole("button", { name: /initiate campaign draft/i })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: /initiate campaign draft/i }));
+    // No opportunity is bound to this chat, so the advice resolves to the
+    // pre-filled brief with the reason named — never a silent upgrade.
+    expect(await screen.findByText(/ADVICE_NO_OPPORTUNITY/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open prefilled brief/i })).toHaveAttribute(
+      "href",
+      expect.stringContaining("/campaigns/new"),
+    );
   });
 });
 

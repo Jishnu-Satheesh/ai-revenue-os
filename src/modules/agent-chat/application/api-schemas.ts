@@ -79,6 +79,24 @@ export const threadRouteParamsSchema = z
   .strict();
 export type ThreadRouteParams = z.infer<typeof threadRouteParamsSchema>;
 
+/**
+ * Thread link update body (spec section 11 audit chain). Every target is
+ * optional and nullable — passing all four as null clears the links — but
+ * unknown keys are refused. Organization, actor, and thread ids are
+ * server-owned (path, session) and never accepted from the client.
+ */
+const threadLinkIdSchema = z.string().uuid().nullable().optional();
+
+export const threadLinksBodySchema = z
+  .object({
+    projectId: threadLinkIdSchema,
+    requestId: threadLinkIdSchema,
+    draftRequestId: threadLinkIdSchema,
+    campaignId: threadLinkIdSchema,
+  })
+  .strict();
+export type ThreadLinksBody = z.infer<typeof threadLinksBodySchema>;
+
 export const organizationRouteParamsSchema = z
   .object({ organizationId: z.string().uuid() })
   .strict();

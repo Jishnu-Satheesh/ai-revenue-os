@@ -340,4 +340,53 @@ describe("thread service", () => {
     ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
     expect(threads.appendMessageKeyed).not.toHaveBeenCalled();
   });
+
+  it("links thread to draft request for operators, reading as not-found when foreign", async () => {
+    const setThreadLinks = vi.fn(async () => ({
+      threadId: "t1",
+      projectId: null,
+      requestId: null,
+      draftRequestId: "d1",
+      campaignId: null,
+    }));
+    const threads = mockThreads({ setThreadLinks });
+    const service = createThreadService({ threads });
+    const out = await service.setThreadLinks({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      draftRequestId: "d1",
+    });
+    expect(out).toMatchObject({ threadId: "t1", draftRequestId: "d1" });
+    expect(setThreadLinks).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "o", actorId: "u", threadId: "t1" }),
+    );
+
+    const foreign = mockThreads({ getThread: vi.fn(async () => null), setThreadLinks });
+    await expect(
+      createThreadService({ threads: foreign }).setThreadLinks({
+        organizationId: "o",
+        actorId: "u",
+        role: "operator",
+        threadId: "foreign",
+      }),
+    ).rejects.toMatchObject({ code: "TENANT_SCOPE_ERROR" });
+  });
+
+  it("refuses thread link updates for viewers before touching persistence", async () => {
+    const setThreadLinks = vi.fn();
+    const threads = mockThreads({ setThreadLinks });
+    const service = createThreadService({ threads });
+    await expect(
+      service.setThreadLinks({
+        organizationId: "o",
+        actorId: "u",
+        role: "viewer",
+        threadId: "t1",
+        draftRequestId: "d1",
+      }),
+    ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
+    expect(setThreadLinks).not.toHaveBeenCalled();
+  });
 });

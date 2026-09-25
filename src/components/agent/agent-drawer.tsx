@@ -8,6 +8,7 @@ import {
   AgentQuestionnaireCard,
   type QuestionnaireAnswers,
 } from "@/components/agent/agent-questionnaire-card";
+import { AgentCampaignAdvice } from "@/components/agent/agent-campaign-advice";
 import { AgentThreadSteps, type AgentStepPhase } from "@/components/agent/agent-thread-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { AgentIntent } from "@/domain/agent-router/intents";
 import type { RouterRole, QuestionnaireSpec } from "@/domain/agent-router/contracts";
@@ -419,59 +420,13 @@ export function AgentDrawer({
 
             <TabsContent value="draft" className="flex flex-col gap-3 overflow-y-auto">
               {routeResult?.intent === "campaign_advice" ? (
-                <>
-                  <p className="text-sm">
-                    Draft advice for your review. Estimates on this surface state their inputs and
-                    assumptions next to the numbers.
-                  </p>
-                  <div className="flex gap-2">
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex">
-                          <Button
-                            type="button"
-                            disabled
-                            title={
-                              !canDraft || isViewer
-                                ? "Needs the campaign.create grant — enforcement stays server-side."
-                                : "Draft handoff lands in a later slice — nothing is created from here yet."
-                            }
-                          >
-                            Initiate campaign draft
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {!canDraft || isViewer
-                          ? "Needs the campaign.create grant — enforcement stays server-side."
-                          : "Draft handoff lands in a later slice — nothing is created from here yet."}
-                      </TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span className="inline-flex">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            disabled
-                            title={
-                              isViewer
-                                ? "Viewers read answers only — ask an operator to save this."
-                                : "Recommendations save lands in a later slice — nothing is stored from here yet."
-                            }
-                          >
-                            Save to recommendations
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {isViewer
-                          ? "Viewers read answers only — ask an operator to save this."
-                          : "Recommendations save lands in a later slice — nothing is stored from here yet."}
-                      </TooltipContent>
-                    </Tooltip>
-                  </div>
-                </>
+                <AgentCampaignAdvice
+                  organizationId={organizationId}
+                  threadId={threadId}
+                  thread={thread}
+                  canDraft={canDraft}
+                  isViewer={isViewer}
+                />
               ) : (
                 <p className="text-sm text-muted-foreground">
                   No draft advice yet. Ask for campaign advice and the review card appears here.
