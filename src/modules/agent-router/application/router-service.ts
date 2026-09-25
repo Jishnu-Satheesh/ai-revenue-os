@@ -11,12 +11,13 @@ import {
   questionnaireSpecSchema,
   routerInputSchema,
   routerOutputSchema,
+  routerProposalSchema,
   type QuestionnaireItem,
   type QuestionnaireSpec,
   type RouterInput,
   type RouterOutput,
+  type RouterProposal,
 } from "@/domain/agent-router/contracts";
-import type { RouterProposal } from "@/modules/agent-router/infrastructure/light-model-provider";
 import { DomainError } from "@/lib/errors";
 
 /**
@@ -187,17 +188,8 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
   };
 
   let proposal: RouterProposal;
-  if (parsed.model.kind === "stub") {
-    proposal = { intent: parsed.model.intent, confidence: parsed.model.confidence, missing: parsed.model.missing };
-  } else if (deps.propose) {
-    proposal = deps.propose({
-      text: parsed.text,
-      page: parsed.page,
-      contextDigest: parsed.contextDigest,
-      activeWatchCount: parsed.activeWatches.length,
-    });
-  } else {
-    return finish({
+  const failClosed = (): RouterOutput =>
+    finish({
       ...shared,
       intent: "answer_memory",
       confidence: "low",
@@ -218,6 +210,30 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
       },
       reasonCodes: ["PROVIDER_FAIL_CLOSED"],
     });
+  if (parsed.model.kind === "stub") {
+    proposal = { intent: parsed.model.intent, confidence: parsed.model.confidence, missing: parsed.model.missing };
+  } else if (deps.propose) {
+    // The resolver seam is still an AI-boundary input: dispose via schema.
+    // An unparseable proposal — or a resolver that throws — fails closed
+    // exactly like a missing provider. No raw error ever escapes.
+    let raw: unknown;
+    try {
+      raw = deps.propose({
+        text: parsed.text,
+        page: parsed.page,
+        contextDigest: parsed.contextDigest,
+        activeWatchCount: parsed.activeWatches.length,
+      });
+    } catch {
+      return failClosed();
+    }
+    const resolved = routerProposalSchema.safeParse(raw);
+    if (!resolved.success) {
+      return failClosed();
+    }
+    proposal = resolved.data;
+  } else {
+    return failClosed();
   }
 
   // Policy gate 1: viewers get read-only answers only.

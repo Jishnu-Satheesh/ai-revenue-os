@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { RouterInput } from "@/domain/agent-router/contracts";
+import type { RouterInput, RouterProposal } from "@/domain/agent-router/contracts";
 import { routeAgentMessage } from "@/modules/agent-router/application/router-service";
 
 const baseInput: Omit<RouterInput, "text" | "model"> = {
@@ -68,6 +68,17 @@ describe("router", () => {
     });
     expect(out.intent).toBe("answer_memory");
     expect(out.reasonCodes).toContain("CAMPAIGN_REQUIRES_CREATE");
+  });
+
+  it("fails closed to answer_memory with a clarify card when the resolver returns garbage", () => {
+    const out = routeAgentMessage(
+      { ...baseInput, text: "keep watching competitors", model: { kind: "live" } },
+      { propose: () => ({ intent: "nonsense" }) as unknown as RouterProposal },
+    );
+    expect(out.intent).toBe("answer_memory");
+    expect(out.questionnaire).not.toBeNull();
+    expect(out.questionnaire?.kind).toBe("clarify");
+    expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
   });
 
   it("rejects an over-long message instead of silently trimming it", () => {

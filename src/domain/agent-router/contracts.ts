@@ -142,3 +142,17 @@ export const routerOutputSchema = z
   })
   .strict();
 export type RouterOutput = z.infer<typeof routerOutputSchema>;
+
+/**
+ * What the light model may propose. The model proposes; this schema
+ * disposes — every resolver result is parsed through it before use, so an
+ * unparseable proposal fails closed instead of flowing downstream.
+ */
+export const routerProposalSchema = z
+  .object({
+    intent: agentIntentSchema,
+    confidence: routerConfidenceSchema,
+    missing: z.array(missingFieldSchema).max(10),
+  })
+  .strict();
+export type RouterProposal = z.infer<typeof routerProposalSchema>;

@@ -2,16 +2,17 @@ import "server-only";
 
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateObject } from "ai";
-import { z } from "zod";
 
 import {
-  agentIntentSchema,
-  missingFieldSchema,
-  routerConfidenceSchema,
-} from "@/domain/agent-router/intents";
+  routerProposalSchema,
+  type RouterProposal,
+} from "@/domain/agent-router/contracts";
 import { env } from "@/lib/env";
 import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
+
+/** Re-exported so existing importers keep working; the schema lives in domain contracts. */
+export { routerProposalSchema, type RouterProposal };
 
 /**
  * Light-model provider for the agent router (spec section 8).
@@ -32,16 +33,6 @@ import { logger } from "@/lib/logger";
 export const ROUTER_MODEL_VERSION = "agent-router@1";
 export const ROUTER_PROVIDER_TIMEOUT_MS = 15_000;
 const ROUTER_MAX_OUTPUT_TOKENS = 500;
-
-/** What the model may propose. Parsed strictly; anything else is refused. */
-export const routerProposalSchema = z
-  .object({
-    intent: agentIntentSchema,
-    confidence: routerConfidenceSchema,
-    missing: z.array(missingFieldSchema).max(10),
-  })
-  .strict();
-export type RouterProposal = z.infer<typeof routerProposalSchema>;
 
 export type LightModelRequest = {
   /** Trimmed user message (already length-capped by the router input). */
