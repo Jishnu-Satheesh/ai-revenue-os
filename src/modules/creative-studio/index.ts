@@ -99,3 +99,20 @@ export type {
   StudioFullPosterRenderInputs,
   StudioVersionSource,
 } from "@/domain/campaigns/deliverable";
+
+// Task 4 intake surface. Type-only on purpose: the client-boundary suite pins
+// the runtime reachable set, and the intake adapters are server-only.
+export type {
+  StudioManifestExclusion,
+  StudioManifestExclusionReason,
+  StudioManifestSelection,
+  StudioReferenceManifest,
+  StudioReferencePreviewRefresh,
+} from "@/modules/creative-studio/application/reference-service";
+export type {
+  StudioUploadCompletion,
+  StudioUploadReservation,
+} from "@/modules/creative-studio/infrastructure/upload-intake";
+export type {
+  StudioUploadRecord,
+} from "@/modules/creative-studio/infrastructure/reference-reader";
