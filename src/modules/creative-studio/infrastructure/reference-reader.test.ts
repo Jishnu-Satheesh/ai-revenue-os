@@ -143,6 +143,23 @@ describe("studio reference signer", () => {
     );
   });
 
+  it("exposes the lookup key through the port, reading its own map with it", async () => {
+    const from = vi.fn(() => ({
+      createSignedUrls: async (paths: string[]) => ({
+        data: paths.map((path) => ({ path, signedUrl: `https://cdn.test/${path}` })),
+        error: null,
+      }),
+    }));
+    const signer = createSupabaseStudioReferenceSigner({ storage: { from } });
+    const entry = { bucket: "studio-uploads", path: `${ORG}/${UPLOAD}/hero.png` };
+
+    // The port delegates to the shared implementation, and the written map is
+    // readable through the port key: one contract, not two literals.
+    expect(signer.keyFor(entry)).toBe(signEntryKey(entry));
+    const urls = await signer.signPaths([entry]);
+    expect(urls[signer.keyFor(entry)]).toContain("https://cdn.test/");
+  });
+
   it("signs anew against the same storage identity when a preview expires", async () => {
     let round = 0;
     const signed: string[][] = [];

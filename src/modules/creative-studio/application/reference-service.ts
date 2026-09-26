@@ -119,6 +119,7 @@ export type StudioReferenceServiceDependencies = {
   ): Promise<CreativeHistoryItemRecord | null>;
   listLibraryReferences(organizationId: string): Promise<readonly AssetLibraryReference[]>;
   readLogoSelections(organizationId: string): Promise<readonly BrandLogoSelection[]>;
+  keyFor(entry: StudioReferenceSignEntry): string;
   signPaths(entries: readonly StudioReferenceSignEntry[]): Promise<Readonly<Record<string, string>>>;
 };
 
@@ -573,7 +574,9 @@ export function createStudioReferenceService(dependencies: StudioReferenceServic
       const previews: Record<string, string | null> = {};
       for (const entry of resolved) {
         previews[entry.referenceId] =
-          urls[`${entry.resolved.bucket}:${entry.resolved.storagePath}`] ?? null;
+          urls[
+            dependencies.keyFor({ bucket: entry.resolved.bucket, path: entry.resolved.storagePath })
+          ] ?? null;
       }
       for (const entry of excluded) {
         previews[entry.referenceId] = null;

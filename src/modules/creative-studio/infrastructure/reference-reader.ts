@@ -134,6 +134,11 @@ export type StudioReferenceSignEntry = {
  * invented: one unsignable reference costs its own preview and no more.
  */
 export type StudioReferenceSigner = {
+  /**
+   * The map key for one entry. Both sides of the sign/lookup contract call
+   * this, so the writer and the reader cannot drift apart into silent misses.
+   */
+  keyFor(entry: StudioReferenceSignEntry): string;
   signPaths(
     entries: readonly StudioReferenceSignEntry[],
   ): Promise<Readonly<Record<string, string>>>;
@@ -160,7 +165,11 @@ export function signEntryKey(entry: StudioReferenceSignEntry): string {
 export function createSupabaseStudioReferenceSigner(
   client: StudioSignStorageClient,
 ): StudioReferenceSigner {
+  // The port's key function: the map below and the service lookup both go
+  // through this, so the contract has one implementation, not two literals.
+  const keyFor = (entry: StudioReferenceSignEntry): string => signEntryKey(entry);
   return {
+    keyFor,
     async signPaths(entries) {
       if (entries.length === 0) return {};
 
@@ -180,7 +189,7 @@ export function createSupabaseStudioReferenceSigner(
         for (const row of data) {
           // A per-path failure arrives as a row with no path rather than an
           // error, so one unsignable object costs its own preview and no more.
-          if (row.path && row.signedUrl) urls[`${bucket}:${row.path}`] = row.signedUrl;
+          if (row.path && row.signedUrl) urls[keyFor({ bucket, path: row.path })] = row.signedUrl;
         }
       }
       return urls;

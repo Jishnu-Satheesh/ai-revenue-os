@@ -216,6 +216,7 @@ function serviceWith(input: {
   history?: Record<string, CreativeHistoryItemRecord | null>;
   library?: readonly AssetLibraryReference[];
   logos?: readonly BrandLogoSelection[];
+  key?: StudioReferenceServiceDependencies["keyFor"];
   sign?: StudioReferenceServiceDependencies["signPaths"];
 }) {
   const seenOrganizations: string[] = [];
@@ -235,12 +236,14 @@ function serviceWith(input: {
     seenOrganizations.push(organizationId);
     return input.logos ?? [];
   });
+  const keyFor =
+    input.key ?? ((entry: { bucket: string; path: string }) => `${entry.bucket}:${entry.path}`);
   const signPaths =
     input.sign ??
     (async (entries: readonly { bucket: string; path: string }[]) => {
       const urls: Record<string, string> = {};
       for (const entry of entries) {
-        urls[`${entry.bucket}:${entry.path}`] = `https://cdn.test/${entry.bucket}/${entry.path}?sig=1`;
+        urls[keyFor(entry)] = `https://cdn.test/${entry.bucket}/${entry.path}?sig=1`;
       }
       return urls;
     });
@@ -249,6 +252,7 @@ function serviceWith(input: {
     readHistoryItem,
     listLibraryReferences,
     readLogoSelections,
+    keyFor,
     signPaths: vi.fn(signPaths),
   });
   return {
@@ -896,6 +900,36 @@ describe("studio reference previews", () => {
         { bucket: "brand-assets", path: `${ORG}/${MARK_ASSET}/${MARK_VERSION}/source` },
       ],
     ]);
+    expect(refreshed.excluded).toEqual([]);
+    expect(refreshed.previews).toEqual({
+      "design-1": expect.stringContaining("sig=1"),
+      "upload-1": expect.stringContaining("sig=1"),
+      "product-1": expect.stringContaining("sig=1"),
+      "mark-1": expect.stringContaining("sig=1"),
+    });
+  });
+
+  it("looks previews up through the injected key function, not an inline literal", async () => {
+    // A distinctive key format: if the service rebuilt the key inline instead
+    // of calling the injected port function, every preview would miss.
+    const keyFor = (entry: { bucket: string; path: string }) => `${entry.bucket}|${entry.path}`;
+    const { service } = serviceWith({
+      ...fullDependencies(),
+      key: keyFor,
+      sign: async (entries) => {
+        const urls: Record<string, string> = {};
+        for (const entry of entries) {
+          urls[keyFor(entry)] = `https://cdn.test/${entry.bucket}/${entry.path}?sig=1`;
+        }
+        return urls;
+      },
+    });
+
+    const refreshed = await service.refreshPreviews({
+      organizationId: ORG,
+      selection: selection(),
+    });
+
     expect(refreshed.excluded).toEqual([]);
     expect(refreshed.previews).toEqual({
       "design-1": expect.stringContaining("sig=1"),
