@@ -9,7 +9,14 @@ import {
 } from "@/domain/agent-router/contracts";
 import { routeAgentMessage } from "@/modules/agent-router/application/router-service";
 import { DomainError } from "@/lib/errors";
-import type { ContextPackReaders } from "@/modules/agent-chat/application/context-pack";
+import type { ContextPack, ContextPackReaders } from "@/modules/agent-chat/application/context-pack";
+import {
+  buildAnswerIdempotencyKey,
+  encodeAnswerBody,
+  writeAnswer,
+  type AnswerDraft,
+  type AnswerSynthesizer,
+} from "@/modules/agent-chat/application/answer-writer";
 import {
   encodeQuestionnaireAnswerBody,
   resolvePackContextDigest,
@@ -58,6 +65,13 @@ export type ThreadServiceDeps = {
    */
   contextReaders?: ContextPackReaders;
   /**
+   * Answer synthesis seam (Slice A). Injected in tests; otherwise the
+   * writer's env-gated default applies (deterministic internal-only draft
+   * unless `AI_ANSWER_MODEL` plus the Google credential is set). Viewers
+   * never reach persistence — they receive the draft without a stored row.
+   */
+  synthesizeAnswer?: AnswerSynthesizer;
+  /**
    * Route-redispatch dedup (ruling L4). Re-route with the same carried
    * idempotency token for the same thread + message returns the kept
    * routing without emitting a duplicate `agent_thread.routed` event.
@@ -79,6 +93,22 @@ export type RouteDedupHit = {
   questionnaire: QuestionnaireSpec | null;
   routingNote: string;
   thread: ThreadSummary;
+  /** Kept synthesis: message id rehydrates on replay; null when viewer-only. */
+  answer: { messageId: string | null; draft: AnswerDraft } | null;
+};
+
+/**
+ * One synthesized answer for a routed turn. Operators persist it as an
+ * `assistant` row through the fenced keyed RPC (thread-linked answer key,
+ * so redispatch replays instead of double-posting); viewers receive the
+ * draft with no stored row, because viewer routes are read-only. A
+ * conflicting or failed append degrades to draft-only rather than failing
+ * the route — the kept row (if any) still renders from the durable read.
+ */
+export type RouteAnswer = {
+  message: ThreadMessageView | null;
+  draft: AnswerDraft;
+  replayed: boolean;
 };
 
 export type RouteDedupStore = {
@@ -183,6 +213,80 @@ async function resolveProposal(
   }
   const parsed = routerProposalSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
+}
+
+async function synthesizeAssistantAnswer(
+  deps: ThreadServiceDeps,
+  args: {
+    organizationId: string;
+    actorId: string;
+    role: OrganizationRole;
+    thread: ThreadSummary;
+    message: ThreadMessageView;
+    pack: ContextPack | null;
+    routingNote: string;
+  },
+): Promise<RouteAnswer> {
+  const draft = await writeAnswer(
+    { pack: args.pack, routingNote: args.routingNote, threadId: args.thread.id, mode: args.thread.mode },
+    {
+      ...(deps.synthesizeAnswer !== undefined ? { synthesize: deps.synthesizeAnswer } : {}),
+      ...(deps.correlationId ? { correlationId: deps.correlationId } : {}),
+    },
+  );
+  // Viewer routes are read-only: the draft returns with no stored row, and
+  // the fenced RPC is never touched.
+  if (args.role === "viewer") {
+    return { message: null, draft, replayed: false };
+  }
+  const idempotencyKey = buildAnswerIdempotencyKey({
+    threadId: args.thread.id,
+    messageId: args.message.id,
+    body: args.message.body ?? "",
+  });
+  try {
+    const appended = await deps.threads.appendMessageKeyed({
+      organizationId: args.organizationId,
+      actorId: args.actorId,
+      threadId: args.thread.id,
+      role: "assistant",
+      body: encodeAnswerBody(draft),
+      idempotencyKey,
+    });
+    const kept = await deps.threads.getMessage({
+      organizationId: args.organizationId,
+      messageId: appended.messageId,
+    });
+    if (!kept) {
+      return { message: null, draft, replayed: appended.replayed };
+    }
+    // No extra audit event here: the turn's `agent_thread.routed` event
+    // already trails this row by thread + message ids, and audit-event
+    // shape belongs to Slice B (dispatch + events). The row itself is the
+    // durable, poll-rendered record.
+    return { message: kept, draft, replayed: appended.replayed };
+  } catch {
+    // A conflicting or failed answer append must not fail the route: the
+    // draft still returns, and the kept row (if any) renders on the next
+    // durable read.
+    return { message: null, draft, replayed: false };
+  }
+}
+
+async function rehydrateKeptAnswer(
+  deps: ThreadServiceDeps,
+  input: { organizationId: string },
+  kept: RouteDedupHit,
+): Promise<RouteAnswer | null> {
+  if (!kept.answer) return null;
+  if (!kept.answer.messageId) {
+    return { message: null, draft: kept.answer.draft, replayed: true };
+  }
+  const message = await deps.threads.getMessage({
+    organizationId: input.organizationId,
+    messageId: kept.answer.messageId,
+  });
+  return { message, draft: kept.answer.draft, replayed: true };
 }
 
 export function createThreadService(deps: ThreadServiceDeps) {
@@ -327,6 +431,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
       questionnaire: QuestionnaireSpec | null;
       routingNote: string;
       thread: ThreadSummary;
+      answer: RouteAnswer | null;
       replayed: boolean;
     }> {
       const thread = await deps.threads.getThread({
@@ -357,24 +462,28 @@ export function createThreadService(deps: ThreadServiceDeps) {
       if (dedupKey) {
         const kept = dedup.get(dedupKey);
         if (kept) {
-          return { ...kept, replayed: true };
+          return { ...kept, answer: await rehydrateKeptAnswer(deps, input, kept), replayed: true };
         }
       }
-      const contextDigest = deps.contextReaders
-        ? (
-            await resolvePackContextDigest({
-              organizationId: input.organizationId,
-              userId: input.actorId,
-              windowDays: 30,
-              page,
-              readers: deps.contextReaders,
-            })
-          ).digest
-        : routingContextDigest({
-            organizationId: input.organizationId,
-            threadId: thread.id,
-            messageId: message.id,
-          });
+      let pack: ContextPack | null = null;
+      let contextDigest: string;
+      if (deps.contextReaders) {
+        const resolved = await resolvePackContextDigest({
+          organizationId: input.organizationId,
+          userId: input.actorId,
+          windowDays: 30,
+          page,
+          readers: deps.contextReaders,
+        });
+        pack = resolved.pack;
+        contextDigest = resolved.digest;
+      } else {
+        contextDigest = routingContextDigest({
+          organizationId: input.organizationId,
+          threadId: thread.id,
+          messageId: message.id,
+        });
+      }
       const proposal = await resolveProposal(deps, { text: message.body, page, contextDigest });
       const output = routeAgentMessage({
         text: message.body,
@@ -415,8 +524,24 @@ export function createThreadService(deps: ThreadServiceDeps) {
         questionnaire: output.questionnaire,
         routingNote: output.routingNote,
         thread,
+        answer: await synthesizeAssistantAnswer(deps, {
+          organizationId: input.organizationId,
+          actorId: input.actorId,
+          role: input.role,
+          thread,
+          message,
+          pack,
+          routingNote: output.routingNote,
+        }),
       };
-      if (dedupKey) dedup.set(dedupKey, routed);
+      if (dedupKey) {
+        dedup.set(dedupKey, {
+          ...routed,
+          answer: routed.answer
+            ? { messageId: routed.answer.message?.id ?? null, draft: routed.answer.draft }
+            : null,
+        });
+      }
       return { ...routed, replayed: false };
     },
 
@@ -443,6 +568,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
       answers: Record<string, string>;
       intent: AgentIntent;
       questionnaire: QuestionnaireSpec | null;
+      answer: RouteAnswer | null;
     }> {
       requireOperatorPlus(input.role);
       const normalized = validateQuestionnaireAnswers(input.spec, input.answers);
@@ -493,6 +619,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
         answers: normalized,
         intent: routed.intent,
         questionnaire: routed.questionnaire,
+        answer: routed.answer,
       };
     },
 

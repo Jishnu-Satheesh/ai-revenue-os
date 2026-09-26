@@ -8,6 +8,7 @@ import {
   AgentQuestionnaireCard,
   type QuestionnaireAnswers,
 } from "@/components/agent/agent-questionnaire-card";
+import { AgentResponseMessage } from "@/components/agent/agent-response-message";
 import {
   AgentCampaignAdvice,
   type CampaignAdviceContext,
@@ -200,6 +201,41 @@ export function AgentDrawer({
   const canManageWatch = role !== "viewer" && permissions.includes("growth_intelligence.manage");
   const isViewer = role === "viewer";
 
+  /**
+   * Durable-read refresh (Slice A): the route/answers re-route persists the
+   * assistant row server-side, but the POST responses carry no message
+   * bodies back — rendering always reads durable GET rows, never POST
+   * echoes and never a token stream. Merges by id so locally appended rows
+   * (user prompt, answers receipt) survive the refresh.
+   */
+  async function refreshMessages(refreshThreadId: string): Promise<void> {
+    try {
+      const body = (await agentGetJson(
+        `${base}/${refreshThreadId}/messages?limit=50`,
+        correlationId,
+      )) as MessagesResponse;
+      const fetched = body.messages ?? [];
+      setMessages((previous) => {
+        const seen = new Map(previous.map((message) => [message.id, message]));
+        for (const message of fetched) {
+          if (!seen.has(message.id)) seen.set(message.id, message);
+        }
+        return [...seen.values()].sort((left, right) =>
+          left.createdAt < right.createdAt
+            ? -1
+            : left.createdAt > right.createdAt
+              ? 1
+              : left.id < right.id
+                ? -1
+                : 1,
+        );
+      });
+    } catch {
+      // The send already succeeded; a failed refresh keeps the local rows
+      // and the next reopen replays the durable read.
+    }
+  }
+
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
@@ -258,6 +294,9 @@ export function AgentDrawer({
       setSendError(null);
       onTabChange("response");
       setAnnouncement(`Routed to ${result.intent}.`);
+      // The assistant row lands server-side during routing; re-read the
+      // durable rows so the answer renders with citations + limitations.
+      void refreshMessages(row.id);
       void queryClient.invalidateQueries({ queryKey: ["agent-threads", organizationId] });
     },
     onError: (error) => {
@@ -315,6 +354,9 @@ export function AgentDrawer({
       setLastSaved({ resumeKey: result.resumeKey, answers: result.answers });
       setSendError(null);
       setAnnouncement(`Answers saved and re-routed to ${result.intent}.`);
+      // The re-route synthesizes again server-side; re-read the durable
+      // rows so the fresh answer renders beside the saved answers.
+      if (threadId) void refreshMessages(threadId);
       void queryClient.invalidateQueries({ queryKey: ["agent-threads", organizationId] });
     },
     onError: (error) => {
@@ -541,8 +583,7 @@ export function AgentDrawer({
               ) : null}
               {messages.length === 0 && !send.isPending ? (
                 <p className="text-sm text-muted-foreground">
-                  Ask anything. This slice routes your message and gathers context — full
-                  synthesized answers arrive with the synthesis slice.
+                  Ask anything. Answers render here with their sources and limitations.
                 </p>
               ) : null}
               {send.isPending ? (
@@ -551,23 +592,27 @@ export function AgentDrawer({
                   <Skeleton className="h-4 w-2/3" />
                 </div>
               ) : null}
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}
-                >
-                  <Card
-                    className={cn(
-                      "max-w-[90%]",
-                      message.role === "user" ? "bg-primary text-primary-foreground" : "",
-                    )}
+              {messages.map((message) =>
+                message.role === "assistant" ? (
+                  <AgentResponseMessage key={message.id} message={message} />
+                ) : (
+                  <div
+                    key={message.id}
+                    className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}
                   >
-                    <CardContent className="text-sm whitespace-pre-wrap">
-                      {message.body ?? "(empty message)"}
-                    </CardContent>
-                  </Card>
-                </div>
-              ))}
+                    <Card
+                      className={cn(
+                        "max-w-[90%]",
+                        message.role === "user" ? "bg-primary text-primary-foreground" : "",
+                      )}
+                    >
+                      <CardContent className="text-sm whitespace-pre-wrap">
+                        {message.body ?? "(empty message)"}
+                      </CardContent>
+                    </Card>
+                  </div>
+                ),
+              )}
               {routeResult ? (
                 <p className="text-sm text-muted-foreground">
                   Routed to <Badge variant="secondary">{routeResult.intent}</Badge>

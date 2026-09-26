@@ -1,0 +1,585 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import {
+  answerCitationSchema,
+  answerDraftSchema,
+  answerEstimateSchema,
+  buildAnswerIdempotencyKey,
+  buildFallbackAnswer,
+  createAnswerSynthesizer,
+  encodeAnswerBody,
+  parseAnswerBody,
+  synthesisCandidateSchema,
+  writeAnswer,
+  type AnswerDraft,
+  type AnswerSynthesizer,
+} from "@/modules/agent-chat/application/answer-writer";
+import { buildAgentContextPack } from "@/modules/agent-chat/application/context-pack";
+import { createThreadService } from "@/modules/agent-chat/application/thread-service";
+import type { ThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
+import { AgentResponseMessage } from "@/components/agent/agent-response-message";
+
+afterEach(() => {
+  cleanup();
+  vi.unstubAllEnvs();
+});
+
+const THREAD = {
+  id: "t1",
+  organizationId: "o",
+  title: "Hi",
+  mode: "quick",
+  status: "open",
+  linkedResearchProjectId: null,
+  linkedRequestId: null,
+  linkedDraftRequestId: null,
+  linkedCampaignId: null,
+  createdAt: "2026-09-25T10:00:00.000Z",
+  updatedAt: "2026-09-25T10:00:00.000Z",
+} as const;
+
+const USER_MESSAGE = {
+  id: "m1",
+  threadId: "t1",
+  role: "user",
+  body: "what do we know about weekday demand?",
+  questionnaireAnswers: null,
+  markerReceipts: null,
+  citations: null,
+  createdAt: "2026-09-25T10:01:00.000Z",
+} as const;
+
+function testPack() {
+  return buildAgentContextPack({
+    organizationId: "o",
+    userId: "u",
+    windowDays: 30,
+    page: "overview",
+    now: "2026-09-20T10:00:00.000Z",
+    readers: {
+      getIdentityFacts: async () => [
+        { id: "f1", statement: "Confirmed trading name.", verified: true, source: "profile" },
+      ],
+      getMarketProfile: async () => ({
+        status: "current",
+        versionId: "mp-v3",
+        digest: "abc123",
+      }),
+    },
+  });
+}
+
+function mockThreads(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>> = {}) {
+  const appendMessageKeyed = vi.fn(async (input: {
+    role: string;
+    body: string;
+    threadId: string;
+  }) => ({
+    messageId: input.role === "assistant" ? "a1" : "m1",
+    threadId: input.threadId,
+    replayed: false,
+  }));
+  const getMessage = vi.fn(async (input: { messageId: string }) => ({
+    id: input.messageId,
+    threadId: "t1",
+    role: input.messageId === "a1" ? "assistant" : "user",
+    body: input.messageId === "a1" ? "assistant body" : USER_MESSAGE.body,
+    questionnaireAnswers: null,
+    markerReceipts: null,
+    citations: null,
+    createdAt: "2026-09-25T10:02:00.000Z",
+  }));
+  return {
+    __appendMessageKeyed: appendMessageKeyed,
+    __getMessage: getMessage,
+    createThreadKeyed: vi.fn(async () => ({ threadId: "t1", status: "open", replayed: false })),
+    appendMessageKeyed,
+    getThread: vi.fn(async () => ({ ...THREAD })),
+    getMessage,
+    latestUserMessage: vi.fn(async () => ({ ...USER_MESSAGE })),
+    listThreads: vi.fn(async () => ({ threads: [{ ...THREAD }], nextCursor: null })),
+    listMessages: vi.fn(async () => ({ messages: [{ ...USER_MESSAGE }], nextCursor: null })),
+    ...overrides,
+  } as unknown as ThreadRepository & {
+    __appendMessageKeyed: typeof appendMessageKeyed;
+    __getMessage: typeof getMessage;
+  };
+}
+
+describe("answer-writer synthesis", () => {
+  it("turns an unknown pack lane into a limitation, never a claim", async () => {
+    const pack = await testPack();
+    // Economics + memory + timeline lanes are unbound in this pack.
+    expect(pack.limitations.length).toBeGreaterThan(0);
+    const draft = await writeAnswer(
+      {
+        pack,
+        routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+        threadId: "t1",
+        mode: "quick",
+      },
+      { synthesize: null },
+    );
+    const parsed = answerDraftSchema.parse(draft);
+    expect(parsed.limitations.length).toBeGreaterThan(0);
+    // Every citation must come from the pack sources — nothing invented.
+    for (const citation of parsed.citations) {
+      expect(pack.sources).toContain(citation.sourceId);
+    }
+    // The unbound economics lane is named honestly, not filled with numbers.
+    expect(parsed.limitations.join(" ")).toMatch(/economics/i);
+    expect(parsed.body).not.toMatch(/AED|aed/);
+  });
+
+  it("rejects an estimate without inputs by Zod", () => {
+    expect(() =>
+      answerEstimateSchema.parse({
+        label: "Estimate",
+        value: "+5% visits",
+        inputs: [],
+        assumptions: ["demand holds"],
+      }),
+    ).toThrow();
+  });
+
+  it("degrades an estimate without inputs to a limitation, never a bare number", async () => {
+    const pack = await testPack();
+    const draft = await writeAnswer(
+      {
+        pack,
+        routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+        threadId: "t1",
+        mode: "quick",
+      },
+      {
+        synthesize: async () => ({
+          body: "Visits will rise.",
+          citations: [],
+          limitations: [],
+          estimates: [
+            { label: "Estimate", value: "+5% visits", inputs: [], assumptions: ["x"] },
+          ],
+        }),
+      },
+    );
+    expect(draft.estimates).toEqual([]);
+    expect(draft.limitations.join(" ")).toMatch(/failed validation/i);
+  });
+
+  it("drops citations outside the pack sources and says so", async () => {
+    const pack = await testPack();
+    const draft = await writeAnswer(
+      {
+        pack,
+        routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+        threadId: "t1",
+        mode: "quick",
+      },
+      {
+        synthesize: async () => ({
+          body: "The name is confirmed.",
+          citations: [
+            { claim: "Confirmed trading name.", sourceId: "f1" },
+            { claim: "Ghost ledger total.", sourceId: "ghost-ledger-9" },
+          ],
+          limitations: [],
+          estimates: [],
+        }),
+      },
+    );
+    expect(draft.citations.map((citation) => citation.sourceId)).toEqual(["f1"]);
+    expect(draft.citations[0]).toMatchObject({ digest: pack.digest });
+    expect(draft.limitations.join(" ")).toMatch(/ghost-ledger-9|dropped/i);
+  });
+
+  it("cannot represent a realized-result claim: baseline/attribution/window fields fail strict validation", async () => {
+    // The candidate schema itself refuses the realized-result shape.
+    expect(() =>
+      synthesisCandidateSchema.parse({
+        body: "This earned you money.",
+        citations: [],
+        limitations: [],
+        estimates: [],
+        baseline: "2026-08-01/2026-08-31",
+        attribution: "last-click",
+        window: "30d",
+      }),
+    ).toThrow();
+    // And a model that tries it gets the honest fallback instead.
+    const pack = await testPack();
+    const draft = await writeAnswer(
+      {
+        pack,
+        routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+        threadId: "t1",
+        mode: "quick",
+      },
+      {
+        synthesize: async () => ({
+          body: "This earned you AED 4,000.",
+          citations: [],
+          limitations: [],
+          estimates: [],
+          baseline: "2026-08",
+          attribution: "last-click",
+          window: "30d",
+        }),
+      },
+    );
+    expect(draft.body).not.toMatch(/earned you/i);
+    expect(draft.limitations.length).toBeGreaterThan(0);
+  });
+
+  it("degrades a throwing model to an honest limitation, never invention", async () => {
+    const pack = await testPack();
+    const draft = await writeAnswer(
+      {
+        pack,
+        routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+        threadId: "t1",
+        mode: "quick",
+      },
+      {
+        synthesize: async () => {
+          throw new Error("provider down");
+        },
+      },
+    );
+    expect(draft.body).toMatch(/stored organization context|unavailable/i);
+    expect(draft.limitations.length).toBeGreaterThan(0);
+  });
+
+  it("stays general when the pack itself is unavailable", async () => {
+    const draft = await writeAnswer(
+      {
+        pack: null,
+        routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+        threadId: "t1",
+        mode: "quick",
+      },
+      { synthesize: null },
+    );
+    expect(draft.citations).toEqual([]);
+    expect(draft.estimates).toEqual([]);
+    expect(draft.limitations.join(" ")).toMatch(/context/i);
+  });
+
+  it("carries a refused pack as an explicit refusal limitation", async () => {
+    const pack = await testPack();
+    const refused = { ...pack, refused: true };
+    const draft = buildFallbackAnswer(refused, "test reason");
+    expect(draft.limitations.join(" ")).toMatch(/refused|reason/i);
+  });
+
+  it("round-trips a draft through the durable body encoding", async () => {
+    const pack = await testPack();
+    const draft: AnswerDraft = {
+      body: "Weekday demand looks soft in the stored window.",
+      citations: [{ claim: "Confirmed trading name.", sourceId: "f1", digest: pack.digest }],
+      limitations: ["Economics data not ready; cost claims stay withheld."],
+      estimates: [
+        {
+          label: "Estimate",
+          value: "+5% visits / week",
+          inputs: ["weekday covers, last 30 days"],
+          assumptions: ["no price change during the window"],
+        },
+      ],
+    };
+    const encoded = encodeAnswerBody(draft);
+    expect(encoded.length).toBeLessThanOrEqual(20000);
+    const parsed = parseAnswerBody(encoded);
+    expect(parsed.body).toBe(draft.body);
+    expect(parsed.citations).toEqual(draft.citations);
+    expect(parsed.limitations).toEqual(draft.limitations);
+    expect(parsed.estimates).toEqual(draft.estimates);
+  });
+
+  it("names whole-section omissions when a pathological draft overflows the row cap", async () => {
+    const pack = await testPack();
+    const big = "x".repeat(15000);
+    const draft: AnswerDraft = {
+      body: big,
+      citations: Array.from({ length: 50 }, (_, index) => ({
+        claim: `Claim ${index} ${"c".repeat(260)}`.slice(0, 280),
+        sourceId: "f1",
+        digest: pack.digest,
+      })),
+      limitations: Array.from({ length: 60 }, (_, index) => `Gap ${index} ${"g".repeat(260)}`.slice(0, 280)),
+      estimates: Array.from({ length: 10 }, (_, index) => ({
+        label: "Estimate" as const,
+        value: `Value ${index} ${"v".repeat(220)}`.slice(0, 240),
+        inputs: Array.from({ length: 5 }, (_, item) => `input ${index}.${item} ${"i".repeat(470)}`.slice(0, 500)),
+        assumptions: Array.from({ length: 5 }, (_, item) => `assume ${index}.${item} ${"a".repeat(470)}`.slice(0, 500)),
+      })),
+    };
+    const encoded = encodeAnswerBody(draft);
+    expect(encoded.length).toBeLessThanOrEqual(20000);
+    const parsed = parseAnswerBody(encoded);
+    expect(parsed.body).toBe(big);
+    expect(parsed.citations).toEqual([]);
+    expect(parsed.limitations.join(" ")).toMatch(/omitted.*message cap/i);
+  });
+
+  it("parses a plain body with no sections as body-only", () => {
+    expect(parseAnswerBody("Just words.")).toEqual({
+      body: "Just words.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    });
+  });
+
+  it("mints a stable thread-linked answer key", () => {
+    const first = buildAnswerIdempotencyKey({ threadId: "t1", messageId: "m1", body: "hi" });
+    expect(first).toBe(buildAnswerIdempotencyKey({ threadId: "t1", messageId: "m1", body: "hi" }));
+    expect(first.startsWith("agent_thread:t1:")).toBe(true);
+    expect(first.endsWith(":answer")).toBe(true);
+    expect(first.length).toBeLessThanOrEqual(200);
+  });
+
+  it("stays null-configured without an explicit answer model", () => {
+    expect(createAnswerSynthesizer()).toBeNull();
+  });
+
+  it("validates the input envelope instead of inventing", async () => {
+    await expect(
+      writeAnswer(
+        { pack: null, routingNote: "   ", threadId: "t1", mode: "quick" },
+        { synthesize: null },
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+
+  it("citation claims stay bounded text", () => {
+    expect(() =>
+      answerCitationSchema.parse({ claim: "  ", sourceId: "f1", digest: "abc123" }),
+    ).toThrow();
+  });
+});
+
+describe("routeLatest synthesize step", () => {
+  const readers = {
+    getIdentityFacts: async () => [
+      { id: "f1", statement: "Confirmed trading name.", verified: true, source: "profile" },
+    ],
+  };
+
+  function routeService(
+    threads: ThreadRepository,
+    synthesize: AnswerSynthesizer | null,
+    extra: Record<string, unknown> = {},
+  ) {
+    return createThreadService({
+      threads,
+      proposeRouter: async () => ({ intent: "answer_memory", confidence: "high", missing: [] }),
+      contextReaders: readers,
+      synthesizeAnswer: synthesize ?? undefined,
+      ...extra,
+    });
+  }
+
+  it("persists an assistant row for operators through the fenced RPC", async () => {
+    const threads = mockThreads();
+    const service = routeService(threads, async () => ({
+      body: "Stored context says hello.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    }));
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "route-token-000000000000001",
+    });
+    expect(out.answer).toBeDefined();
+    expect(out.answer?.draft.body).toMatch(/stored context/i);
+    expect(threads.__appendMessageKeyed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "o",
+        threadId: "t1",
+        role: "assistant",
+        idempotencyKey: expect.stringMatching(/^agent_thread:t1:[0-9a-f]{16}:answer$/),
+      }),
+    );
+    expect(out.answer?.message?.role).toBe("assistant");
+    expect(out.answer?.replayed).toBe(false);
+  });
+
+  it("writes no rows for viewers but still returns the draft", async () => {
+    const threads = mockThreads();
+    const service = routeService(threads, async () => ({
+      body: "Stored context says hello.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    }));
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "viewer",
+      threadId: "t1",
+      page: "overview",
+    });
+    expect(threads.__appendMessageKeyed).not.toHaveBeenCalled();
+    expect(out.answer?.message).toBeNull();
+    expect(out.answer?.draft.body).toMatch(/stored context/i);
+  });
+
+  it("keeps the route green when the answer append conflicts", async () => {
+    const threads = mockThreads({
+      appendMessageKeyed: vi.fn(async () => {
+        const { IdempotencyConflictError } = await import("@/domain/agent-chat/errors");
+        throw new IdempotencyConflictError("already saved");
+      }),
+    });
+    const service = routeService(threads, async () => ({
+      body: "Stored context says hello.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    }));
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.answer?.message).toBeNull();
+    expect(out.answer?.draft.body).toMatch(/stored context/i);
+  });
+
+  it("stays general without bound readers (answers-route reality until Task 3 binds them)", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      proposeRouter: async () => ({ intent: "answer_memory", confidence: "high", missing: [] }),
+      synthesizeAnswer: async () => ({
+        body: "Stored context says hello.",
+        citations: [],
+        limitations: [],
+        estimates: [],
+      }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+    // No readers bound (the answers route wires none yet): the pack is
+    // null, the stub is never called, and the general fallback persists.
+    expect(out.answer?.draft.body).toMatch(/stays general/i);
+    expect(out.answer?.message?.role).toBe("assistant");
+  });
+
+  it("synthesizes again on the answers re-route", async () => {
+    const threads = mockThreads();
+    const synthesize = vi.fn(async () => ({
+      body: "Stored context says hello.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    }));
+    const service = routeService(threads, synthesize);
+    const out = await service.submitAnswers({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      spec: {
+        kind: "missing_fields" as const,
+        title: "One more detail",
+        resumeKey: "router:watch:overview:abcdef1234567890",
+        items: [
+          {
+            key: "frequency",
+            label: "How often?",
+            kind: "single_select" as const,
+            required: true,
+            options: [
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+            ],
+          },
+        ],
+      },
+      answers: { frequency: "weekly" },
+      idempotencyKey: "answers-key-0000000000000001",
+      page: "overview",
+    });
+    expect(synthesize).toHaveBeenCalledTimes(1);
+    expect(out.answer?.draft.body).toMatch(/stored context/i);
+    const assistantCalls = threads.__appendMessageKeyed.mock.calls.filter(
+      (call) => (call[0] as { role: string }).role === "assistant",
+    );
+    expect(assistantCalls).toHaveLength(1);
+  });
+});
+
+describe("AgentResponseMessage", () => {
+  it("renders the answer with citation chips, limitations, and labeled estimates", async () => {
+    const pack = await testPack();
+    const draft: AnswerDraft = {
+      body: "Weekday demand looks soft in the stored window.",
+      citations: [{ claim: "Confirmed trading name.", sourceId: "f1", digest: pack.digest }],
+      limitations: ["Economics data not ready; cost claims stay withheld."],
+      estimates: [
+        {
+          label: "Estimate",
+          value: "+5% visits / week",
+          inputs: ["weekday covers, last 30 days"],
+          assumptions: ["no price change during the window"],
+        },
+      ],
+    };
+    render(
+      <AgentResponseMessage
+        message={{
+          id: "a1",
+          threadId: "t1",
+          role: "assistant",
+          body: encodeAnswerBody(draft),
+          questionnaireAnswers: null,
+          markerReceipts: null,
+          citations: null,
+          createdAt: "2026-09-25T10:02:00.000Z",
+        }}
+      />,
+    );
+    expect(screen.getByText(/weekday demand looks soft/i)).toBeInTheDocument();
+    expect(screen.getByText(/confirmed trading name/i)).toBeInTheDocument();
+    expect(screen.getByText(/economics data not ready/i)).toBeInTheDocument();
+    expect(screen.getByText("Estimate")).toBeInTheDocument();
+    expect(screen.getByText(/\+5% visits \/ week/)).toBeInTheDocument();
+    expect(screen.getByText(/weekday covers, last 30 days/)).toBeInTheDocument();
+    expect(screen.getByText(/no price change during the window/)).toBeInTheDocument();
+  });
+
+  it("renders a plain assistant body with no sections", () => {
+    render(
+      <AgentResponseMessage
+        message={{
+          id: "a1",
+          threadId: "t1",
+          role: "assistant",
+          body: "Hello.",
+          questionnaireAnswers: null,
+          markerReceipts: null,
+          citations: null,
+          createdAt: "2026-09-25T10:02:00.000Z",
+        }}
+      />,
+    );
+    expect(screen.getByText("Hello.")).toBeInTheDocument();
+    expect(screen.queryByText("Estimate")).not.toBeInTheDocument();
+  });
+});
