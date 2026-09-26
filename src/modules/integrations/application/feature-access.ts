@@ -48,6 +48,55 @@ export function isIntegrationHubEnabled(
   return enabledOrganizationIds.has(organizationId.toLowerCase());
 }
 
+export function parseAgentChatOrganizationIds(value: string | undefined): Set<string> {
+  if (!value) {
+    return new Set();
+  }
+
+  const organizationIds = value.split(",").map((organizationId) => organizationId.trim());
+
+  if (organizationIds.some((organizationId) => organizationId.length === 0)) {
+    throw new Error("Agent chat rollout organization IDs must not contain empty values.");
+  }
+
+  const enabledOrganizationIds = new Set<string>();
+
+  for (const organizationId of organizationIds) {
+    enabledOrganizationIds.add(organizationIdSchema.parse(organizationId).toLowerCase());
+  }
+
+  if (enabledOrganizationIds.size !== organizationIds.length) {
+    throw new Error("Agent chat rollout organization IDs must not contain duplicates.");
+  }
+
+  return enabledOrganizationIds;
+}
+
+/**
+ * Whether this organization sees the universal agent shell and its routes.
+ *
+ * Unset means off for everyone (default off). Rollback is removing an ID
+ * from this list: classification writes nothing durable beyond threads and
+ * messages, and research/watch/campaign lanes keep their own fences, so
+ * turning the flag off leaves no run to unwind — in-flight drawer polls
+ * simply start failing closed until the flag returns.
+ */
+export function isAgentChatEnabled(
+  organizationId: string,
+  enabledOrganizationIds = parseAgentChatOrganizationIds(env.AGENT_CHAT_V1_ORGANIZATION_IDS),
+): boolean {
+  return enabledOrganizationIds.has(organizationId.toLowerCase());
+}
+
+export function assertAgentChatEnabled(organizationId: string): void {
+  if (!isAgentChatEnabled(organizationId)) {
+    throw new DomainError(
+      "FEATURE_NOT_AVAILABLE",
+      "The AI agent is not available for this organization.",
+    );
+  }
+}
+
 export function isGovernedReportValidationEnabled(
   organizationId: string,
   enabledOrganizationIds = parseIntegrationOrganizationIds(

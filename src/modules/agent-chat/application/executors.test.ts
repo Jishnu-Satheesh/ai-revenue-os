@@ -423,8 +423,23 @@ describe("buildDuplicateWatchCard", () => {
     ]);
     const editable = card.items.map((item) => item.key);
     expect(editable).toEqual(
-      expect.arrayContaining(["frequency", "branch", "end_date", "confirm_start_fresh"]),
+      expect.arrayContaining([
+        "frequency",
+        "branch",
+        "research_area",
+        "competitors",
+        "end_date",
+        "confirm_start_fresh",
+      ]),
     );
+    // Research-area and competitor edits never apply in place: their help
+    // text says they propose a Market Profile update instead.
+    const researchArea = card.items.find((item) => item.key === "research_area");
+    const competitors = card.items.find((item) => item.key === "competitors");
+    expect(researchArea?.required).toBe(false);
+    expect(competitors?.required).toBe(false);
+    expect(researchArea?.helpText).toMatch(/Market Profile update/);
+    expect(competitors?.helpText).toMatch(/valid public HTTP or HTTPS URL/);
   });
 });
 

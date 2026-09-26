@@ -10,6 +10,11 @@ import {
   type AgentDrawerTab,
   type PendingPrompt,
 } from "@/components/agent/agent-drawer";
+import type {
+  CampaignAdviceContext,
+  CampaignAdviceOpportunity,
+} from "@/components/agent/agent-campaign-advice";
+import type { AdviseCampaignSeams } from "@/modules/agent-chat/application/campaign-advise";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
@@ -53,9 +58,27 @@ export type UniversalAgentShellProps = {
   organizationId: string;
   /** Explicit page key (tests and callers that already know the page). */
   page?: string;
-  /** Viewer-safe default: gated actions render disabled until a loader wires the real role. */
+  /**
+   * Loader-provided caller role and grants. The layout resolves these
+   * server-side from the membership — never client claims — and the shell
+   * gates DeepThink, watch, and draft controls on them (server rechecks
+   * every route). Defaults stay viewer-safe for tests and bare mounts.
+   */
   role?: RouterRole;
   permissions?: string[];
+  /** Actor id for the eligible campaign-draft path. Absent → brief path. */
+  actorId?: string;
+  /** Opportunity binding the draft request. Absent → brief path. */
+  opportunity?: CampaignAdviceOpportunity | null;
+  /** Full advice context. Absent → brief path, nothing invented. */
+  advice?: CampaignAdviceContext | null;
+  /** Injected campaign seams for tests; defaults post to live routes. */
+  campaignSeams?: AdviseCampaignSeams;
+  /**
+   * Whether the watch schedule-update migration is applied. False until
+   * the two agent migrations are pushed: Update-fields stays unavailable.
+   */
+  watchUpdateAvailable?: boolean;
 };
 
 /** Memory-only example prompts. Never fake data, never fabricated metrics. */
@@ -78,6 +101,11 @@ export function UniversalAgentShell({
   page,
   role = "viewer",
   permissions = [],
+  actorId,
+  opportunity = null,
+  advice = null,
+  campaignSeams,
+  watchUpdateAvailable = false,
 }: UniversalAgentShellProps) {
   const reduceMotion = useReducedMotion();
   const inputId = useId();
@@ -282,6 +310,11 @@ export function UniversalAgentShell({
           mode={mode}
           role={role}
           permissions={permissions}
+          actorId={actorId}
+          opportunity={opportunity}
+          advice={advice}
+          campaignSeams={campaignSeams}
+          watchUpdateAvailable={watchUpdateAvailable}
           activeTab={activeTab}
           onTabChange={setActiveTab}
           collapsed={collapsed}
@@ -298,16 +331,27 @@ export function UniversalAgentShell({
 /**
  * Layout mount point: derives the page key from the pathname and renders
  * the shell only on the 5 allowed pages. Mounted once in the organization
- * layout; no auth change, no data fetching here.
+ * layout; no auth change, no data fetching here. The layout passes the
+ * loader-resolved role, grants, and actor id — this host only forwards.
  */
 export function UniversalAgentShellHost({
   organizationId,
   role,
   permissions,
+  actorId,
+  opportunity,
+  advice,
+  campaignSeams,
+  watchUpdateAvailable,
 }: {
   organizationId: string;
   role?: RouterRole;
   permissions?: string[];
+  actorId?: string;
+  opportunity?: CampaignAdviceOpportunity | null;
+  advice?: CampaignAdviceContext | null;
+  campaignSeams?: AdviseCampaignSeams;
+  watchUpdateAvailable?: boolean;
 }) {
   const pathname = usePathname();
   const page = pageKeyForPathname(pathname, organizationId);
@@ -318,6 +362,11 @@ export function UniversalAgentShellHost({
       page={page}
       role={role}
       permissions={permissions}
+      actorId={actorId}
+      opportunity={opportunity}
+      advice={advice}
+      campaignSeams={campaignSeams}
+      watchUpdateAvailable={watchUpdateAvailable}
     />
   );
 }

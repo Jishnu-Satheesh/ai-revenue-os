@@ -56,11 +56,25 @@ type Outcome =
 
 type RecommendationState = "idle" | "saved" | "planned" | "snoozed" | "dismissed";
 
-function defaultFetchSeams(organizationId: string, opportunityId: string): AdviseCampaignSeams {
+function defaultFetchSeams(
+  organizationId: string,
+  opportunityId: string,
+  options: {
+    correlationId?: string;
+    existingLinks?: { projectId?: string; requestId?: string; campaignId?: string };
+  } = {},
+): AdviseCampaignSeams {
   async function postJson(path: string, payload: Record<string, unknown>): Promise<unknown> {
     const response = await fetch(path, {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+        // The campaign-draft route honors x-correlation-id; every agent
+        // fetch sends no-store + correlation (Task 8 drawer contract).
+        ...(options.correlationId ? { "x-correlation-id": options.correlationId } : {}),
+      },
+      cache: "no-store",
       body: JSON.stringify(payload),
     });
     const body = (await response.json().catch(() => null)) as {
@@ -105,7 +119,13 @@ function defaultFetchSeams(organizationId: string, opportunityId: string): Advis
       setThreadLinks: async (args) => {
         await postJson(
           `/api/organizations/${organizationId}/agent/threads/${args.threadId}/links`,
-          { draftRequestId: args.draftRequestId },
+          {
+            // Sibling ids already on the thread ride along: the links RPC
+            // overwrites every link column, so posting the draft id alone
+            // would wipe the thread → research chain.
+            ...(options.existingLinks ?? {}),
+            draftRequestId: args.draftRequestId,
+          },
         );
         return { threadId: args.threadId };
       },
@@ -169,6 +189,15 @@ export function AgentCampaignAdvice({
     setError(null);
     try {
       if (opportunity && advice && actorId) {
+        // One uuid per initiation: it travels as the adviseCampaign
+        // correlation id and on the wire as x-correlation-id, so the
+        // draft admission and the thread link share one trail.
+        const correlationId = crypto.randomUUID();
+        const existingLinks: { projectId?: string; requestId?: string; campaignId?: string } = {
+          ...(thread?.linkedResearchProjectId ? { projectId: thread.linkedResearchProjectId } : {}),
+          ...(thread?.linkedRequestId ? { requestId: thread.linkedRequestId } : {}),
+          ...(thread?.linkedCampaignId ? { campaignId: thread.linkedCampaignId } : {}),
+        };
         const result = await adviseCampaign(
           {
             organizationId,
@@ -187,8 +216,11 @@ export function AgentCampaignAdvice({
             schedulePass: advice.schedulePass,
             audienceReady: advice.audienceReady,
             estimate: advice.estimate,
+            correlationId,
+            existingLinks,
           },
-          seams ?? defaultFetchSeams(organizationId, opportunity.id),
+          seams ??
+            defaultFetchSeams(organizationId, opportunity.id, { correlationId, existingLinks }),
         );
         if (result.outcome === "draft_requested") {
           setOutcome({ kind: "draft", result });

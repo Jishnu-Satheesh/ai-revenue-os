@@ -7,6 +7,7 @@ import { isResearchProviderQualified } from "@/domain/growth-intelligence/resear
 import { createGrowthIntelligenceRequestFingerprint } from "@/domain/growth-intelligence/request-fingerprint";
 import type { Database } from "@/lib/supabase/database.types";
 import { createGrowthIntelligenceWorkerServiceClient } from "@/lib/supabase/service";
+import { isAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import {
   buildMarkerReceipts,
   executeResearchOnce,
@@ -161,6 +162,23 @@ function blockedOnceResult(
   };
 }
 
+/**
+ * Rollout gate (spec section 16, M2): the worker rechecks the org
+ * allowlist at run start — the drawer may have dispatched minutes ago
+ * and the operator can delist mid-flight. A delisted org fails closed
+ * before any enqueue, reserve, or dispatch: zero spend, provably.
+ */
+function agentChatDisabledResult(organizationId: string, correlationId: string) {
+  return {
+    outcome: "blocked" as const,
+    reasonCode: "AGENT_CHAT_DISABLED" as const,
+    copy: "The AI agent is not available for this organization. Nothing was spent or changed.",
+    spentMicrosUsd: 0,
+    organizationId,
+    correlationId,
+  };
+}
+
 export const agentResearchOnceTask = schemaTask({
   id: "agent-chat.research-once",
   schema: agentResearchOncePayloadSchema,
@@ -169,6 +187,14 @@ export const agentResearchOnceTask = schemaTask({
   maxDuration: 300,
   run: async (payload) => {
     const parsed = agentResearchOncePayloadSchema.parse(payload);
+    if (!isAgentChatEnabled(parsed.organizationId)) {
+      logger.info("agent_chat.research_once_blocked", {
+        organizationId: parsed.organizationId,
+        correlationId: parsed.correlationId,
+        reasonCode: "AGENT_CHAT_DISABLED",
+      });
+      return agentChatDisabledResult(parsed.organizationId, parsed.correlationId);
+    }
     const supabase = createGrowthIntelligenceWorkerServiceClient();
 
     // Live gate recheck: the drawer may have routed minutes ago, and the
@@ -374,6 +400,14 @@ export const agentWatchCreateTask = schemaTask({
   maxDuration: 300,
   run: async (payload) => {
     const parsed = agentWatchCreatePayloadSchema.parse(payload);
+    if (!isAgentChatEnabled(parsed.organizationId)) {
+      logger.info("agent_chat.watch_create_blocked", {
+        organizationId: parsed.organizationId,
+        correlationId: parsed.correlationId,
+        reasonCode: "AGENT_CHAT_DISABLED",
+      });
+      return agentChatDisabledResult(parsed.organizationId, parsed.correlationId);
+    }
     const supabase = createGrowthIntelligenceWorkerServiceClient();
     const projects = createAuthenticatedResearchProjectRepository(supabase);
     const outcome = await executeWatchCreate(
@@ -497,6 +531,14 @@ export const agentWatchUpdateTask = schemaTask({
   maxDuration: 300,
   run: async (payload) => {
     const parsed = agentWatchUpdatePayloadSchema.parse(payload);
+    if (!isAgentChatEnabled(parsed.organizationId)) {
+      logger.info("agent_chat.watch_update_blocked", {
+        organizationId: parsed.organizationId,
+        correlationId: parsed.correlationId,
+        reasonCode: "AGENT_CHAT_DISABLED",
+      });
+      return agentChatDisabledResult(parsed.organizationId, parsed.correlationId);
+    }
     const supabase = createGrowthIntelligenceWorkerServiceClient();
     const projects = createAuthenticatedResearchProjectRepository(supabase);
     const brief = await readLatestBriefRevision(supabase, parsed.organizationId, parsed.projectId);

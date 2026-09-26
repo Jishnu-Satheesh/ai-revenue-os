@@ -2,6 +2,7 @@ import { getOrganizationContext } from "@/lib/api/organization-context";
 import { toPublicError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { createEventPublisher } from "@/domain/events/publisher";
+import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { createLightModelProvider } from "@/modules/agent-router/infrastructure/light-model-provider";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
 import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
@@ -43,6 +44,7 @@ export async function POST(
       Promise.resolve({ organizationId: rawParams.organizationId }),
     );
     organizationId = context.organizationId;
+    assertAgentChatEnabled(organizationId);
     correlationId = correlation.parseAfterAuthorization();
 
     const body = routeThreadBodySchema.parse(await request.json().catch(() => ({})));
@@ -58,7 +60,7 @@ export async function POST(
       contextReaders: createAgentContextReaders(context.supabase),
       correlationId,
     });
-    const { intent, questionnaire, thread } = await service.routeLatest({
+    const { intent, confidence, reasonCodes, questionnaire, thread } = await service.routeLatest({
       organizationId,
       actorId: context.user.id,
       role: context.membership.role,
@@ -69,8 +71,18 @@ export async function POST(
     // Intent, confidence, and reason codes travel in the event payload
     // (identifier-only, bodies never logged); the log line stays inside
     // the closed LogContext allowlist.
-    logger.info("agent_thread.routed", { organizationId, correlationId });
-    return agentJsonResponse({ intent, questionnaire, thread }, correlationId);
+    logger.info("agent_thread.routed", {
+      organizationId,
+      threadId: thread.id,
+      intent,
+      confidence,
+      reasonCodes,
+      correlationId,
+    });
+    return agentJsonResponse(
+      { intent, confidence, reasonCodes, questionnaire, thread },
+      correlationId,
+    );
   } catch (error) {
     logger.warn("agent_thread.route_failed", {
       organizationId,

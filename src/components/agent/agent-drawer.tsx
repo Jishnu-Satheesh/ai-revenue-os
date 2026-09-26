@@ -8,7 +8,12 @@ import {
   AgentQuestionnaireCard,
   type QuestionnaireAnswers,
 } from "@/components/agent/agent-questionnaire-card";
-import { AgentCampaignAdvice } from "@/components/agent/agent-campaign-advice";
+import {
+  AgentCampaignAdvice,
+  type CampaignAdviceContext,
+  type CampaignAdviceOpportunity,
+} from "@/components/agent/agent-campaign-advice";
+import type { AdviseCampaignSeams } from "@/modules/agent-chat/application/campaign-advise";
 import { AgentThreadSteps, type AgentStepPhase } from "@/components/agent/agent-thread-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,6 +37,8 @@ export type PendingPrompt = { text: string; nonce: number };
 
 export type AgentRouteResult = {
   intent: AgentIntent;
+  confidence: "high" | "medium" | "low";
+  reasonCodes: string[];
   questionnaire: QuestionnaireSpec | null;
 };
 
@@ -43,6 +50,21 @@ export type AgentDrawerProps = {
   mode: ThreadMode;
   role: RouterRole;
   permissions: string[];
+  /** Actor id for the eligible campaign-draft path. Absent → brief path. */
+  actorId?: string;
+  /** Opportunity binding the draft request. Absent → brief path. */
+  opportunity?: CampaignAdviceOpportunity | null;
+  /** Full advice context. Absent → brief path, nothing invented. */
+  advice?: CampaignAdviceContext | null;
+  /** Injected campaign seams for tests; defaults post to the live routes. */
+  campaignSeams?: AdviseCampaignSeams;
+  /**
+   * Whether the watch schedule-update migration is applied. False until
+   * the two agent migrations are pushed (user's step): the duplicate-watch
+   * Update-fields choice renders unavailable with honest copy, and the
+   * server fails closed underneath. Flip to true in the push commit.
+   */
+  watchUpdateAvailable?: boolean;
   activeTab: AgentDrawerTab;
   onTabChange: (tab: AgentDrawerTab) => void;
   collapsed: boolean;
@@ -55,8 +77,20 @@ export type AgentDrawerProps = {
 type ThreadsResponse = { threads: ThreadSummary[]; nextCursor: string | null };
 type MessagesResponse = { messages: ThreadMessageView[]; nextCursor: string | null };
 
-async function agentGetJson(path: string): Promise<unknown> {
-  const response = await fetch(path, { method: "GET", headers: { accept: "application/json" } });
+/** Durable-checkpoint poll cadence (performance-build-watcher pattern). */
+export const AGENT_THREAD_POLL_MS = 3000;
+
+/**
+ * Every drawer fetch sends `cache: "no-store"` plus one drawer-session
+ * `x-correlation-id`, and every route answers with the same id plus
+ * `Cache-Control: no-store`. Fresh reads, one trail per conversation.
+ */
+async function agentGetJson(path: string, correlationId: string): Promise<unknown> {
+  const response = await fetch(path, {
+    method: "GET",
+    headers: { accept: "application/json", "x-correlation-id": correlationId },
+    cache: "no-store",
+  });
   const body = (await response.json().catch(() => null)) as {
     error?: { message?: string };
   } | null;
@@ -66,10 +100,19 @@ async function agentGetJson(path: string): Promise<unknown> {
   return body as unknown;
 }
 
-async function agentPostJson(path: string, payload: Record<string, unknown>): Promise<unknown> {
+async function agentPostJson(
+  path: string,
+  payload: Record<string, unknown>,
+  correlationId: string,
+): Promise<unknown> {
   const response = await fetch(path, {
     method: "POST",
-    headers: { "content-type": "application/json", accept: "application/json" },
+    headers: {
+      "content-type": "application/json",
+      accept: "application/json",
+      "x-correlation-id": correlationId,
+    },
+    cache: "no-store",
     body: JSON.stringify(payload),
   });
   const body = (await response.json().catch(() => null)) as {
@@ -90,10 +133,11 @@ function formatAnswers(answers: Record<string, unknown>): string {
 /**
  * Bottom sheet over the floating shell (spec section 5.2). Opens on send,
  * persists across the 5 pages within the session (thread state lives in the
- * shell above page switches; progress resumes via polling in later slices),
- * and collapses to a single-line status strip docked on top of the shell.
- * Tabs: Response / Steps / Draft advice / History. History reopens through
- * the Task 3 GET messages route, restoring messages plus saved answers.
+ * shell above page switches; background progress resumes via the
+ * thread-checkpoint poll), and collapses to a single-line status strip
+ * docked on top of the shell. Tabs: Response / Steps / Draft advice /
+ * History. History reopens through the Task 3 GET messages route, restoring
+ * messages plus saved answers.
  */
 export function AgentDrawer({
   organizationId,
@@ -103,6 +147,11 @@ export function AgentDrawer({
   mode,
   role,
   permissions,
+  actorId,
+  opportunity = null,
+  advice = null,
+  campaignSeams,
+  watchUpdateAvailable = false,
   activeTab,
   onTabChange,
   collapsed,
@@ -114,6 +163,14 @@ export function AgentDrawer({
   const queryClient = useQueryClient();
   const base = `/api/organizations/${organizationId}/agent/threads`;
 
+  // One correlation id per drawer session: every send, poll, reopen, and
+  // downstream handoff fetch carries it, so one conversation is one trail.
+  const sessionCorrelation = useRef<string | null>(null);
+  if (sessionCorrelation.current === null) {
+    sessionCorrelation.current = crypto.randomUUID();
+  }
+  const correlationId = sessionCorrelation.current;
+
   const [messages, setMessages] = useState<ThreadMessageView[]>([]);
   const [thread, setThread] = useState<ThreadSummary | null>(null);
   const [routeResult, setRouteResult] = useState<AgentRouteResult | null>(null);
@@ -121,6 +178,14 @@ export function AgentDrawer({
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, QuestionnaireAnswers>>(
     {},
   );
+  // The latest server-confirmed submission, shown under the Response tab.
+  // Tracked apart from submittedAnswers (which hides answered cards by
+  // resume key) because a re-route swaps the visible card — keying the
+  // confirmation off the new card would hide the proof of what was saved.
+  const [lastSaved, setLastSaved] = useState<{
+    resumeKey: string;
+    answers: Record<string, unknown>;
+  } | null>(null);
   const [dismissedCards, setDismissedCards] = useState<string[]>([]);
   const [announcement, setAnnouncement] = useState("Conversation opened.");
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -132,6 +197,7 @@ export function AgentDrawer({
   const consumedNonceRef = useRef<number | null>(null);
 
   const canDraft = permissions.includes("campaign.create");
+  const canManageWatch = role !== "viewer" && permissions.includes("growth_intelligence.manage");
   const isViewer = role === "viewer";
 
   useEffect(() => {
@@ -142,28 +208,47 @@ export function AgentDrawer({
     mutationFn: async (vars: { text: string; threadMode: ThreadMode; threadId: string | null }) => {
       let tid = vars.threadId;
       if (!tid) {
-        const created = (await agentPostJson(base, {
-          idempotencyKey: crypto.randomUUID(),
-          mode: vars.threadMode,
-        })) as { thread: ThreadSummary };
+        const created = (await agentPostJson(
+          base,
+          {
+            idempotencyKey: crypto.randomUUID(),
+            mode: vars.threadMode,
+          },
+          correlationId,
+        )) as { thread: ThreadSummary };
         tid = created.thread.id;
         onThreadChange(tid);
       }
-      const appended = (await agentPostJson(`${base}/${tid}/messages`, {
-        idempotencyKey: crypto.randomUUID(),
-        body: vars.text,
-      })) as { message: ThreadMessageView };
-      const routed = (await agentPostJson(`${base}/${tid}/route?page=${page}`, {
-        idempotencyKey: crypto.randomUUID(),
-      })) as {
+      const appended = (await agentPostJson(
+        `${base}/${tid}/messages`,
+        {
+          idempotencyKey: crypto.randomUUID(),
+          body: vars.text,
+        },
+        correlationId,
+      )) as { message: ThreadMessageView };
+      const routed = (await agentPostJson(
+        `${base}/${tid}/route?page=${page}`,
+        {
+          idempotencyKey: crypto.randomUUID(),
+        },
+        correlationId,
+      )) as {
         intent: AgentIntent;
+        confidence: "high" | "medium" | "low";
+        reasonCodes: string[];
         questionnaire: QuestionnaireSpec | null;
         thread: ThreadSummary;
       };
       return {
         thread: routed.thread,
         userMessage: appended.message,
-        result: { intent: routed.intent, questionnaire: routed.questionnaire },
+        result: {
+          intent: routed.intent,
+          confidence: routed.confidence,
+          reasonCodes: routed.reasonCodes ?? [],
+          questionnaire: routed.questionnaire,
+        },
       };
     },
     onSuccess: ({ thread: row, userMessage, result }) => {
@@ -182,6 +267,61 @@ export function AgentDrawer({
     },
   });
 
+  // Questionnaire submit (Task 6 ruling F2, drawer half): answers post
+  // to the fenced answers route with the echoed spec — validated,
+  // persisted through the keyed RPC, and re-routed in the same call —
+  // never local-only. The returned message joins the thread and the new
+  // classification replaces the card's. Confidence/reason codes carry
+  // forward from this turn's classification; the answers call returns
+  // intent + questionnaire only, by route contract.
+  const submitAnswers = useMutation({
+    mutationFn: async (vars: { spec: QuestionnaireSpec; answers: QuestionnaireAnswers }) => {
+      if (!threadId) throw new Error("No active conversation. Send a message first.");
+      const submitted = (await agentPostJson(
+        `${base}/${threadId}/answers?page=${page}`,
+        {
+          idempotencyKey: crypto.randomUUID(),
+          resumeKey: vars.spec.resumeKey,
+          spec: vars.spec,
+          answers: vars.answers,
+        },
+        correlationId,
+      )) as {
+        message: ThreadMessageView;
+        replayed: boolean;
+        answers: Record<string, string>;
+        intent: AgentIntent;
+        questionnaire: QuestionnaireSpec | null;
+      };
+      return { ...submitted, resumeKey: vars.spec.resumeKey };
+    },
+    onSuccess: (result) => {
+      setMessages((previous) =>
+        previous.some((message) => message.id === result.message.id)
+          ? previous
+          : [...previous, result.message],
+      );
+      setRouteResult((previous) =>
+        previous
+          ? {
+              intent: result.intent,
+              confidence: previous.confidence,
+              reasonCodes: previous.reasonCodes,
+              questionnaire: result.questionnaire,
+            }
+          : previous,
+      );
+      setSubmittedAnswers((previous) => ({ ...previous, [result.resumeKey]: result.answers }));
+      setLastSaved({ resumeKey: result.resumeKey, answers: result.answers });
+      setSendError(null);
+      setAnnouncement(`Answers saved and re-routed to ${result.intent}.`);
+      void queryClient.invalidateQueries({ queryKey: ["agent-threads", organizationId] });
+    },
+    onError: (error) => {
+      setSendError(error instanceof Error ? error.message : "Saving answers failed.");
+      setAnnouncement("Saving answers failed.");
+    },
+  });
   // Pump: adopt a fresh prompt into the queue, then run queued prompts one
   // at a time so rapid sends never mint two threads for one conversation.
   // Only ref writes, prop callbacks, and mutate calls here — no setState.
@@ -206,14 +346,44 @@ export function AgentDrawer({
 
   const historyQuery = useQuery({
     queryKey: ["agent-threads", organizationId],
-    queryFn: () => agentGetJson(`${base}?limit=20`) as Promise<ThreadsResponse>,
+    queryFn: () => agentGetJson(`${base}?limit=20`, correlationId) as Promise<ThreadsResponse>,
     enabled: activeTab === "history",
   });
+
+  /**
+   * Durable-checkpoint poll (spec section 10, performance-build-watcher
+   * pattern): the thread row carries the worker-written links (research
+   * project, request, draft request, campaign), so re-reading it is how
+   * the drawer learns a background run finished. A dropped poll keeps the
+   * previous row and retries — never mistaken for an answer. Terminal
+   * thread rows stop the interval; fresh sends resume it via the thread
+   * state they set.
+   */
+  const threadPoll = useQuery({
+    queryKey: ["agent-thread", organizationId, threadId],
+    queryFn: async () => {
+      const body = (await agentGetJson(`${base}?limit=50`, correlationId)) as ThreadsResponse;
+      return body.threads.find((row) => row.id === threadId) ?? null;
+    },
+    enabled: threadId !== null,
+    staleTime: AGENT_THREAD_POLL_MS,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) => {
+      const row = query.state.data;
+      if (row && (row.status === "completed" || row.status === "cancelled")) return false;
+      return AGENT_THREAD_POLL_MS;
+    },
+  });
+
+  // The polled row wins when it arrives: worker link updates land here,
+  // and the send/reopen paths below seed the same state optimistically.
+  const liveThread = threadPoll.data ?? thread;
 
   const reopen = useMutation({
     mutationFn: async (target: ThreadSummary) => {
       const body = (await agentGetJson(
         `${base}/${target.id}/messages?limit=50`,
+        correlationId,
       )) as MessagesResponse;
       return { target, messages: body.messages };
     },
@@ -223,6 +393,9 @@ export function AgentDrawer({
       setMessages(reopened);
       setRouteResult(null);
       setSendError(null);
+      setSubmittedAnswers({});
+      setDismissedCards([]);
+      setLastSaved(null);
       onTabChange("response");
       setAnnouncement(`Reopened ${target.title}.`);
     },
@@ -238,6 +411,9 @@ export function AgentDrawer({
     setThread(null);
     setRouteResult(null);
     setSendError(null);
+    setSubmittedAnswers({});
+    setDismissedCards([]);
+    setLastSaved(null);
     onTabChange("response");
     setAnnouncement("Started a new conversation.");
   }
@@ -246,7 +422,7 @@ export function AgentDrawer({
     ? "routing"
     : sendError
       ? "error"
-      : routeResult || thread
+      : routeResult || liveThread
         ? "done"
         : "idle";
 
@@ -256,6 +432,23 @@ export function AgentDrawer({
     questionnaire && cardKey && !submittedAnswers[cardKey] && !dismissedCards.includes(cardKey),
   );
 
+  // Duplicate-watch gating (spec section 12 + M2 stage gate). Viewing the
+  // existing watch and cancelling stay free for every member; Update-fields
+  // needs the manage grant AND the applied schedule-update migration, and
+  // Start-fresh needs the grant (it mints a second watch). The server
+  // rechecks the grant on submit; the migration gate fails closed below it.
+  const isDuplicateCard = questionnaire?.kind === "duplicate_watch";
+  const gatedChoices: string[] = [];
+  if (isDuplicateCard && !canManageWatch) gatedChoices.push("update_fields", "start_fresh");
+  else if (isDuplicateCard && !watchUpdateAvailable) gatedChoices.push("update_fields");
+  const gatedChoiceReason = !isDuplicateCard
+    ? undefined
+    : !canManageWatch
+      ? "Watch updates and second watches need the growth_intelligence.manage grant — enforcement stays server-side. Viewing the existing watch stays free."
+      : !watchUpdateAvailable
+        ? "Watch field updates are unavailable until the pending migration is applied — viewing the existing watch stays free."
+        : undefined;
+
   if (collapsed) {
     return (
       <div className="fixed inset-x-0 bottom-24 flex justify-center px-4">
@@ -264,7 +457,7 @@ export function AgentDrawer({
           variant="secondary"
           className="w-[min(44rem,100%)] justify-between"
           onClick={onToggleCollapsed}
-          aria-label={`Expand conversation${thread ? `: ${thread.title}` : ""}`}
+          aria-label={`Expand conversation${liveThread ? `: ${liveThread.title}` : ""}`}
         >
           <span className="flex min-w-0 items-center gap-2">
             <span
@@ -278,7 +471,7 @@ export function AgentDrawer({
                     : "bg-emerald-500",
               )}
             />
-            <span className="truncate text-sm">{thread?.title ?? "New conversation"}</span>
+            <span className="truncate text-sm">{liveThread?.title ?? "New conversation"}</span>
           </span>
           <span className="flex items-center gap-2">
             {send.isPending ? <Spinner aria-hidden="true" /> : null}
@@ -307,7 +500,9 @@ export function AgentDrawer({
           </p>
 
           <div className="flex items-center justify-between gap-2">
-            <p className="truncate text-sm font-medium">{thread?.title ?? "New conversation"}</p>
+            <p className="truncate text-sm font-medium">
+              {liveThread?.title ?? "New conversation"}
+            </p>
             <div className="flex shrink-0 items-center gap-1">
               <Button
                 type="button"
@@ -390,20 +585,30 @@ export function AgentDrawer({
                 <AgentQuestionnaireCard
                   key={questionnaire.resumeKey}
                   spec={questionnaire}
+                  disabled={isViewer || submitAnswers.isPending}
+                  disabledReason={
+                    isViewer
+                      ? "Viewers cannot change this chat — answers stay read-only."
+                      : undefined
+                  }
+                  disabledOptionValues={gatedChoices}
+                  disabledOptionReason={gatedChoiceReason}
                   onSubmit={(answers) => {
-                    if (cardKey)
-                      setSubmittedAnswers((previous) => ({ ...previous, [cardKey]: answers }));
-                    setAnnouncement("Answers saved with this turn.");
+                    submitAnswers.mutate({ spec: questionnaire, answers });
                   }}
                   onCancel={() => {
                     if (cardKey) setDismissedCards((previous) => [...previous, cardKey]);
                   }}
                 />
               ) : null}
-              {cardKey && submittedAnswers[cardKey] ? (
+              {submitAnswers.isPending ? (
+                <p role="status" className="text-sm text-muted-foreground">
+                  Saving answers…
+                </p>
+              ) : null}
+              {lastSaved ? (
                 <p className="text-sm text-muted-foreground">
-                  Answers saved: {formatAnswers(submittedAnswers[cardKey])} They travel with the
-                  next routing call once the executor slice lands.
+                  Answers saved: {formatAnswers(lastSaved.answers)}
                 </p>
               ) : null}
             </TabsContent>
@@ -412,7 +617,8 @@ export function AgentDrawer({
               <AgentThreadSteps
                 phase={phase}
                 intent={routeResult?.intent ?? null}
-                thread={thread}
+                reasonCodes={routeResult?.reasonCodes ?? []}
+                thread={liveThread}
                 error={sendError}
                 growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
               />
@@ -422,10 +628,14 @@ export function AgentDrawer({
               {routeResult?.intent === "campaign_advice" ? (
                 <AgentCampaignAdvice
                   organizationId={organizationId}
+                  actorId={actorId}
                   threadId={threadId}
-                  thread={thread}
+                  thread={liveThread}
                   canDraft={canDraft}
                   isViewer={isViewer}
+                  opportunity={opportunity}
+                  advice={advice}
+                  seams={campaignSeams}
                 />
               ) : (
                 <p className="text-sm text-muted-foreground">

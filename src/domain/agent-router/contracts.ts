@@ -131,7 +131,7 @@ export const questionnaireSpecSchema = z
       .string()
       .trim()
       .regex(/^[a-z0-9:_\-.]{1,160}$/),
-    items: z.array(questionnaireItemSchema).min(1).max(5),
+    items: z.array(questionnaireItemSchema).min(1).max(8),
   })
   .strict();
 export type QuestionnaireSpec = z.infer<typeof questionnaireSpecSchema>;

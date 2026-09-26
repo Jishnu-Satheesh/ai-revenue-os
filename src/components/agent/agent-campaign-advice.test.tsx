@@ -232,4 +232,59 @@ describe("campaign advice card", () => {
     expect(screen.getByText(new RegExp(DRAFT_REQUEST))).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /campaign bundle review/i })).toBeInTheDocument();
   });
+
+  it("sends correlation headers and forwards sibling links on the live fetch seams", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("crypto", {
+      ...(globalThis.crypto as object | undefined),
+      randomUUID: () => "66666666-6666-4666-8666-666666666666",
+    });
+    const seen: Array<{ url: string; init: RequestInit }> = [];
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      seen.push({ url: String(url), init: init ?? {} });
+      if (String(url).includes("/campaign-draft")) {
+        return Response.json({
+          outcome: "created",
+          requestId: DRAFT_REQUEST,
+          draftRequestStatus: "pending",
+        });
+      }
+      return Response.json({ links: { threadId: THREAD_ID, draftRequestId: DRAFT_REQUEST } });
+    }) as never;
+    const projectId = "55555555-5555-4555-8555-555555555555";
+    render(
+      <AgentCampaignAdvice
+        organizationId={ORGANIZATION}
+        actorId={ACTOR}
+        threadId={THREAD_ID}
+        thread={{ ...THREAD, linkedResearchProjectId: projectId }}
+        canDraft
+        isViewer={false}
+        opportunity={OPPORTUNITY}
+        advice={ADVICE}
+      />,
+    );
+
+    await fillIntent(user);
+    await user.click(screen.getByRole("button", { name: /initiate campaign draft/i }));
+    expect(await screen.findByText("Requested")).toBeInTheDocument();
+
+    const draftCall = seen.find((call) => call.url.includes("/campaign-draft"));
+    const linksCall = seen.find((call) => call.url.includes("/agent/threads/"));
+    expect(draftCall).toBeDefined();
+    expect(linksCall).toBeDefined();
+    // Both posts travel no-store with one shared x-correlation-id.
+    const draftHeaders = draftCall?.init.headers as Record<string, string>;
+    const linksHeaders = linksCall?.init.headers as Record<string, string>;
+    expect(draftCall?.init.cache).toBe("no-store");
+    expect(linksCall?.init.cache).toBe("no-store");
+    expect(draftHeaders["x-correlation-id"]).toBe("66666666-6666-4666-8666-666666666666");
+    expect(linksHeaders["x-correlation-id"]).toBe(draftHeaders["x-correlation-id"]);
+    // The sibling research link rides along so the overwrite RPC keeps it.
+    expect(JSON.parse(String(linksCall?.init.body))).toMatchObject({
+      projectId,
+      draftRequestId: DRAFT_REQUEST,
+    });
+    vi.unstubAllGlobals();
+  });
 });

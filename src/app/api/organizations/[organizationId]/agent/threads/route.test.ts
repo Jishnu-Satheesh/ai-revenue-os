@@ -24,6 +24,11 @@ vi.mock("@/domain/events/publisher", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { warn: mocks.warn, info: mocks.info, error: vi.fn() },
 }));
+// The test organization sits inside the agent rollout allowlist; a refusal
+// below proves authorization or validation, never the feature being off.
+vi.mock("@/lib/env", () => ({
+  env: { AGENT_CHAT_V1_ORGANIZATION_IDS: "10000000-0000-4000-8000-000000000001" },
+}));
 
 import { GET, POST } from "@/app/api/organizations/[organizationId]/agent/threads/route";
 import { IdempotencyConflictError } from "@/domain/agent-chat/errors";
@@ -79,7 +84,11 @@ describe("agent threads route", () => {
     );
     expect(response.status).toBe(200);
     const body = await response.json();
-    expect(body).toMatchObject({ threads: [THREAD_ROW], nextCursor: null, correlationId: CORRELATION });
+    expect(body).toMatchObject({
+      threads: [THREAD_ROW],
+      nextCursor: null,
+      correlationId: CORRELATION,
+    });
     expect(response.headers.get("x-correlation-id")).toBe(CORRELATION);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
@@ -106,6 +115,11 @@ describe("agent threads route", () => {
     );
     expect(created.status).toBe(201);
     expect(await created.json()).toMatchObject({ thread: THREAD_ROW, replayed: false });
+    // M1: the opened line carries the thread id; bodies never logged.
+    expect(mocks.info).toHaveBeenCalledWith(
+      "agent_thread.opened",
+      expect.objectContaining({ organizationId: ORGANIZATION, threadId: THREAD }),
+    );
 
     mocks.createRepo.mockReturnValue({
       createThreadKeyed: vi.fn(async () => ({ threadId: THREAD, status: "open", replayed: true })),
@@ -139,7 +153,11 @@ describe("agent threads route", () => {
   });
 
   it("rejects a missing idempotency key and an over-200 title", async () => {
-    for (const payload of [{ title: "Hi" }, { idempotencyKey: "short", title: "Hi" }, { idempotencyKey: "k-1234567890123456", title: "x".repeat(201) }]) {
+    for (const payload of [
+      { title: "Hi" },
+      { idempotencyKey: "short", title: "Hi" },
+      { idempotencyKey: "k-1234567890123456", title: "x".repeat(201) },
+    ]) {
       const response = await POST(
         request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads`, {
           method: "POST",
@@ -169,5 +187,23 @@ describe("agent threads route", () => {
     const body = await response.json();
     expect(body.error.code).toBe("IDEMPOTENCY_CONFLICT");
     expect(response.headers.get("x-correlation-id")).toBe(CORRELATION);
+  });
+
+  it("refuses organizations outside the agent rollout allowlist", async () => {
+    const outside = "20000000-0000-4000-8000-000000000002";
+    mocks.getOrganizationContext.mockResolvedValue({
+      ...operatorContext(),
+      organizationId: outside,
+    });
+    const response = await GET(
+      request(`http://localhost/api/organizations/${outside}/agent/threads?limit=10`),
+      { params: Promise.resolve({ organizationId: outside }) },
+    );
+    expect(response.status).toBe(422);
+    const body = await response.json();
+    expect(body.error.code).toBe("FEATURE_NOT_AVAILABLE");
+    expect(response.headers.get("x-correlation-id")).toBe(CORRELATION);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(mocks.createRepo).not.toHaveBeenCalled();
   });
 });

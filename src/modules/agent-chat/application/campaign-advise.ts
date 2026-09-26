@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { DomainError } from "@/lib/errors";
-import { buildThreadIdempotencyKey } from "@/modules/agent-chat/application/executors";
+import { buildThreadIdempotencyKey } from "@/modules/agent-chat/application/thread-keys";
 
 /**
  * Campaign advice handoff (spec section 11: `Draft advice for your review`).
@@ -78,6 +78,16 @@ export const campaignEstimateSchema = z
 
 export type CampaignEstimate = z.infer<typeof campaignEstimateSchema>;
 
+const threadLinkPointerSchema = z
+  .object({
+    projectId: z.string().trim().min(1).max(200).optional(),
+    requestId: z.string().trim().min(1).max(200).optional(),
+    campaignId: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+
+export type ThreadLinkPointers = z.infer<typeof threadLinkPointerSchema>;
+
 export const adviseCampaignInputSchema = z
   .object({
     organizationId: z.string().trim().min(1).max(200),
@@ -110,6 +120,14 @@ export const adviseCampaignInputSchema = z
     audienceReady: z.boolean(),
     estimate: campaignEstimateSchema,
     correlationId: z.string().trim().min(1).max(200).optional(),
+    /**
+     * Sibling link ids already on the thread (research project, request,
+     * campaign). The `set_thread_links` RPC overwrites all four columns,
+     * so the handoff forwards these alongside the new draft-request id —
+     * posting the draft id alone would silently wipe the thread →
+     * research chain.
+     */
+    existingLinks: threadLinkPointerSchema.optional(),
   })
   .strict();
 
@@ -356,6 +374,10 @@ export type AdviseCampaignSeams = {
       actorId: string;
       threadId: string;
       draftRequestId: string;
+      /** Sibling ids forwarded so the overwrite RPC keeps them. */
+      projectId?: string;
+      requestId?: string;
+      campaignId?: string;
     }): Promise<unknown>;
   };
   now?: () => Date;
@@ -497,12 +519,15 @@ export async function adviseCampaign(
   });
 
   // Thread → request link: the audit chain across thread, draft request,
-  // and (once the worker completes it) campaign.
+  // and (once the worker completes it) campaign. Sibling ids already on
+  // the thread ride along because the RPC overwrites every link column.
+  const existingLinks = threadLinkPointerSchema.parse(parsed.existingLinks ?? {});
   await seams.links.setThreadLinks({
     organizationId: parsed.organizationId,
     actorId: parsed.actorId,
     threadId: parsed.threadId,
     draftRequestId: admitted.requestId,
+    ...existingLinks,
   });
 
   const replayed = admitted.outcome === "replayed";

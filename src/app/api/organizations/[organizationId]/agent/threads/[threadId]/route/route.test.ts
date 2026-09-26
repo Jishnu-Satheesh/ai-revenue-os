@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   createRepo: vi.fn(),
   propose: vi.fn(),
   publish: vi.fn(),
+  info: vi.fn(),
 }));
 
 vi.mock("@/lib/api/organization-context", () => ({
@@ -24,7 +25,12 @@ vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: mocks.publish }),
 }));
 vi.mock("@/lib/logger", () => ({
-  logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+  logger: { warn: vi.fn(), info: mocks.info, error: vi.fn() },
+}));
+// The test organization sits inside the agent rollout allowlist; a refusal
+// below proves authorization or validation, never the feature being off.
+vi.mock("@/lib/env", () => ({
+  env: { AGENT_CHAT_V1_ORGANIZATION_IDS: "10000000-0000-4000-8000-000000000001" },
 }));
 
 import { POST } from "@/app/api/organizations/[organizationId]/agent/threads/[threadId]/route/route";
@@ -103,6 +109,19 @@ describe("agent thread route endpoint", () => {
     expect(body.questionnaire.kind).toBe("deepthink_upgrade");
     expect(body.thread.id).toBe(THREAD);
     expect(body.correlationId).toBe(CORRELATION);
+    // The route answers confidence + reason codes for the drawer steps,
+    // and the routed log line carries intent/confidence/reasons/threadId.
+    expect(body.confidence).toBe("high");
+    expect(body.reasonCodes).toEqual(expect.arrayContaining(["DEEPTHINK_UPGRADE_REQUIRED"]));
+    expect(mocks.info).toHaveBeenCalledWith(
+      "agent_thread.routed",
+      expect.objectContaining({
+        organizationId: ORGANIZATION,
+        threadId: THREAD,
+        intent: "research_once",
+        confidence: "high",
+      }),
+    );
     expect(response.headers.get("x-correlation-id")).toBe(CORRELATION);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(mocks.propose).toHaveBeenCalledWith(

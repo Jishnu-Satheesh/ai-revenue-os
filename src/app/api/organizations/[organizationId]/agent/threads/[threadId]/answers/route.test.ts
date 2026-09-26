@@ -26,6 +26,11 @@ vi.mock("@/domain/events/publisher", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
+// The test organization sits inside the agent rollout allowlist; a refusal
+// below proves authorization or validation, never the feature being off.
+vi.mock("@/lib/env", () => ({
+  env: { AGENT_CHAT_V1_ORGANIZATION_IDS: "10000000-0000-4000-8000-000000000001" },
+}));
 
 import { POST } from "@/app/api/organizations/[organizationId]/agent/threads/[threadId]/answers/route";
 
@@ -190,5 +195,75 @@ describe("agent thread answers route", () => {
       params,
     );
     expect(invalid.status).toBe(400);
+  });
+
+  it("refuses duplicate-watch answers without the manage grant", async () => {
+    const watchSpec = {
+      ...SPEC,
+      kind: "duplicate_watch",
+      resumeKey: "router:watch:overview:abcdef1234567890",
+      items: [
+        {
+          key: "choice",
+          label: "What should happen?",
+          kind: "single_select",
+          required: true,
+          options: [
+            { value: "view_existing", label: "View existing" },
+            { value: "cancel", label: "Cancel" },
+          ],
+        },
+      ],
+    };
+    const payload = {
+      idempotencyKey: "w-1234567890123456",
+      resumeKey: watchSpec.resumeKey,
+      spec: watchSpec,
+      answers: { choice: "view_existing" },
+    };
+    // Viewers hold no manage grant: the watch fence refuses before the
+    // generic viewer gate, naming the grant so the drawer can say so.
+    mocks.getOrganizationContext.mockResolvedValue({
+      ...operatorContext(),
+      membership: { role: "viewer" },
+    });
+    const refused = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
+      params,
+    );
+    expect(refused.status).toBe(403);
+    expect((await refused.json()).error.message).toMatch(/growth_intelligence\.manage/);
+    expect(mocks.createRepo).not.toHaveBeenCalled();
+
+    // Operators hold the grant: the watch card submits like any other.
+    mocks.getOrganizationContext.mockResolvedValue(operatorContext());
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+    });
+    mocks.propose.mockResolvedValue({ intent: "answer_memory", confidence: "high", missing: [] });
+    const accepted = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+        },
+      ),
+      params,
+    );
+    expect(accepted.status).toBe(201);
   });
 });

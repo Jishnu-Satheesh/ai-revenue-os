@@ -2,6 +2,7 @@ import { getOrganizationContext } from "@/lib/api/organization-context";
 import { DomainError, toPublicError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { createEventPublisher } from "@/domain/events/publisher";
+import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
 import { createThreadService } from "@/modules/agent-chat/application/thread-service";
 import {
@@ -40,6 +41,7 @@ export async function GET(
       Promise.resolve({ organizationId: rawParams.organizationId }),
     );
     organizationId = context.organizationId;
+    assertAgentChatEnabled(organizationId);
     correlationId = correlation.parseAfterAuthorization();
 
     const url = new URL(request.url);
@@ -84,6 +86,7 @@ export async function POST(
       Promise.resolve({ organizationId: rawParams.organizationId }),
     );
     organizationId = context.organizationId;
+    assertAgentChatEnabled(organizationId);
     if (context.membership.role === "viewer") {
       throw new DomainError("AUTHORIZATION_ERROR", "Viewers cannot change this chat.");
     }
@@ -104,7 +107,11 @@ export async function POST(
       idempotencyKey: body.idempotencyKey,
       body: body.body,
     });
-    logger.info("agent_message.appended", { organizationId, correlationId });
+    logger.info("agent_message.appended", {
+      organizationId,
+      threadId: message.threadId,
+      correlationId,
+    });
     return agentJsonResponse({ message, replayed }, correlationId, replayed ? 200 : 201);
   } catch (error) {
     logger.warn("agent_message.append_failed", {

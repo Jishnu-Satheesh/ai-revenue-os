@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getOrganizationContext: vi.fn(),
   createRepo: vi.fn(),
   publish: vi.fn(),
+  info: vi.fn(),
 }));
 
 vi.mock("@/lib/api/organization-context", () => ({
@@ -20,10 +21,18 @@ vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: mocks.publish }),
 }));
 vi.mock("@/lib/logger", () => ({
-  logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+  logger: { warn: vi.fn(), info: mocks.info, error: vi.fn() },
+}));
+// The test organization sits inside the agent rollout allowlist; a refusal
+// below proves authorization or validation, never the feature being off.
+vi.mock("@/lib/env", () => ({
+  env: { AGENT_CHAT_V1_ORGANIZATION_IDS: "10000000-0000-4000-8000-000000000001" },
 }));
 
-import { GET, POST } from "@/app/api/organizations/[organizationId]/agent/threads/[threadId]/messages/route";
+import {
+  GET,
+  POST,
+} from "@/app/api/organizations/[organizationId]/agent/threads/[threadId]/messages/route";
 
 const ORGANIZATION = "10000000-0000-4000-8000-000000000001";
 const USER = "70000000-0000-4000-8000-000000000007";
@@ -90,16 +99,28 @@ describe("agent thread messages route", () => {
       getMessage: vi.fn(async () => MESSAGE_ROW),
     });
     const created = await POST(
-      request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ idempotencyKey: "k-1234567890123456", body: "Hello" }),
-      }),
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`,
+        {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: "k-1234567890123456", body: "Hello" }),
+        },
+      ),
       params,
     );
     expect(created.status).toBe(201);
     const body = await created.json();
-    expect(body).toMatchObject({ message: MESSAGE_ROW, replayed: false, correlationId: CORRELATION });
+    expect(body).toMatchObject({
+      message: MESSAGE_ROW,
+      replayed: false,
+      correlationId: CORRELATION,
+    });
     expect(created.headers.get("Cache-Control")).toBe("no-store");
+    // M1: the append line carries the thread id; bodies never logged.
+    expect(mocks.info).toHaveBeenCalledWith(
+      "agent_message.appended",
+      expect.objectContaining({ organizationId: ORGANIZATION, threadId: THREAD }),
+    );
   });
 
   it("refuses appends for viewers and empty bodies", async () => {
@@ -108,10 +129,13 @@ describe("agent thread messages route", () => {
       membership: { role: "viewer" },
     });
     const forbidden = await POST(
-      request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ idempotencyKey: "k-1234567890123456", body: "Hello" }),
-      }),
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`,
+        {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: "k-1234567890123456", body: "Hello" }),
+        },
+      ),
       params,
     );
     expect(forbidden.status).toBe(403);
@@ -119,10 +143,13 @@ describe("agent thread messages route", () => {
 
     mocks.getOrganizationContext.mockResolvedValue(operatorContext());
     const invalid = await POST(
-      request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`, {
-        method: "POST",
-        body: JSON.stringify({ idempotencyKey: "k-1234567890123456", body: "   " }),
-      }),
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`,
+        {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: "k-1234567890123456", body: "   " }),
+        },
+      ),
       params,
     );
     expect(invalid.status).toBe(400);
@@ -130,10 +157,13 @@ describe("agent thread messages route", () => {
 
   it("rejects a non-uuid thread id", async () => {
     const response = await POST(
-      request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/not-a-uuid/messages`, {
-        method: "POST",
-        body: JSON.stringify({ idempotencyKey: "k-1234567890123456", body: "Hello" }),
-      }),
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/not-a-uuid/messages`,
+        {
+          method: "POST",
+          body: JSON.stringify({ idempotencyKey: "k-1234567890123456", body: "Hello" }),
+        },
+      ),
       { params: Promise.resolve({ organizationId: ORGANIZATION, threadId: "not-a-uuid" }) },
     );
     expect(response.status).toBe(400);
@@ -145,7 +175,9 @@ describe("agent thread messages route", () => {
       listMessages: vi.fn(async () => ({ messages: [MESSAGE_ROW], nextCursor: null })),
     });
     const response = await GET(
-      request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`),
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`,
+      ),
       params,
     );
     expect(response.status).toBe(200);
@@ -162,7 +194,9 @@ describe("agent thread messages route", () => {
       listMessages: vi.fn(async () => ({ messages: [], nextCursor: null })),
     });
     const response = await GET(
-      request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`),
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`,
+      ),
       params,
     );
     expect(response.status).toBe(404);

@@ -202,6 +202,36 @@ describe("eligible draft-request path", () => {
     expect(seam.drafts.requestDraft).toHaveBeenCalledTimes(1);
   });
 
+  it("forwards sibling link ids and the correlation id through the handoff seams", async () => {
+    const seam = seams();
+    const input = {
+      ...eligibleInput(),
+      correlationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      existingLinks: {
+        projectId: "11111111-1111-4111-8111-111111111111",
+        requestId: "22222222-2222-4222-8222-222222222222",
+      },
+    };
+    const out = await adviseCampaign(input, seam);
+
+    expect(out.outcome).toBe("draft_requested");
+    // The draft admission carries the caller's correlation id so the
+    // admission and the thread link share one trail.
+    expect(seam.drafts.requestDraft).toHaveBeenCalledWith(
+      expect.objectContaining({ correlationId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc" }),
+    );
+    // Sibling ids ride along: the links RPC overwrites every link column,
+    // so dropping them would wipe the thread → research chain.
+    expect(seam.links.setThreadLinks).toHaveBeenCalledWith({
+      organizationId: ORGANIZATION,
+      actorId: ACTOR,
+      threadId: THREAD,
+      draftRequestId: DRAFT_REQUEST,
+      projectId: "11111111-1111-4111-8111-111111111111",
+      requestId: "22222222-2222-4222-8222-222222222222",
+    });
+  });
+
   it("reports the admitted plan with no seams wired, creating nothing", async () => {
     const out = await adviseCampaign(eligibleInput());
 

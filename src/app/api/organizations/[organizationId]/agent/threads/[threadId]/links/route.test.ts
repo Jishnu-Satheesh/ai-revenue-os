@@ -16,6 +16,11 @@ vi.mock("@/modules/agent-chat/application/thread-service", () => ({
 vi.mock("@/lib/logger", () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
+// The test organization sits inside the agent rollout allowlist; a refusal
+// below proves authorization or validation, never the feature being off.
+vi.mock("@/lib/env", () => ({
+  env: { AGENT_CHAT_V1_ORGANIZATION_IDS: "10000000-0000-4000-8000-000000000001" },
+}));
 
 import { POST } from "@/app/api/organizations/[organizationId]/agent/threads/[threadId]/links/route";
 
@@ -86,6 +91,16 @@ describe("POST thread links", () => {
     mocks.getOrganizationContext.mockResolvedValue(operatorContext());
     const unknown = await POST(request({ opportunityId: DRAFT_REQUEST }), params);
     expect(unknown.status).toBe(400);
+    expect(mocks.setThreadLinks).not.toHaveBeenCalled();
+  });
+
+  it("refuses bodies with zero link ids instead of clearing the links", async () => {
+    for (const payload of [{}, { projectId: null }, { projectId: null, campaignId: null }]) {
+      const response = await POST(request(payload), params);
+      expect(response.status).toBe(400);
+      const body = await response.json();
+      expect(body.error.code).toBe("VALIDATION_ERROR");
+    }
     expect(mocks.setThreadLinks).not.toHaveBeenCalled();
   });
 });

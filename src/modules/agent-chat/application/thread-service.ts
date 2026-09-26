@@ -1,4 +1,5 @@
 import { hasOrganizationPermission } from "@/domain/access/permissions";
+import type { AgentIntent } from "@/domain/agent-router/intents";
 import type { EventPublisher } from "@/domain/events/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import {
@@ -72,7 +73,9 @@ export type ThreadServiceDeps = {
  * long-lived process cannot grow this without limit.
  */
 export type RouteDedupHit = {
-  intent: string;
+  intent: AgentIntent;
+  confidence: "high" | "medium" | "low";
+  reasonCodes: string[];
   questionnaire: QuestionnaireSpec | null;
   routingNote: string;
   thread: ThreadSummary;
@@ -318,7 +321,9 @@ export function createThreadService(deps: ThreadServiceDeps) {
        */
       idempotencyKey?: string;
     }): Promise<{
-      intent: string;
+      intent: AgentIntent;
+      confidence: "high" | "medium" | "low";
+      reasonCodes: string[];
       questionnaire: QuestionnaireSpec | null;
       routingNote: string;
       thread: ThreadSummary;
@@ -405,6 +410,8 @@ export function createThreadService(deps: ThreadServiceDeps) {
       });
       const routed = {
         intent: output.intent,
+        confidence: output.confidence,
+        reasonCodes: output.reasonCodes,
         questionnaire: output.questionnaire,
         routingNote: output.routingNote,
         thread,
@@ -434,7 +441,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
       message: ThreadMessageView;
       replayed: boolean;
       answers: Record<string, string>;
-      intent: string;
+      intent: AgentIntent;
       questionnaire: QuestionnaireSpec | null;
     }> {
       requireOperatorPlus(input.role);

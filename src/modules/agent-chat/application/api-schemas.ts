@@ -81,9 +81,13 @@ export type ThreadRouteParams = z.infer<typeof threadRouteParamsSchema>;
 
 /**
  * Thread link update body (spec section 11 audit chain). Every target is
- * optional and nullable — passing all four as null clears the links — but
- * unknown keys are refused. Organization, actor, and thread ids are
- * server-owned (path, session) and never accepted from the client.
+ * optional and nullable, but at least one link id must arrive: a body
+ * with zero link ids is refused with 400 instead of clearing the thread's
+ * links (the `set_thread_links` RPC overwrites all four columns, so an
+ * empty body would silently wipe the thread → research → draft chain —
+ * see Task 7 finding 2). Unknown keys are refused. Organization, actor,
+ * and thread ids are server-owned (path, session) and never accepted
+ * from the client.
  */
 const threadLinkIdSchema = z.string().uuid().nullable().optional();
 
@@ -94,7 +98,14 @@ export const threadLinksBodySchema = z
     draftRequestId: threadLinkIdSchema,
     campaignId: threadLinkIdSchema,
   })
-  .strict();
+  .strict()
+  .refine(
+    (body) =>
+      [body.projectId, body.requestId, body.draftRequestId, body.campaignId].some(
+        (id) => typeof id === "string" && id.length > 0,
+      ),
+    { message: "At least one link id is required." },
+  );
 export type ThreadLinksBody = z.infer<typeof threadLinksBodySchema>;
 
 export const organizationRouteParamsSchema = z

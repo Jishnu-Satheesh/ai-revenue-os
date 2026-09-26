@@ -1,8 +1,10 @@
 import { questionnaireSpecSchema } from "@/domain/agent-router/contracts";
+import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { DomainError, toPublicError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { createEventPublisher } from "@/domain/events/publisher";
+import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { createLightModelProvider } from "@/modules/agent-router/infrastructure/light-model-provider";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
 import { createThreadService } from "@/modules/agent-chat/application/thread-service";
@@ -41,13 +43,28 @@ export async function POST(
       Promise.resolve({ organizationId: rawParams.organizationId }),
     );
     organizationId = context.organizationId;
-    if (context.membership.role === "viewer") {
-      throw new DomainError("AUTHORIZATION_ERROR", "Viewers cannot change this chat.");
-    }
+    assertAgentChatEnabled(organizationId);
     correlationId = correlation.parseAfterAuthorization();
 
     const body = submitAnswersBodySchema.parse(await request.json().catch(() => ({})));
     const spec = questionnaireSpecSchema.parse(body.spec);
+    // Watch dispatch fence (spec section 12): answers that drive watch
+    // create/update carry the duplicate_watch card, and creating or
+    // changing a watch needs growth_intelligence.manage. Checked by grant
+    // rather than role name so the refusal follows the permission map;
+    // every other card keeps the operator-plus gate below.
+    if (
+      spec.kind === "duplicate_watch" &&
+      !hasOrganizationPermission(context.membership.role, "growth_intelligence.manage")
+    ) {
+      throw new DomainError(
+        "AUTHORIZATION_ERROR",
+        "Watch changes need the growth_intelligence.manage grant.",
+      );
+    }
+    if (context.membership.role === "viewer") {
+      throw new DomainError("AUTHORIZATION_ERROR", "Viewers cannot change this chat.");
+    }
     const url = new URL(request.url);
     const page = url.searchParams.get("page") ?? undefined;
 
@@ -67,7 +84,11 @@ export async function POST(
       idempotencyKey: body.idempotencyKey,
       ...(page ? { page } : {}),
     });
-    logger.info("agent_thread.answers_submitted", { organizationId, correlationId });
+    logger.info("agent_thread.answers_submitted", {
+      organizationId,
+      threadId: rawParams.threadId,
+      correlationId,
+    });
     return agentJsonResponse(
       { message, replayed, answers, resumeKey: body.resumeKey, intent, questionnaire },
       correlationId,

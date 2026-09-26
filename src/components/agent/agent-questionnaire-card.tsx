@@ -34,6 +34,14 @@ export type AgentQuestionnaireCardProps = {
   savedAnswers?: Record<string, unknown>;
   disabled?: boolean;
   disabledReason?: string;
+  /**
+   * Single-select option values rendered disabled (e.g. the duplicate-watch
+   * Update-fields choice while the schedule-update migration is unpushed
+   * or the caller lacks the manage grant). Viewing and cancelling stay
+   * usable; only the gated choices refuse.
+   */
+  disabledOptionValues?: string[];
+  disabledOptionReason?: string;
   onSubmit: (answers: QuestionnaireAnswers) => void;
   onCancel?: () => void;
   className?: string;
@@ -132,6 +140,8 @@ export function AgentQuestionnaireCard({
   savedAnswers = {},
   disabled = false,
   disabledReason,
+  disabledOptionValues = [],
+  disabledOptionReason,
   onSubmit,
   onCancel,
   className,
@@ -200,7 +210,19 @@ export function AgentQuestionnaireCard({
     event.preventDefault();
     if (disabled) return;
     const failures: Record<string, string> = {};
+    const unavailable = new Set(disabledOptionValues);
     for (const item of visibleItems) {
+      // A gated choice picked before the gate applied (or forged) refuses
+      // with the gate reason instead of travelling to the server.
+      const value = answers[item.key];
+      if (
+        typeof value === "string" &&
+        unavailable.has(value) &&
+        (item.kind === "single_select" || item.kind === "multi_select")
+      ) {
+        failures[item.key] = disabledOptionReason ?? "That option is not available right now.";
+        continue;
+      }
       const message = validateItem(item, answers[item.key]);
       if (message) failures[item.key] = message;
     }
@@ -252,6 +274,7 @@ export function AgentQuestionnaireCard({
     const multiple = item.kind === "multi_select";
     const picked =
       multiple && Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+    const disabledOptions = new Set(disabledOptionValues);
     return (
       <QuestionnaireChoices>
         {(item.options ?? []).map((option) => (
@@ -259,7 +282,7 @@ export function AgentQuestionnaireCard({
             key={option.value}
             value={option.value}
             checked={picked.includes(option.value)}
-            disabled={disabled}
+            disabled={disabled || disabledOptions.has(option.value)}
             onChange={(event) => {
               if (!multiple) {
                 setAnswer(item.key, option.value);
@@ -339,6 +362,9 @@ export function AgentQuestionnaireCard({
 
       {disabled && disabledReason ? (
         <p className="text-sm text-muted-foreground">{disabledReason}</p>
+      ) : null}
+      {disabledOptionValues.length > 0 && disabledOptionReason ? (
+        <p className="text-sm text-muted-foreground">{disabledOptionReason}</p>
       ) : null}
       {onCancel ? (
         <button

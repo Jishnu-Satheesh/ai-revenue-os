@@ -151,8 +151,16 @@ describe("shell", () => {
     // The drawer opens on send (the transient routing Marker is covered
     // deterministically in the drawer suite with a never-resolving route).
     expect(await screen.findByLabelText("AI agent conversation")).toBeInTheDocument();
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3));
-    const calls = (globalThis.fetch as ReturnType<typeof vi.fn>).mock.calls.map(
+    // The send pipeline posts thread + message + route; the
+    // thread-checkpoint poll adds a no-store GET alongside.
+    const fetchMock = globalThis.fetch as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(
+        (call) => (call[1] as RequestInit | undefined)?.method === "POST",
+      );
+      expect(posts).toHaveLength(3);
+    });
+    const calls = fetchMock.mock.calls.map(
       ([url, init]) => `${(init as RequestInit)?.method} ${url}`,
     );
     expect(calls[0]).toMatch(/\/agent\/threads$/);

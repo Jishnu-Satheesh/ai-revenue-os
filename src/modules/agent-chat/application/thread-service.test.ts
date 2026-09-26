@@ -149,6 +149,10 @@ describe("thread service", () => {
     expect(out.intent).toBe("research_once");
     expect(out.questionnaire?.kind).toBe("deepthink_upgrade");
     expect(out.thread.id).toBe("t1");
+    // The routed result carries confidence + reason codes for the drawer
+    // steps and the enriched route log line.
+    expect(out.confidence).toBe("high");
+    expect(out.reasonCodes).toEqual(expect.arrayContaining(["DEEPTHINK_UPGRADE_REQUIRED"]));
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({
         eventName: "agent_thread.routed",

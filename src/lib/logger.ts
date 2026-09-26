@@ -42,6 +42,20 @@ type LogContext = {
     | "unpinned"
     | "resolved";
   runId?: string;
+  /** An agent chat thread. Opaque UUID, like the other ids here. */
+  threadId?: string;
+  /**
+   * The agent router's classified intent. Bounded vocabulary, never the
+   * user message or any model text.
+   */
+  intent?: "answer_memory" | "research_once" | "watch" | "campaign_advice" | "profile_scope_change";
+  /** The router's confidence. Bounded vocabulary. */
+  confidence?: "high" | "medium" | "low";
+  /**
+   * Stable routing reason codes (e.g. `DEEPTHINK_UPGRADE_REQUIRED`). Codes
+   * chosen by the platform, never tenant text.
+   */
+  reasonCodes?: string[];
   /**
    * A thrown error's constructor name, such as `ZodError`. A code identifier
    * chosen by the platform, never tenant text — the message itself stays out
