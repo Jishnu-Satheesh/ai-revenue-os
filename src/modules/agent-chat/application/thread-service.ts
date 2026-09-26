@@ -2,6 +2,7 @@ import { hasOrganizationPermission } from "@/domain/access/permissions";
 import type { AgentIntent } from "@/domain/agent-router/intents";
 import type { EventPublisher } from "@/domain/events/types";
 import type { OrganizationRole } from "@/domain/organizations/types";
+import { z } from "zod";
 import {
   routerProposalSchema,
   type QuestionnaireSpec,
@@ -9,7 +10,22 @@ import {
 } from "@/domain/agent-router/contracts";
 import { routeAgentMessage } from "@/modules/agent-router/application/router-service";
 import { DomainError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import type { ContextPack, ContextPackReaders } from "@/modules/agent-chat/application/context-pack";
+import type {
+  DispatchAction,
+  DispatchCampaignAdvice,
+  DispatchWatchCreate,
+  DispatchWatchUpdate,
+} from "@/modules/agent-chat/application/api-schemas";
+import {
+  adviseCampaign,
+  campaignBundleLink,
+} from "@/modules/agent-chat/application/campaign-advise";
+import {
+  buildThreadIdempotencyKey,
+  messageDigestFor,
+} from "@/modules/agent-chat/application/thread-keys";
 import {
   buildAnswerIdempotencyKey,
   encodeAnswerBody,
@@ -78,6 +94,21 @@ export type ThreadServiceDeps = {
    * Defaults to a process-local capped cache; inject a fake in tests.
    */
   routeDedup?: RouteDedupStore;
+  /**
+   * Governed dispatch seams (Slice B). The trigger functions enqueue the
+   * three `src/trigger/agent-chat.ts` tasks; the resolvers read
+   * server-owned pointers (Market Profile version, opportunity row) the
+   * worker re-validates. All optional so unit scope runs the pure paths;
+   * the dispatch route wires every one.
+   */
+  dispatchSeams?: AgentDispatchSeams;
+  /**
+   * Dispatch redispatch guard. The same client token for the same thread
+   * + message replays the kept outcome without a duplicate enqueue and
+   * without a duplicate audit event. Defaults to a process-local capped
+   * cache; inject a fake in tests.
+   */
+  dispatchDedup?: DispatchDedupStore;
 };
 
 /**
@@ -133,6 +164,125 @@ const sharedRouteDedup = (() => {
 })();
 
 /**
+ * Governed dispatch (Slice B, spec sections 10-12).
+ *
+ * The research/watch/draft lanes become dispatchable: the service
+ * rechecks the caller's grants at dispatch time (viewers refused first,
+ * `growth_intelligence.manage` for research/watch,
+ * `campaign.create` for drafts), requires the operator's explicit
+ * confirmation, and enqueues the three `src/trigger/agent-chat.ts`
+ * tasks (research/watch) or admits one governed draft through
+ * `adviseCampaign` (campaign). The same client token replays the kept
+ * outcome without a duplicate enqueue and without a duplicate audit
+ * event. Research needs no client params: the bound Market Profile
+ * pointer resolves server-side and the worker re-validates its digest.
+ */
+
+export type AgentDispatchTrigger = (payload: {
+  organizationId: string;
+  actorId: string;
+  threadId?: string;
+  idempotencyKey: string;
+  correlationId: string;
+} & Record<string, unknown>) => Promise<{ runId: string }>;
+
+export type AgentOpportunityRecord = {
+  id: string;
+  version: number;
+  status: string;
+  actionKey: string;
+};
+
+export type AgentDispatchSeams = {
+  triggerResearchOnce?: AgentDispatchTrigger;
+  triggerWatchCreate?: AgentDispatchTrigger;
+  triggerWatchUpdate?: AgentDispatchTrigger;
+  resolveProfilePointer?: (input: {
+    organizationId: string;
+  }) => Promise<{ versionId: string; digest: string } | null>;
+  resolveOpportunity?: (input: {
+    organizationId: string;
+    opportunityId: string;
+  }) => Promise<AgentOpportunityRecord | null>;
+  requestDraft?: (input: {
+    organizationId: string;
+    actorId: string;
+    opportunityId: string;
+    opportunityVersion: number;
+    actionKey: "campaign.governed_draft_v1";
+    objective: string;
+    audience: string;
+    assertions: Array<{ key: string; expectedOutcome: string }>;
+    idempotencyKey: string;
+    correlationId: string;
+  }) => Promise<{ outcome: "created" | "replayed"; requestId: string; draftRequestStatus: string }>;
+};
+
+export type ThreadDispatchInput = {
+  organizationId: string;
+  actorId: string;
+  role: OrganizationRole;
+  threadId: string;
+  action: DispatchAction;
+  idempotencyKey: string;
+  confirmation: { confirmed: boolean };
+  watchCreate?: DispatchWatchCreate;
+  watchUpdate?: DispatchWatchUpdate;
+  campaignAdvice?: DispatchCampaignAdvice;
+};
+
+/**
+ * Verbatim wire shape Slice C and operators depend on. Every key is
+ * always present (nulls where not applicable) so the contract is
+ * stable: `outcome` is `dispatched` (enqueued — the worker owns the
+ * result), `replayed` (same token, kept outcome), `draft_requested`
+ * (admitted now), or `brief_prefilled` (ineligible, reasons named).
+ * `eventId` is the audit event for this dispatch, null when no event
+ * was emitted (async lanes emit from the worker instead).
+ */
+export type ThreadDispatchOutcome = {
+  outcome: "dispatched" | "replayed" | "draft_requested" | "brief_prefilled";
+  eventId: string | null;
+  replayed: boolean;
+  idempotencyKey: string;
+  runId: string | null;
+  requestId: string | null;
+  projectId: string | null;
+  draftRequestId: string | null;
+  briefUrl: string | null;
+  reasonCodes: string[];
+  link: { href: string; ref: Record<string, string | null> } | null;
+};
+
+export type DispatchDedupStore = {
+  get(key: string): ThreadDispatchOutcome | undefined;
+  set(key: string, hit: ThreadDispatchOutcome): void;
+};
+
+const DISPATCH_DEDUP_CAP = 500;
+const sharedDispatchDedup = (() => {
+  const seen = new Map<string, ThreadDispatchOutcome>();
+  const store: DispatchDedupStore = {
+    get: (key) => seen.get(key),
+    set: (key, hit) => {
+      if (!seen.has(key) && seen.size >= DISPATCH_DEDUP_CAP) {
+        const oldest = seen.keys().next();
+        if (!oldest.done) seen.delete(oldest.value);
+      }
+      seen.set(key, hit);
+    },
+  };
+  return store;
+})();
+
+function agentResearchLink(organizationId: string): ThreadDispatchOutcome["link"] {
+  return {
+    href: `/organizations/${organizationId}/growth-intelligence`,
+    ref: { requestId: null, projectId: null, reportId: null },
+  };
+}
+
+/**
  * Permissions the router understands, derived from the caller's org role
  * in code — never from client claims.
  */
@@ -182,7 +332,13 @@ async function publishAgentEvent(
   input: {
     organizationId: string;
     actorId: string;
-    eventName: "agent_thread.opened" | "agent_message.appended" | "agent_thread.routed";
+    eventName:
+      | "agent_thread.opened"
+      | "agent_message.appended"
+      | "agent_thread.routed"
+      | "agent_thread.research_triggered"
+      | "agent_thread.watch_created"
+      | "agent_thread.draft_requested";
     payload: Record<string, unknown>;
   },
 ): Promise<void> {
@@ -261,14 +417,25 @@ async function synthesizeAssistantAnswer(
       return { message: null, draft, replayed: appended.replayed };
     }
     // No extra audit event here: the turn's `agent_thread.routed` event
-    // already trails this row by thread + message ids, and audit-event
-    // shape belongs to Slice B (dispatch + events). The row itself is the
-    // durable, poll-rendered record.
+    // already trails this row by thread + message ids (ruling F6 — a
+    // per-append event would double the audit volume for a derived
+    // artifact while the routed event plus the durable row carry the
+    // same lineage; retention keeps the content-free routed event after
+    // bodies are purged). The row itself is the durable, poll-rendered
+    // record.
     return { message: kept, draft, replayed: appended.replayed };
-  } catch {
+  } catch (error) {
     // A conflicting or failed answer append must not fail the route: the
     // draft still returns, and the kept row (if any) renders on the next
-    // durable read.
+    // durable read. Ruling F2: the swallow is logged, structured, with
+    // organization/thread/message ids only — never the body.
+    logger.warn("agent_thread.answer_append_failed", {
+      organizationId: args.organizationId,
+      threadId: args.thread.id,
+      messageId: args.message.id,
+      ...(deps.correlationId ? { correlationId: deps.correlationId } : {}),
+      errorCode: error instanceof Error ? error.name : "unknown",
+    });
     return { message: null, draft, replayed: false };
   }
 }
@@ -621,6 +788,329 @@ export function createThreadService(deps: ThreadServiceDeps) {
         questionnaire: routed.questionnaire,
         answer: routed.answer,
       };
+    },
+
+    /**
+     * Governed dispatch (Slice B). Enqueues the research/watch Trigger
+     * tasks or admits one campaign draft through `adviseCampaign`.
+     * Viewers are refused before persistence; grants are rechecked from
+     * the role (never client claims); confirmation must be explicit; the
+     * same token replays the kept outcome. Research/watch lanes emit
+     * their audit events from the worker (which knows the outcome); the
+     * draft lane emits `agent_thread.draft_requested` here, its
+     * `adviseCampaign` caller — identifier-only payload plus
+     * correlation, never bodies.
+     */
+    async dispatch(input: ThreadDispatchInput): Promise<ThreadDispatchOutcome> {
+      requireOperatorPlus(input.role);
+      const grant =
+        input.action === "campaign_advice" ? "campaign.create" : "growth_intelligence.manage";
+      if (!hasOrganizationPermission(input.role, grant)) {
+        throw new DomainError(
+          "AUTHORIZATION_ERROR",
+          input.action === "campaign_advice"
+            ? "Campaign drafts need the campaign.create grant."
+            : "Research and watch changes need the growth_intelligence.manage grant.",
+        );
+      }
+      if (input.confirmation?.confirmed !== true) {
+        throw new DomainError(
+          "VALIDATION_ERROR",
+          "Confirm this action before dispatch. Nothing was enqueued.",
+        );
+      }
+      const clientToken = z.string().trim().min(16).max(200).parse(input.idempotencyKey);
+      const thread = await deps.threads.getThread({
+        organizationId: input.organizationId,
+        threadId: input.threadId,
+      });
+      if (!thread) {
+        throw new DomainError(
+          "TENANT_SCOPE_ERROR",
+          "This chat was not found in your organization.",
+        );
+      }
+      const message = await deps.threads.latestUserMessage({
+        organizationId: input.organizationId,
+        threadId: input.threadId,
+      });
+      if (!message || !message.body) {
+        throw new DomainError("DOMAIN_ERROR", "This chat has no readable message to dispatch from.");
+      }
+      const dedup = deps.dispatchDedup ?? sharedDispatchDedup;
+      const dedupKey = `${input.organizationId}:${thread.id}:${message.id}:${clientToken}`;
+      const kept = dedup.get(dedupKey);
+      if (kept) {
+        return { ...kept, replayed: true };
+      }
+      const digest = messageDigestFor({
+        threadId: thread.id,
+        messageId: message.id,
+        body: message.body ?? "",
+      });
+      const correlationId = deps.correlationId ?? crypto.randomUUID();
+      const seams = deps.dispatchSeams ?? {};
+      let result: ThreadDispatchOutcome;
+      switch (input.action) {
+        case "research_once": {
+          if (!seams.resolveProfilePointer || !seams.triggerResearchOnce) {
+            throw new DomainError("DOMAIN_ERROR", "Research dispatch is not wired for this chat.");
+          }
+          const pointer = await seams.resolveProfilePointer({
+            organizationId: input.organizationId,
+          });
+          if (!pointer) {
+            throw new DomainError(
+              "VALIDATION_ERROR",
+              "No current Market Profile version is bound to this chat; scoped research cannot start.",
+            );
+          }
+          const idempotencyKey = buildThreadIdempotencyKey(thread.id, digest);
+          const { runId } = await seams.triggerResearchOnce({
+            organizationId: input.organizationId,
+            actorId: input.actorId,
+            threadId: thread.id,
+            messageDigest: digest,
+            profileVersionId: pointer.versionId,
+            profileDigest: pointer.digest,
+            correlationId,
+            idempotencyKey,
+          });
+          // No event here: the worker emits `agent_thread.research_triggered`
+          // with the outcome it owns (dispatched, blocked, or replayed).
+          result = {
+            outcome: "dispatched",
+            eventId: null,
+            replayed: false,
+            idempotencyKey,
+            runId,
+            requestId: null,
+            projectId: null,
+            draftRequestId: null,
+            briefUrl: null,
+            reasonCodes: [],
+            link: agentResearchLink(input.organizationId),
+          };
+          break;
+        }
+        case "watch_create": {
+          const block = input.watchCreate;
+          if (!block) {
+            throw new DomainError(
+              "VALIDATION_ERROR",
+              "This action needs its watch parameters.",
+            );
+          }
+          if (!seams.triggerWatchCreate) {
+            throw new DomainError("DOMAIN_ERROR", "Watch dispatch is not wired for this chat.");
+          }
+          const idempotencyKey = buildThreadIdempotencyKey(thread.id, `${digest}:watch`);
+          const { runId } = await seams.triggerWatchCreate({
+            organizationId: input.organizationId,
+            actorId: input.actorId,
+            threadId: thread.id,
+            branchId: block.branchId,
+            ...(block.title ? { title: block.title } : {}),
+            question: block.question,
+            mode: block.mode,
+            ...(block.schedule !== undefined ? { schedule: block.schedule } : {}),
+            researchArea: block.researchArea,
+            competitors: block.competitors,
+            investigationAreas: block.investigationAreas,
+            ...(block.businessContextSnapshotId
+              ? { businessContextSnapshotId: block.businessContextSnapshotId }
+              : {}),
+            correlationId,
+            idempotencyKey,
+          });
+          // No event here: the worker emits `agent_thread.watch_created`
+          // with the outcome it owns (created, replayed, or duplicate).
+          result = {
+            outcome: "dispatched",
+            eventId: null,
+            replayed: false,
+            idempotencyKey,
+            runId,
+            requestId: null,
+            projectId: null,
+            draftRequestId: null,
+            briefUrl: null,
+            reasonCodes: [],
+            link: agentResearchLink(input.organizationId),
+          };
+          break;
+        }
+        case "watch_update": {
+          const block = input.watchUpdate;
+          if (!block) {
+            throw new DomainError(
+              "VALIDATION_ERROR",
+              "This action needs its watch parameters.",
+            );
+          }
+          if (!seams.triggerWatchUpdate) {
+            throw new DomainError("DOMAIN_ERROR", "Watch dispatch is not wired for this chat.");
+          }
+          const idempotencyKey = buildThreadIdempotencyKey(thread.id, `${digest}:watch-update`);
+          const { runId } = await seams.triggerWatchUpdate({
+            organizationId: input.organizationId,
+            actorId: input.actorId,
+            threadId: thread.id,
+            projectId: block.projectId,
+            edits: block.edits,
+            correlationId,
+            idempotencyKey,
+          });
+          // No event: an update re-points an existing watch rather than
+          // creating one, so no creation vocabulary fits; the route log
+          // plus the fenced update RPC trail the change.
+          result = {
+            outcome: "dispatched",
+            eventId: null,
+            replayed: false,
+            idempotencyKey,
+            runId,
+            requestId: null,
+            projectId: block.projectId,
+            draftRequestId: null,
+            briefUrl: null,
+            reasonCodes: [],
+            link: {
+              href: `/organizations/${input.organizationId}/growth-intelligence`,
+              ref: { requestId: null, projectId: block.projectId, reportId: null },
+            },
+          };
+          break;
+        }
+        case "campaign_advice": {
+          const block = input.campaignAdvice;
+          if (!block) {
+            throw new DomainError(
+              "VALIDATION_ERROR",
+              "This action needs its campaign parameters.",
+            );
+          }
+          if (!seams.resolveOpportunity) {
+            throw new DomainError("DOMAIN_ERROR", "Campaign dispatch is not wired for this chat.");
+          }
+          const resolved = await seams.resolveOpportunity({
+            organizationId: input.organizationId,
+            opportunityId: block.opportunity.id,
+          });
+          if (!resolved) {
+            throw new DomainError(
+              "TENANT_SCOPE_ERROR",
+              "This opportunity was not found in your organization.",
+            );
+          }
+          if (resolved.version !== block.opportunity.version) {
+            throw new DomainError(
+              "VALIDATION_ERROR",
+              "That opportunity changed since it was read. Refresh it and confirm again.",
+            );
+          }
+          const advised = await adviseCampaign(
+            {
+              organizationId: input.organizationId,
+              actorId: input.actorId,
+              threadId: thread.id,
+              permissions: permissionsForRole(input.role),
+              opportunity: { id: block.opportunity.id, version: block.opportunity.version },
+              objective: block.objective,
+              audience: block.audience,
+              assertions: block.assertions,
+              evidenceSnapshot: block.evidenceSnapshot,
+              evidenceSnapshotFreezable: block.evidenceSnapshotFreezable,
+              marketProfile: block.marketProfile,
+              policyPass: block.policyPass,
+              capabilityPass: block.capabilityPass,
+              schedulePass: block.schedulePass,
+              audienceReady: block.audienceReady,
+              estimate: block.estimate,
+              correlationId,
+              existingLinks: {
+                ...(thread.linkedResearchProjectId
+                  ? { projectId: thread.linkedResearchProjectId }
+                  : {}),
+                ...(thread.linkedRequestId ? { requestId: thread.linkedRequestId } : {}),
+                ...(thread.linkedCampaignId ? { campaignId: thread.linkedCampaignId } : {}),
+              },
+            },
+            {
+              ...(seams.requestDraft ? { drafts: { requestDraft: seams.requestDraft } } : {}),
+              links: {
+                setThreadLinks: (linkInput) =>
+                  this.setThreadLinks({
+                    organizationId: linkInput.organizationId,
+                    actorId: linkInput.actorId,
+                    role: input.role,
+                    threadId: linkInput.threadId,
+                    draftRequestId: linkInput.draftRequestId,
+                    ...(linkInput.projectId ? { projectId: linkInput.projectId } : {}),
+                    ...(linkInput.requestId ? { requestId: linkInput.requestId } : {}),
+                    ...(linkInput.campaignId ? { campaignId: linkInput.campaignId } : {}),
+                  }),
+              },
+            },
+          );
+          if (advised.outcome === "brief_prefilled") {
+            result = {
+              outcome: "brief_prefilled",
+              eventId: null,
+              replayed: false,
+              idempotencyKey: buildThreadIdempotencyKey(thread.id, digest),
+              runId: null,
+              requestId: null,
+              projectId: null,
+              draftRequestId: null,
+              briefUrl: advised.briefUrl,
+              reasonCodes: [...advised.reasonCodes],
+              link: null,
+            };
+            break;
+          }
+          let eventId: string | null = null;
+          if (advised.draftRequestId !== "pending") {
+            eventId = crypto.randomUUID();
+            await publishAgentEvent(deps, {
+              organizationId: input.organizationId,
+              actorId: input.actorId,
+              eventName: "agent_thread.draft_requested",
+              payload: {
+                threadId: thread.id,
+                draftRequestId: advised.draftRequestId,
+                opportunityId: block.opportunity.id,
+                idempotencyKey: advised.idempotencyKey,
+              },
+            });
+          }
+          const bundleLink = campaignBundleLink(input.organizationId, {
+            draftRequestId: advised.draftRequestId,
+          });
+          result = {
+            outcome: "draft_requested",
+            eventId,
+            replayed: false,
+            idempotencyKey: advised.idempotencyKey,
+            runId: null,
+            requestId: null,
+            projectId: null,
+            draftRequestId: advised.draftRequestId,
+            briefUrl: null,
+            reasonCodes: [],
+            link: {
+              href: bundleLink.href,
+              ref: {
+                draftRequestId: bundleLink.ref.draftRequestId,
+                campaignId: bundleLink.ref.campaignId,
+              },
+            },
+          };
+          break;
+        }
+      }
+      dedup.set(dedupKey, result);
+      return { ...result, replayed: false };
     },
 
     /**

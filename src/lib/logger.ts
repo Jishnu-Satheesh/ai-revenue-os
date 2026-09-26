@@ -44,6 +44,8 @@ type LogContext = {
   runId?: string;
   /** An agent chat thread. Opaque UUID, like the other ids here. */
   threadId?: string;
+  /** A message inside an agent chat thread. Opaque UUID, like threadId. */
+  messageId?: string;
   /**
    * The agent router's classified intent. Bounded vocabulary, never the
    * user message or any model text.

@@ -75,8 +75,9 @@ export type UniversalAgentShellProps = {
   /** Injected campaign seams for tests; defaults post to live routes. */
   campaignSeams?: AdviseCampaignSeams;
   /**
-   * Whether the watch schedule-update migration is applied. False until
-   * the two agent migrations are pushed: Update-fields stays unavailable.
+   * Whether the watch schedule-update path is available. True: the
+   * schedule RPC is live and proven on staging. Forwarded to the
+   * drawer; pass false explicitly to force the honest unavailable copy.
    */
   watchUpdateAvailable?: boolean;
 };
@@ -105,7 +106,7 @@ export function UniversalAgentShell({
   opportunity = null,
   advice = null,
   campaignSeams,
-  watchUpdateAvailable = false,
+  watchUpdateAvailable = true,
 }: UniversalAgentShellProps) {
   const reduceMotion = useReducedMotion();
   const inputId = useId();

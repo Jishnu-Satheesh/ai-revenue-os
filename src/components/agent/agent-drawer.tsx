@@ -26,6 +26,10 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { AgentIntent } from "@/domain/agent-router/intents";
 import type { RouterRole, QuestionnaireSpec } from "@/domain/agent-router/contracts";
+import {
+  buildDispatchPayload,
+  type DispatchAction,
+} from "@/modules/agent-chat/application/api-schemas";
 import type {
   ThreadMessageView,
   ThreadMode,
@@ -41,6 +45,20 @@ export type AgentRouteResult = {
   confidence: "high" | "medium" | "low";
   reasonCodes: string[];
   questionnaire: QuestionnaireSpec | null;
+};
+
+export type AgentDispatchOutcome = {
+  outcome: "dispatched" | "replayed" | "draft_requested" | "brief_prefilled";
+  eventId: string | null;
+  replayed: boolean;
+  idempotencyKey: string;
+  runId: string | null;
+  requestId: string | null;
+  projectId: string | null;
+  draftRequestId: string | null;
+  briefUrl: string | null;
+  reasonCodes: string[];
+  link: { href: string; ref: Record<string, string | null> } | null;
 };
 
 export type AgentDrawerProps = {
@@ -60,10 +78,10 @@ export type AgentDrawerProps = {
   /** Injected campaign seams for tests; defaults post to the live routes. */
   campaignSeams?: AdviseCampaignSeams;
   /**
-   * Whether the watch schedule-update migration is applied. False until
-   * the two agent migrations are pushed (user's step): the duplicate-watch
-   * Update-fields choice renders unavailable with honest copy, and the
-   * server fails closed underneath. Flip to true in the push commit.
+   * Whether the watch schedule-update path is available. True: the
+   * schedule RPC is live and proven on staging, so Update-fields is
+   * offered to grant-holders (the server rechecks the grant on submit).
+   * Pass false explicitly to force the honest unavailable copy.
    */
   watchUpdateAvailable?: boolean;
   activeTab: AgentDrawerTab;
@@ -152,7 +170,7 @@ export function AgentDrawer({
   opportunity = null,
   advice = null,
   campaignSeams,
-  watchUpdateAvailable = false,
+  watchUpdateAvailable = true,
   activeTab,
   onTabChange,
   collapsed,
@@ -176,6 +194,8 @@ export function AgentDrawer({
   const [thread, setThread] = useState<ThreadSummary | null>(null);
   const [routeResult, setRouteResult] = useState<AgentRouteResult | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [dispatchOutcome, setDispatchOutcome] = useState<AgentDispatchOutcome | null>(null);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, QuestionnaireAnswers>>(
     {},
   );
@@ -292,6 +312,8 @@ export function AgentDrawer({
       setMessages((previous) => [...previous, userMessage]);
       setRouteResult(result);
       setSendError(null);
+      setDispatchOutcome(null);
+      setDispatchError(null);
       onTabChange("response");
       setAnnouncement(`Routed to ${result.intent}.`);
       // The assistant row lands server-side during routing; re-read the
@@ -362,6 +384,40 @@ export function AgentDrawer({
     onError: (error) => {
       setSendError(error instanceof Error ? error.message : "Saving answers failed.");
       setAnnouncement("Saving answers failed.");
+    },
+  });
+  // Governed dispatch (Slice B): the research lane needs no parameters —
+  // the route resolves the Market Profile pointer server-side — so the
+  // Steps tab can offer the confirm click directly. The click IS the
+  // explicit confirmation the route requires. Watch and draft lanes need
+  // their forms first (Slice C); the dispatch route already serves them.
+  const dispatchLane = useMutation({
+    mutationFn: async (vars: { action: DispatchAction }) => {
+      if (!threadId) throw new Error("No active conversation. Send a message first.");
+      const payload = buildDispatchPayload({
+        action: vars.action,
+        idempotencyKey: crypto.randomUUID(),
+      });
+      return (await agentPostJson(
+        `${base}/${threadId}/dispatch`,
+        payload as unknown as Record<string, unknown>,
+        correlationId,
+      )) as AgentDispatchOutcome;
+    },
+    onSuccess: (result) => {
+      setDispatchOutcome(result);
+      setDispatchError(null);
+      setAnnouncement(
+        result.replayed
+          ? "Already queued — showing the kept run."
+          : "Research queued. Track it in Market Intelligence.",
+      );
+    },
+    onError: (error) => {
+      setDispatchError(
+        error instanceof Error ? error.message : "Dispatch failed. Nothing was enqueued.",
+      );
+      setAnnouncement("Dispatch failed.");
     },
   });
   // Pump: adopt a fresh prompt into the queue, then run queued prompts one
@@ -453,6 +509,8 @@ export function AgentDrawer({
     setThread(null);
     setRouteResult(null);
     setSendError(null);
+    setDispatchOutcome(null);
+    setDispatchError(null);
     setSubmittedAnswers({});
     setDismissedCards([]);
     setLastSaved(null);
@@ -488,7 +546,7 @@ export function AgentDrawer({
     : !canManageWatch
       ? "Watch updates and second watches need the growth_intelligence.manage grant — enforcement stays server-side. Viewing the existing watch stays free."
       : !watchUpdateAvailable
-        ? "Watch field updates are unavailable until the pending migration is applied — viewing the existing watch stays free."
+        ? "Watch field updates are unavailable for this chat — viewing the existing watch stays free."
         : undefined;
 
   if (collapsed) {
@@ -667,6 +725,48 @@ export function AgentDrawer({
                 error={sendError}
                 growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
               />
+              {routeResult?.intent === "research_once" && threadId ? (
+                <div className="flex flex-col gap-2 pt-2">
+                  <Button
+                    type="button"
+                    disabled={!canManageWatch || dispatchLane.isPending}
+                    onClick={() => dispatchLane.mutate({ action: "research_once" })}
+                    title={
+                      canManageWatch
+                        ? "Queue one TinyFish research run for this chat. This click is the confirmation — the worker spends only inside its reserve-before-call budget."
+                        : "Needs the growth_intelligence.manage grant — enforcement stays server-side."
+                    }
+                  >
+                    {dispatchLane.isPending ? <Spinner aria-hidden="true" /> : null}
+                    Run research once
+                  </Button>
+                  {!canManageWatch ? (
+                    <p className="text-xs text-muted-foreground">
+                      Needs the growth_intelligence.manage grant — enforcement stays server-side.
+                    </p>
+                  ) : null}
+                  {dispatchError ? (
+                    <p role="alert" className="text-sm text-destructive">
+                      {dispatchError}
+                    </p>
+                  ) : null}
+                  {dispatchOutcome ? (
+                    <p className="text-sm text-muted-foreground">
+                      {dispatchOutcome.replayed
+                        ? "Already queued — showing the kept run."
+                        : "Research queued."}{" "}
+                      {dispatchOutcome.link ? (
+                        <a
+                          className="font-medium text-primary underline-offset-4 hover:underline"
+                          href={dispatchOutcome.link.href}
+                        >
+                          Open Market Intelligence
+                        </a>
+                      ) : null}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
             </TabsContent>
 
             <TabsContent value="draft" className="flex flex-col gap-3 overflow-y-auto">

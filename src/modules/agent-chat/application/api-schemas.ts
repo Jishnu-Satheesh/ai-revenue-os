@@ -111,3 +111,128 @@ export type ThreadLinksBody = z.infer<typeof threadLinksBodySchema>;
 export const organizationRouteParamsSchema = z
   .object({ organizationId: z.string().uuid() })
   .strict();
+
+/**
+ * Governed dispatch body (spec sections 10-12, Slice B).
+ *
+ * POST carries the idempotency token, the action, and the operator's
+ * explicit confirmation — plus only the block matching the action.
+ * Organization, actor, thread, digest, and correlation ids are
+ * server-owned (path, session, latest message, headers) and never
+ * accepted from the client. `research_once` needs no block: the route
+ * resolves the bound Market Profile pointer server-side, so a client
+ * can never widen research scope.
+ */
+
+export const dispatchActionSchema = z.enum([
+  "research_once",
+  "watch_create",
+  "watch_update",
+  "campaign_advice",
+]);
+export type DispatchAction = z.infer<typeof dispatchActionSchema>;
+
+export const dispatchConfirmationSchema = z.object({ confirmed: z.boolean() }).strict();
+export type DispatchConfirmation = z.infer<typeof dispatchConfirmationSchema>;
+
+const dispatchAssertionSchema = z
+  .object({
+    key: z.string().trim().min(1).max(200),
+    expectedOutcome: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+const dispatchEvidenceSnapshotSchema = z
+  .object({
+    windowDays: z.union([z.literal(30), z.literal(60)]),
+    observedAt: z.string().datetime({ offset: true }),
+    digest: z.string().trim().min(1).max(256),
+    citations: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
+  })
+  .strict();
+
+const dispatchEstimateSchema = z
+  .object({
+    valueText: z.string().trim().min(1).max(240),
+    inputs: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
+    assumptions: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
+  })
+  .strict();
+
+export const dispatchWatchCreateSchema = z
+  .object({
+    branchId: z.string().uuid(),
+    title: z.string().trim().min(1).max(200).optional(),
+    question: z.string().trim().min(1).max(2000),
+    mode: z.enum(["one-time", "recurring"]),
+    schedule: z.unknown().optional(),
+    researchArea: z.string().trim().min(1).max(160),
+    competitors: z.array(z.unknown()).max(20).default([]),
+    investigationAreas: z.array(z.string()).min(1).max(5).default(["demand"]),
+    businessContextSnapshotId: z.string().uuid().optional(),
+  })
+  .strict();
+export type DispatchWatchCreate = z.infer<typeof dispatchWatchCreateSchema>;
+
+export const dispatchWatchUpdateSchema = z
+  .object({
+    projectId: z.string().uuid(),
+    edits: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+export type DispatchWatchUpdate = z.infer<typeof dispatchWatchUpdateSchema>;
+
+export const dispatchCampaignAdviceSchema = z
+  .object({
+    opportunity: z
+      .object({ id: z.string().uuid(), version: z.number().int().positive() })
+      .strict(),
+    objective: z.string().trim().min(1).max(500),
+    audience: z.string().trim().min(1).max(500),
+    assertions: z.array(dispatchAssertionSchema).min(1).max(50),
+    evidenceSnapshot: dispatchEvidenceSnapshotSchema,
+    evidenceSnapshotFreezable: z.boolean(),
+    marketProfile: z
+      .object({
+        versionId: z.string().trim().min(1).max(200),
+        digest: z.string().trim().min(1).max(256),
+      })
+      .strict()
+      .nullable()
+      .default(null),
+    policyPass: z.boolean(),
+    capabilityPass: z.boolean(),
+    schedulePass: z.boolean(),
+    audienceReady: z.boolean(),
+    estimate: dispatchEstimateSchema,
+  })
+  .strict();
+export type DispatchCampaignAdvice = z.infer<typeof dispatchCampaignAdviceSchema>;
+
+export const dispatchBodySchema = z
+  .object({
+    idempotencyKey: idempotencyKeySchema,
+    action: dispatchActionSchema,
+    confirmation: dispatchConfirmationSchema,
+    watchCreate: dispatchWatchCreateSchema.optional(),
+    watchUpdate: dispatchWatchUpdateSchema.optional(),
+    campaignAdvice: dispatchCampaignAdviceSchema.optional(),
+  })
+  .strict();
+export type DispatchBody = z.infer<typeof dispatchBodySchema>;
+
+/**
+ * Builds the exact confirmed POST body the drawer sends to the dispatch
+ * route. One constructor shared by the drawer, tests, and Slice C, so the
+ * wire shape cannot drift between callers. Confirmation is always true
+ * here: this helper is only called from an explicit confirm click.
+ */
+export function buildDispatchPayload(input: {
+  action: DispatchAction;
+  idempotencyKey: string;
+  watchCreate?: DispatchWatchCreate;
+  watchUpdate?: DispatchWatchUpdate;
+  campaignAdvice?: DispatchCampaignAdvice;
+}): DispatchBody {
+  return dispatchBodySchema.parse({ ...input, confirmation: { confirmed: true } });
+}

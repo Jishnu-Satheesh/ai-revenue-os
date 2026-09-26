@@ -5,6 +5,7 @@ import { z } from "zod";
 import { briefRevisionSchema, type BriefRevision } from "@/domain/growth-intelligence/brief";
 import { isResearchProviderQualified } from "@/domain/growth-intelligence/research-budget";
 import { createGrowthIntelligenceRequestFingerprint } from "@/domain/growth-intelligence/request-fingerprint";
+import { createEventPublisher } from "@/domain/events/publisher";
 import type { Database } from "@/lib/supabase/database.types";
 import { createGrowthIntelligenceWorkerServiceClient } from "@/lib/supabase/service";
 import { isAgentChatEnabled } from "@/modules/integrations/application/feature-access";
@@ -59,6 +60,33 @@ const agentChatQueue = queue({
   name: "agent-chat",
   concurrencyLimit: 3,
 });
+
+/**
+ * Audit trail for governed dispatches (Slice B, spec section 7). The
+ * dispatch route enqueues blind — it cannot know the outcome — so the
+ * worker emits the event once the outcome exists. Payloads carry
+ * identifiers plus bounded outcome codes plus correlation only, never
+ * bodies, questions, or estimates.
+ */
+async function publishAgentThreadEvent(input: {
+  organizationId: string;
+  actorId: string;
+  correlationId: string;
+  eventName: "agent_thread.research_triggered" | "agent_thread.watch_created";
+  payload: Record<string, unknown>;
+}): Promise<void> {
+  await createEventPublisher().publish({
+    organizationId: input.organizationId,
+    eventId: crypto.randomUUID(),
+    eventName: input.eventName,
+    occurredAt: new Date().toISOString(),
+    actorType: "user",
+    actorId: input.actorId,
+    correlationId: input.correlationId,
+    schemaVersion: 1,
+    payload: input.payload,
+  });
+}
 
 type WorkerClient = SupabaseClient<Database>;
 
@@ -193,6 +221,19 @@ export const agentResearchOnceTask = schemaTask({
         correlationId: parsed.correlationId,
         reasonCode: "AGENT_CHAT_DISABLED",
       });
+      await publishAgentThreadEvent({
+        organizationId: parsed.organizationId,
+        actorId: parsed.actorId,
+        correlationId: parsed.correlationId,
+        eventName: "agent_thread.research_triggered",
+        payload: {
+          threadId: parsed.threadId,
+          messageDigest: parsed.messageDigest,
+          idempotencyKey: parsed.idempotencyKey,
+          outcome: "blocked",
+          reasonCode: "AGENT_CHAT_DISABLED",
+        },
+      });
       return agentChatDisabledResult(parsed.organizationId, parsed.correlationId);
     }
     const supabase = createGrowthIntelligenceWorkerServiceClient();
@@ -224,6 +265,19 @@ export const agentResearchOnceTask = schemaTask({
         organizationId: parsed.organizationId,
         correlationId: parsed.correlationId,
         reasonCode: gate.reasonCode,
+      });
+      await publishAgentThreadEvent({
+        organizationId: parsed.organizationId,
+        actorId: parsed.actorId,
+        correlationId: parsed.correlationId,
+        eventName: "agent_thread.research_triggered",
+        payload: {
+          threadId: parsed.threadId,
+          messageDigest: parsed.messageDigest,
+          idempotencyKey: parsed.idempotencyKey,
+          outcome: "blocked",
+          reasonCode: gate.reasonCode,
+        },
       });
       return blockedOnceResult(parsed.organizationId, gate.reasonCode, gate.copy);
     }
@@ -366,6 +420,22 @@ export const agentResearchOnceTask = schemaTask({
       correlationId: parsed.correlationId,
       outcome: outcome.outcome,
     });
+    await publishAgentThreadEvent({
+      organizationId: parsed.organizationId,
+      actorId: parsed.actorId,
+      correlationId: parsed.correlationId,
+      eventName: "agent_thread.research_triggered",
+      payload: {
+        threadId: parsed.threadId,
+        messageDigest: parsed.messageDigest,
+        idempotencyKey: parsed.idempotencyKey,
+        outcome: outcome.outcome,
+        ...("reasonCode" in outcome ? { reasonCode: outcome.reasonCode } : {}),
+        ...("requestId" in outcome && typeof outcome.requestId === "string"
+          ? { requestId: outcome.requestId }
+          : {}),
+      },
+    });
     return outcome;
   },
 });
@@ -378,6 +448,8 @@ export const agentWatchCreatePayloadSchema = z
   .object({
     organizationId: uuidSchema,
     actorId: z.string().trim().min(1).max(200),
+    /** Thread the dispatch came from; carried into the audit event. */
+    threadId: z.string().trim().min(1).max(200).optional(),
     branchId: uuidSchema,
     title: z.string().trim().min(1).max(200).optional(),
     question: z.string().trim().min(1).max(2000),
@@ -450,6 +522,23 @@ export const agentWatchCreateTask = schemaTask({
       correlationId: parsed.correlationId,
       outcome: outcome.outcome,
     });
+    await publishAgentThreadEvent({
+      organizationId: parsed.organizationId,
+      actorId: parsed.actorId,
+      correlationId: parsed.correlationId,
+      eventName: "agent_thread.watch_created",
+      payload: {
+        threadId: parsed.threadId ?? null,
+        idempotencyKey: parsed.idempotencyKey,
+        outcome: outcome.outcome,
+        ...("projectId" in outcome && typeof outcome.projectId === "string"
+          ? { projectId: outcome.projectId }
+          : {}),
+        ...(outcome.outcome === "duplicate"
+          ? { candidateProjectIds: outcome.candidates.map((candidate) => candidate.projectId) }
+          : {}),
+      },
+    });
     return outcome;
   },
 });
@@ -458,6 +547,8 @@ export const agentWatchUpdatePayloadSchema = z
   .object({
     organizationId: uuidSchema,
     actorId: z.string().trim().min(1).max(200),
+    /** Thread the dispatch came from; carried in logs, not a new event. */
+    threadId: z.string().trim().min(1).max(200).optional(),
     projectId: uuidSchema,
     edits: z.record(z.string(), z.unknown()),
     idempotencyKey: z.string().trim().min(16).max(200),
@@ -581,7 +672,11 @@ export const agentWatchUpdateTask = schemaTask({
       correlationId: parsed.correlationId,
       projectId: parsed.projectId,
       outcome: outcome.outcome,
+      ...(parsed.threadId ? { threadId: parsed.threadId } : {}),
     });
+    // No domain event: an update re-points an existing watch rather than
+    // creating one, so no creation vocabulary fits; the dispatch route
+    // log plus the fenced update RPC trail the change.
     return outcome;
   },
 });
