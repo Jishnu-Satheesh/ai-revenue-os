@@ -2423,3 +2423,30 @@ revoke all on function public.accept_studio_export(uuid, uuid, text, text)
   from public, anon, authenticated, service_role;
 grant execute on function public.accept_studio_export(uuid, uuid, text, text)
   to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Permission catalogue seeds. Descriptions must match
+-- src/domain/access/permissions.ts exactly; the drift test compares them.
+-- Read for every member role; edit and generate for operator and above;
+-- policy management for admin and above. Studio grants no campaign approval
+-- or publish power: campaign.approve and campaign.publish are untouched.
+-- ---------------------------------------------------------------------------
+insert into public.permissions (key, description, scope) values
+  ('studio.read', 'Open Creative Studio and read its history.', 'organization'),
+  ('studio.edit', 'Change Studio setup, documents, and versions that are not finalized.', 'organization'),
+  ('studio.generate', 'Run Studio generations, edits, and exports against the generation policy.', 'organization'),
+  ('studio.policy_manage', 'Change the Studio generation policy and budgets.', 'organization');
+
+insert into public.organization_role_permissions (organization_role, permission_key) values
+  ('viewer', 'studio.read'),
+  ('operator', 'studio.read'),
+  ('operator', 'studio.edit'),
+  ('operator', 'studio.generate'),
+  ('admin', 'studio.read'),
+  ('admin', 'studio.edit'),
+  ('admin', 'studio.generate'),
+  ('admin', 'studio.policy_manage'),
+  ('owner', 'studio.read'),
+  ('owner', 'studio.edit'),
+  ('owner', 'studio.generate'),
+  ('owner', 'studio.policy_manage');
