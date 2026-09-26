@@ -71,6 +71,10 @@ export const organizationPermissions = [
   "campaign.publish",
   "campaign.research_request",
   "poster.render",
+  "studio.read",
+  "studio.edit",
+  "studio.generate",
+  "studio.policy_manage",
   "asset.read",
   "asset.manage",
   "asset.review",
@@ -145,6 +149,10 @@ export const permissionDescriptions: Readonly<Record<Permission, string>> = {
   "campaign.research_request":
     "Request campaign research against the research allowance.",
   "poster.render": "Render an approved campaign version as a poster.",
+  "studio.read": "Open Creative Studio and read its history.",
+  "studio.edit": "Change Studio setup, documents, and versions that are not finalized.",
+  "studio.generate": "Run Studio generations, edits, and exports against the generation policy.",
+  "studio.policy_manage": "Change the Studio generation policy and budgets.",
   "asset.read": "Read the organization asset library and subject profiles.",
   "asset.manage": "Upload, classify, tag, and archive organization reference assets.",
   "asset.review": "Approve or reject reference and generated creative assets.",
@@ -211,6 +219,7 @@ const viewerPermissions = [
   "policy.read",
   "audit.read",
   "growth_intelligence.read",
+  "studio.read",
 ] as const satisfies readonly OrganizationPermission[];
 
 const operatorPermissions = [
@@ -239,6 +248,8 @@ const operatorPermissions = [
    */
   "campaign.approve",
   "poster.render",
+  "studio.edit",
+  "studio.generate",
   "asset.manage",
   "asset.review",
   "subject.manage",
@@ -285,6 +296,7 @@ const adminPermissions = [
    * which is how a permanently red check hides the next real drift.
    */
   "campaign.research_request",
+  "studio.policy_manage",
   "policy.update",
   "budget.modify",
   /**

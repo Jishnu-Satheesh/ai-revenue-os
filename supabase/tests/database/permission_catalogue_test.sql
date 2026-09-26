@@ -40,7 +40,7 @@ select extensions.is(
 );
 select extensions.is(
   (select count(*)::bigint from public.permissions where scope = 'organization'),
-  47::bigint,
+  57::bigint,
   'the organization vocabulary is seeded'
 );
 select extensions.ok(
@@ -93,6 +93,39 @@ select extensions.is(
   ),
   array['admin', 'operator', 'owner']::text[],
   'only operator and above can manage Growth Intelligence'
+);
+select extensions.is(
+  (
+    select pg_catalog.array_agg(organization_role::text order by organization_role::text)
+    from public.organization_role_permissions
+    where permission_key = 'studio.read'
+  ),
+  array['admin', 'operator', 'owner', 'viewer']::text[],
+  'every organization role can open Creative Studio'
+);
+select extensions.is(
+  (
+    select pg_catalog.array_agg(organization_role::text order by organization_role::text)
+    from public.organization_role_permissions
+    where permission_key = 'studio.generate'
+  ),
+  array['admin', 'operator', 'owner']::text[],
+  'only operator and above can run Studio generations'
+);
+select extensions.ok(
+  not exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'operator' and permission_key = 'studio.policy_manage'
+  ),
+  'an operator cannot change the Studio generation policy'
+);
+select extensions.ok(
+  not exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'viewer'
+      and permission_key in ('studio.edit', 'studio.generate', 'studio.policy_manage')
+  ),
+  'a viewer reads Studio but changes nothing in it'
 );
 
 -- The specific boundaries the product depends on.

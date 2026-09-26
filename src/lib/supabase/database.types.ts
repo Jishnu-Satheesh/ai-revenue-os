@@ -2691,6 +2691,331 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
       };
+      /**
+       * Independent Creative Studio documents (Task 3). One row per saved
+       * Studio canvas: title, setup settings, compare-and-swap revision, and
+       * the current-version pointer. Written only through save_studio_document.
+       */
+      studio_documents: {
+        Row: {
+          id: string;
+          organization_id: string;
+          creator_id: string;
+          title: string;
+          revision: number;
+          current_version_id: string | null;
+          settings: Record<string, unknown>;
+          archived_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_documents"]["Row"],
+          "id" | "revision" | "created_at" | "updated_at"
+        > & {
+          title?: string;
+          current_version_id?: string | null;
+          settings?: Record<string, unknown>;
+          archived_at?: string | null;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["studio_documents"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Immutable Studio versions (Task 3). One row per completed generation:
+       * ordinal ancestry, input manifest, provider profile pin, validated
+       * output identity, exact Text Copy, and the campaign request intent.
+       * Written only through complete_studio_run; updates are refused.
+       */
+      studio_versions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          document_id: string;
+          ordinal: number;
+          parent_version_id: string | null;
+          run_id: string;
+          requested_campaign_id: string | null;
+          input_manifest: Record<string, unknown>;
+          input_digest: string;
+          provider_profile_id: string;
+          continuation_id: string | null;
+          output_path: string;
+          output_hash: string;
+          output_mime: string;
+          output_width: number;
+          output_height: number;
+          output_bytes: number;
+          exact_text_copy: string;
+          verification: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_versions"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_versions"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Studio run ledger (Task 3). Admission, reservation, lease, and result
+       * for every generate/edit/enhance/new_idea/export attempt. Admitted
+       * through admit_studio_run and create_studio_export; settled only by
+       * the worker writers.
+       */
+      studio_runs: {
+        Row: {
+          id: string;
+          organization_id: string;
+          document_id: string;
+          actor_id: string;
+          operation: "generate" | "edit" | "enhance" | "new_idea" | "export";
+          expected_revision: number;
+          parent_version_id: string | null;
+          request: Record<string, unknown>;
+          request_digest: string;
+          idempotency_key: string;
+          requested_campaign_id: string | null;
+          profile_id: string;
+          policy_version: number;
+          reserved_minor: number;
+          currency: string;
+          actual_cost_minor: number | null;
+          state:
+            | "queued"
+            | "preparing"
+            | "generating"
+            | "previewing"
+            | "validating"
+            | "ready"
+            | "failed"
+            | "cancel_requested"
+            | "cancelled"
+            | "outcome_unknown";
+          lease_token: string | null;
+          lease_expires_at: string | null;
+          attempt: number;
+          provider_request_id: string | null;
+          cancel_requested_at: string | null;
+          result_version_id: string | null;
+          result_export_id: string | null;
+          result_json: Record<string, unknown> | null;
+          safe_failure_code: string | null;
+          created_at: string;
+          finished_at: string | null;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_runs"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_runs"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Immutable export derivatives (Task 3). One row per validated
+       * resize/pad/crop of a version. Same inputs reuse the same row.
+       * Finalized only through complete_studio_export.
+       */
+      studio_exports: {
+        Row: {
+          id: string;
+          organization_id: string;
+          studio_version_id: string;
+          parent_export_id: string | null;
+          transform_version: number;
+          transform: Record<string, unknown>;
+          preset_version: number;
+          output_path: string;
+          output_hash: string;
+          output_mime: string;
+          output_width: number;
+          output_height: number;
+          output_bytes: number;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_exports"]["Row"],
+          "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_exports"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Append-only export consent receipts (Task 3). Pins the exact bytes an
+       * operator accepted for Campaign use. Written only through
+       * accept_studio_export; one receipt per export.
+       */
+      studio_export_acceptances: {
+        Row: {
+          id: string;
+          organization_id: string;
+          export_id: string;
+          content_hash: string;
+          transform_digest: string;
+          actor_id: string;
+          idempotency_key: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_export_acceptances"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_export_acceptances"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Durable run event stream (Task 3). Database-assigned sequence per run
+       * doubles as the SSE resume cursor. Payloads carry stage, preview, and
+       * error codes only. Written by the run writers; never updated.
+       */
+      studio_run_events: {
+        Row: {
+          id: number;
+          organization_id: string;
+          run_id: string;
+          sequence: number;
+          kind: string;
+          safe_payload: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_run_events"]["Row"],
+          "id" | "sequence" | "created_at"
+        > & {
+          safe_payload?: Record<string, unknown>;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["studio_run_events"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Real preview frames (Task 3). One row per independently decodable
+       * partial image, referencing its private object. 24-hour retention.
+       */
+      studio_preview_frames: {
+        Row: {
+          id: string;
+          organization_id: string;
+          run_id: string;
+          frame_index: number;
+          private_path: string;
+          content_hash: string;
+          mime: string;
+          width: number;
+          height: number;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_preview_frames"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_preview_frames"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Upload reservations (Task 3). A reservation grants one actor a bounded
+       * window to transfer bytes; settlement records the verified receipt.
+       */
+      studio_uploads: {
+        Row: {
+          id: string;
+          organization_id: string;
+          actor_id: string;
+          reserved_path: string;
+          state: "reserved" | "ready" | "rejected" | "expired";
+          rights_attestation: Record<string, unknown>;
+          final_hash: string | null;
+          final_mime: string | null;
+          final_width: number | null;
+          final_height: number | null;
+          final_bytes: number | null;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_uploads"]["Row"],
+          "id" | "created_at"
+        > & {
+          state?: Database["public"]["Tables"]["studio_uploads"]["Row"]["state"];
+          rights_attestation?: Record<string, unknown>;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["studio_uploads"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Opaque provider continuations (Task 3). Worker-only: no member role
+       * may read these rows. The browser learns computed edit availability.
+       */
+      studio_continuations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          document_id: string;
+          version_id: string;
+          parent_id: string | null;
+          profile_id: string;
+          private_object_path: string;
+          private_object_hash: string;
+          provider_handle: string | null;
+          replay_expires_at: string | null;
+          state: "usable" | "expired" | "deleted";
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_continuations"]["Row"],
+          "id" | "created_at"
+        > & {
+          state?: Database["public"]["Tables"]["studio_continuations"]["Row"]["state"];
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["studio_continuations"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Immutable generation policy versions (Task 3). The current policy is
+       * the highest version per organization. Nothing is admitted without an
+       * explicit enabled policy, and no default is ever seeded.
+       */
+      studio_generation_policies: {
+        Row: {
+          id: string;
+          organization_id: string;
+          version: number;
+          enabled: boolean;
+          currency: string;
+          per_run_ceiling_minor: number;
+          window_ceiling_minor: number;
+          window_seconds: number;
+          max_pending: number;
+          max_attempts: number;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_generation_policies"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_generation_policies"]["Insert"]
+        >;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -3772,6 +4097,125 @@ export type Database = {
       purge_expired_agent_threads: {
         Args: {
           p_older_than: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Independent Creative Studio writers (Task 3). Document, upload,
+       * policy, run, and export RPCs from migration 20260921130000. Each
+       * returns a jsonb receipt; typed mappings live in the Studio
+       * infrastructure repository.
+       */
+      save_studio_document: {
+        Args: {
+          target_organization_id: string;
+          input_document: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      reserve_studio_upload: {
+        Args: {
+          target_organization_id: string;
+          input_upload: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_studio_upload: {
+        Args: {
+          target_organization_id: string;
+          target_upload_id: string;
+          input_receipt: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      save_studio_generation_policy: {
+        Args: {
+          target_organization_id: string;
+          input_policy: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      admit_studio_run: {
+        Args: {
+          target_organization_id: string;
+          input_run: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      claim_studio_run: {
+        Args: {
+          target_run_id: string;
+          target_worker_id: string;
+          lease_seconds: number;
+        };
+        Returns: Record<string, unknown>;
+      };
+      heartbeat_studio_run: {
+        Args: {
+          target_run_id: string;
+          target_lease_token: string;
+        };
+        Returns: boolean;
+      };
+      append_studio_run_event: {
+        Args: {
+          target_run_id: string;
+          target_lease_token: string;
+          input_event: unknown;
+        };
+        Returns: number;
+      };
+      complete_studio_run: {
+        Args: {
+          target_run_id: string;
+          target_lease_token: string;
+          input_result: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      fail_studio_run: {
+        Args: {
+          target_run_id: string;
+          target_lease_token: string;
+          input_failure: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      cancel_studio_run: {
+        Args: {
+          target_organization_id: string;
+          target_run_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      reconcile_studio_run: {
+        Args: {
+          target_run_id: string;
+          input_receipt: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      create_studio_export: {
+        Args: {
+          target_organization_id: string;
+          input_export: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_studio_export: {
+        Args: {
+          target_organization_id: string;
+          target_export_id: string;
+          input_receipt: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      accept_studio_export: {
+        Args: {
+          target_organization_id: string;
+          target_export_id: string;
+          expected_content_hash: string;
+          idempotency_key: string;
         };
         Returns: Record<string, unknown>;
       };
