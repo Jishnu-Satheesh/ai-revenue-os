@@ -1,6 +1,6 @@
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { toPublicError } from "@/lib/errors";
-import { logger } from "@/lib/logger";
+import { logger, toAgentReasonCodes } from "@/lib/logger";
 import { createEventPublisher } from "@/domain/events/publisher";
 import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { createLightModelProvider } from "@/modules/agent-router/infrastructure/light-model-provider";
@@ -70,13 +70,14 @@ export async function POST(
     });
     // Intent, confidence, and reason codes travel in the event payload
     // (identifier-only, bodies never logged); the log line stays inside
-    // the closed LogContext allowlist.
+    // the closed LogContext allowlist (Slice C F4: codes narrowed to the
+    // closed vocabulary before logging).
     logger.info("agent_thread.routed", {
       organizationId,
       threadId: thread.id,
       intent,
       confidence,
-      reasonCodes,
+      reasonCodes: toAgentReasonCodes(reasonCodes),
       correlationId,
     });
     return agentJsonResponse(

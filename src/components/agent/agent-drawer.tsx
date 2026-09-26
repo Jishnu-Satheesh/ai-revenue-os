@@ -19,8 +19,19 @@ import { AgentThreadSteps, type AgentStepPhase } from "@/components/agent/agent-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
+import { Textarea } from "@/components/ui/textarea";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -100,6 +111,29 @@ type MessagesResponse = { messages: ThreadMessageView[]; nextCursor: string | nu
 export const AGENT_THREAD_POLL_MS = 3000;
 
 /**
+ * Nonce-derived idempotency keys (Slice C M8).
+ *
+ * Every POST in one send derives its key from the drawer-session id plus
+ * the prompt nonce: `<session>:<nonce>:thread|:message|:route`. The same
+ * nonce always yields the same three keys, so a transport retry replays
+ * instead of double-posting (the keyed RPCs converge on same-key +
+ * same-body and refuse same-key + other-body). The session id keeps two
+ * drawer sessions from sharing keys when the shell nonce restarts at
+ * zero, and its 36 chars keep every key above the 16-char route floor.
+ */
+export function buildDrawerRequestKeys(
+  sessionId: string,
+  nonce: number,
+): { threadKey: string; messageKey: string; routeKey: string } {
+  const stem = `${sessionId}:${nonce}`;
+  return {
+    threadKey: `${stem}:thread`,
+    messageKey: `${stem}:message`,
+    routeKey: `${stem}:route`,
+  };
+}
+
+/**
  * Every drawer fetch sends `cache: "no-store"` plus one drawer-session
  * `x-correlation-id`, and every route answers with the same id plus
  * `Cache-Control: no-store`. Fresh reads, one trail per conversation.
@@ -147,6 +181,243 @@ function formatAnswers(answers: Record<string, unknown>): string {
   return Object.entries(answers)
     .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
     .join(" · ");
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Watch lane forms (Slice C, task-2 report s9.2).
+ *
+ * The dispatch route serves `watch_create` and `watch_update`, but the
+ * drawer only offered the research confirm button — these forms close
+ * that gap. Every submit IS the explicit confirmation the route
+ * requires; the route rechecks the grant and Zod-disposes every field,
+ * so client checks stay courtesy-only. The update form prefills the
+ * project from the polled thread links; scope-widening edits (new
+ * competitors, moved research area) stay refusal-side: the worker
+ * routes them to `profile_scope_change` instead of applying them.
+ */
+function WatchDispatchForms({
+  defaultProjectId,
+  watchUpdateAvailable,
+  pending,
+  outcome,
+  error,
+  onDispatch,
+}: {
+  defaultProjectId: string | null;
+  watchUpdateAvailable: boolean;
+  pending: boolean;
+  outcome: AgentDispatchOutcome | null;
+  error: string | null;
+  onDispatch: (vars: {
+    action: DispatchAction;
+    idempotencyKey: string;
+    watchCreate?: {
+      branchId: string;
+      title?: string;
+      question: string;
+      mode: "one-time" | "recurring";
+      researchArea: string;
+    };
+    watchUpdate?: { projectId: string; edits: Record<string, unknown> };
+  }) => void;
+}) {
+  const [question, setQuestion] = useState("");
+  const [researchArea, setResearchArea] = useState("");
+  const [mode, setMode] = useState<"one-time" | "recurring">("one-time");
+  const [branchId, setBranchId] = useState("");
+  const [title, setTitle] = useState("");
+  const [projectId, setProjectId] = useState("");
+  const [frequency, setFrequency] = useState("none");
+  const [endDate, setEndDate] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function submitWatchCreate() {
+    if (question.trim().length < 1 || researchArea.trim().length < 1) {
+      setFormError("A question and a research area are required.");
+      return;
+    }
+    if (!UUID_PATTERN.test(branchId.trim())) {
+      setFormError("The branch id must be a uuid.");
+      return;
+    }
+    setFormError(null);
+    onDispatch({
+      action: "watch_create",
+      idempotencyKey: crypto.randomUUID(),
+      watchCreate: {
+        branchId: branchId.trim(),
+        ...(title.trim().length > 0 ? { title: title.trim() } : {}),
+        question: question.trim(),
+        mode,
+        researchArea: researchArea.trim(),
+      },
+    });
+  }
+
+  function submitWatchUpdate() {
+    const target = projectId.trim() || defaultProjectId || "";
+    if (!UUID_PATTERN.test(target)) {
+      setFormError("A watch project id (uuid) is required — pick it from the linked thread.");
+      return;
+    }
+    const edits: Record<string, unknown> = {};
+    if (frequency !== "none") edits.frequency = frequency;
+    if (endDate.trim().length > 0) {
+      if (!DATE_PATTERN.test(endDate.trim())) {
+        setFormError("The end date must be YYYY-MM-DD.");
+        return;
+      }
+      edits.endDate = endDate.trim();
+    }
+    if (Object.keys(edits).length === 0) {
+      setFormError("Change a field first — frequency or end date.");
+      return;
+    }
+    setFormError(null);
+    onDispatch({
+      action: "watch_update",
+      idempotencyKey: crypto.randomUUID(),
+      watchUpdate: { projectId: target, edits },
+    });
+  }
+
+  return (
+    <div className="flex flex-col gap-3 pt-2">
+      <FieldGroup>
+        <Field>
+          <FieldLabel htmlFor="watch-question">Watch question</FieldLabel>
+          <Textarea
+            id="watch-question"
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="What should this watch track?"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="watch-area">Research area</FieldLabel>
+          <Input
+            id="watch-area"
+            value={researchArea}
+            onChange={(event) => setResearchArea(event.target.value)}
+            placeholder="e.g. downtown lunch demand"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="watch-branch">Branch id</FieldLabel>
+          <Input
+            id="watch-branch"
+            value={branchId}
+            onChange={(event) => setBranchId(event.target.value)}
+            placeholder="Branch uuid this watch belongs to"
+          />
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="watch-title">Title (optional)</FieldLabel>
+          <Input
+            id="watch-title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Short watch title"
+          />
+        </Field>
+        <Field>
+          <FieldLabel>Run mode</FieldLabel>
+          <ToggleGroup
+            type="single"
+            value={mode}
+            aria-label="Watch run mode"
+            onValueChange={(next) => {
+              if (next === "one-time" || next === "recurring") setMode(next);
+            }}
+          >
+            <ToggleGroupItem value="one-time" aria-label="One-time watch">
+              One-time
+            </ToggleGroupItem>
+            <ToggleGroupItem value="recurring" aria-label="Recurring watch">
+              Recurring
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </Field>
+        <Button type="button" disabled={pending} onClick={submitWatchCreate}>
+          {pending ? <Spinner aria-hidden="true" /> : null}
+          Start watch
+        </Button>
+      </FieldGroup>
+
+      {watchUpdateAvailable ? (
+        <FieldGroup>
+          <Field>
+            <FieldLabel htmlFor="watch-project">Watch project id</FieldLabel>
+            <Input
+              id="watch-project"
+              value={projectId}
+              onChange={(event) => setProjectId(event.target.value)}
+              placeholder={defaultProjectId ?? "Watch project uuid"}
+            />
+          </Field>
+          <Field>
+            <FieldLabel>Frequency</FieldLabel>
+            <Select value={frequency} onValueChange={setFrequency}>
+              <SelectTrigger aria-label="Watch frequency">
+                <SelectValue placeholder="No change" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No change</SelectItem>
+                <SelectItem value="daily">Daily</SelectItem>
+                <SelectItem value="weekly">Weekly</SelectItem>
+                <SelectItem value="monthly">Monthly</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <Field>
+            <FieldLabel htmlFor="watch-end">End date (optional)</FieldLabel>
+            <Input
+              id="watch-end"
+              value={endDate}
+              onChange={(event) => setEndDate(event.target.value)}
+              placeholder="YYYY-MM-DD"
+            />
+          </Field>
+          <Button type="button" variant="outline" disabled={pending} onClick={submitWatchUpdate}>
+            {pending ? <Spinner aria-hidden="true" /> : null}
+            Update watch
+          </Button>
+        </FieldGroup>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          Watch field updates are unavailable for this chat — viewing the existing watch stays
+          free.
+        </p>
+      )}
+
+      {formError ? (
+        <p role="alert" className="text-sm text-destructive">
+          {formError}
+        </p>
+      ) : null}
+      {error ? (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
+      ) : null}
+      {outcome ? (
+        <p className="text-sm text-muted-foreground">
+          {outcome.replayed ? "Already queued — showing the kept run." : "Watch queued."}{" "}
+          {outcome.link ? (
+            <a
+              className="font-medium text-primary underline-offset-4 hover:underline"
+              href={outcome.link.href}
+            >
+              Open Market Intelligence
+            </a>
+          ) : null}
+        </p>
+      ) : null}
+    </div>
+  );
 }
 
 /**
@@ -261,13 +532,22 @@ export function AgentDrawer({
   }, []);
 
   const send = useMutation({
-    mutationFn: async (vars: { text: string; threadMode: ThreadMode; threadId: string | null }) => {
+    mutationFn: async (vars: {
+      text: string;
+      threadMode: ThreadMode;
+      threadId: string | null;
+      nonce: number;
+    }) => {
+      // Slice C M8: keys derive from the prompt nonce, not from a fresh
+      // uuid per attempt — a retried send replays instead of minting a
+      // second thread, message, and route.
+      const keys = buildDrawerRequestKeys(correlationId, vars.nonce);
       let tid = vars.threadId;
       if (!tid) {
         const created = (await agentPostJson(
           base,
           {
-            idempotencyKey: crypto.randomUUID(),
+            idempotencyKey: keys.threadKey,
             mode: vars.threadMode,
           },
           correlationId,
@@ -278,7 +558,7 @@ export function AgentDrawer({
       const appended = (await agentPostJson(
         `${base}/${tid}/messages`,
         {
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: keys.messageKey,
           body: vars.text,
         },
         correlationId,
@@ -286,7 +566,7 @@ export function AgentDrawer({
       const routed = (await agentPostJson(
         `${base}/${tid}/route?page=${page}`,
         {
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: keys.routeKey,
         },
         correlationId,
       )) as {
@@ -331,17 +611,22 @@ export function AgentDrawer({
   // Questionnaire submit (Task 6 ruling F2, drawer half): answers post
   // to the fenced answers route with the echoed spec — validated,
   // persisted through the keyed RPC, and re-routed in the same call —
-  // never local-only. The returned message joins the thread and the new
-  // classification replaces the card's. Confidence/reason codes carry
-  // forward from this turn's classification; the answers call returns
-  // intent + questionnaire only, by route contract.
+  // never local-only. Slice C F2/M6: the response carries the re-route's
+  // fresh confidence + reason codes, which replace the card's turn — the
+  // previous classification is never carried forward. The idempotency key
+  // is minted in the submit handler (one per user submit) and travels in
+  // the mutation vars, so a transport retry replays the same submit.
   const submitAnswers = useMutation({
-    mutationFn: async (vars: { spec: QuestionnaireSpec; answers: QuestionnaireAnswers }) => {
+    mutationFn: async (vars: {
+      spec: QuestionnaireSpec;
+      answers: QuestionnaireAnswers;
+      idempotencyKey: string;
+    }) => {
       if (!threadId) throw new Error("No active conversation. Send a message first.");
       const submitted = (await agentPostJson(
         `${base}/${threadId}/answers?page=${page}`,
         {
-          idempotencyKey: crypto.randomUUID(),
+          idempotencyKey: vars.idempotencyKey,
           resumeKey: vars.spec.resumeKey,
           spec: vars.spec,
           answers: vars.answers,
@@ -352,6 +637,8 @@ export function AgentDrawer({
         replayed: boolean;
         answers: Record<string, string>;
         intent: AgentIntent;
+        confidence: "high" | "medium" | "low";
+        reasonCodes: string[];
         questionnaire: QuestionnaireSpec | null;
       };
       return { ...submitted, resumeKey: vars.spec.resumeKey };
@@ -362,16 +649,12 @@ export function AgentDrawer({
           ? previous
           : [...previous, result.message],
       );
-      setRouteResult((previous) =>
-        previous
-          ? {
-              intent: result.intent,
-              confidence: previous.confidence,
-              reasonCodes: previous.reasonCodes,
-              questionnaire: result.questionnaire,
-            }
-          : previous,
-      );
+      setRouteResult({
+        intent: result.intent,
+        confidence: result.confidence,
+        reasonCodes: result.reasonCodes ?? [],
+        questionnaire: result.questionnaire,
+      });
       setSubmittedAnswers((previous) => ({ ...previous, [result.resumeKey]: result.answers }));
       setLastSaved({ resumeKey: result.resumeKey, answers: result.answers });
       setSendError(null);
@@ -389,14 +672,30 @@ export function AgentDrawer({
   // Governed dispatch (Slice B): the research lane needs no parameters —
   // the route resolves the Market Profile pointer server-side — so the
   // Steps tab can offer the confirm click directly. The click IS the
-  // explicit confirmation the route requires. Watch and draft lanes need
-  // their forms first (Slice C); the dispatch route already serves them.
+  // explicit confirmation the route requires. Watch lanes take their
+  // parameters from the Slice C forms below; the dispatch route already
+  // serves them. The idempotency key is minted at click time (one per
+  // user confirm) and travels in the mutation vars, so a transport retry
+  // replays the same dispatch.
   const dispatchLane = useMutation({
-    mutationFn: async (vars: { action: DispatchAction }) => {
+    mutationFn: async (vars: {
+      action: DispatchAction;
+      idempotencyKey: string;
+      watchCreate?: {
+        branchId: string;
+        title?: string;
+        question: string;
+        mode: "one-time" | "recurring";
+        researchArea: string;
+      };
+      watchUpdate?: { projectId: string; edits: Record<string, unknown> };
+    }) => {
       if (!threadId) throw new Error("No active conversation. Send a message first.");
       const payload = buildDispatchPayload({
         action: vars.action,
-        idempotencyKey: crypto.randomUUID(),
+        idempotencyKey: vars.idempotencyKey,
+        ...(vars.watchCreate ? { watchCreate: vars.watchCreate } : {}),
+        ...(vars.watchUpdate ? { watchUpdate: vars.watchUpdate } : {}),
       });
       return (await agentPostJson(
         `${base}/${threadId}/dispatch`,
@@ -404,13 +703,17 @@ export function AgentDrawer({
         correlationId,
       )) as AgentDispatchOutcome;
     },
-    onSuccess: (result) => {
+    onSuccess: (result, vars) => {
       setDispatchOutcome(result);
       setDispatchError(null);
       setAnnouncement(
         result.replayed
           ? "Already queued — showing the kept run."
-          : "Research queued. Track it in Market Intelligence.",
+          : vars.action === "watch_create"
+            ? "Watch queued. Track it in Market Intelligence."
+            : vars.action === "watch_update"
+              ? "Watch update queued."
+              : "Research queued. Track it in Market Intelligence.",
       );
     },
     onError: (error) => {
@@ -434,7 +737,7 @@ export function AgentDrawer({
     }
     if (!sendPending) {
       const next = queueRef.current.shift();
-      if (next) send.mutate({ text: next.text, threadMode: mode, threadId });
+      if (next) send.mutate({ text: next.text, threadMode: mode, threadId, nonce: next.nonce });
     }
     // The pump reads the latest render values through its deps; callbacks
     // are intentionally not deps (they are stable enough per render and the
@@ -450,18 +753,23 @@ export function AgentDrawer({
 
   /**
    * Durable-checkpoint poll (spec section 10, performance-build-watcher
-   * pattern): the thread row carries the worker-written links (research
-   * project, request, draft request, campaign), so re-reading it is how
-   * the drawer learns a background run finished. A dropped poll keeps the
-   * previous row and retries — never mistaken for an answer. Terminal
-   * thread rows stop the interval; fresh sends resume it via the thread
-   * state they set.
+   * pattern, Slice C M9): one GET against the single thread row, which
+   * carries the worker-written links (research project, request, draft
+   * request, campaign) — re-reading it is how the drawer learns a
+   * background run finished. A dropped poll keeps the previous row and
+   * retries — never mistaken for an answer. Terminal thread rows stop
+   * the interval; fresh sends resume it via the thread state they set.
+   * Never the collection list: one open drawer re-reads one row per
+   * tick, not up to fifty.
    */
   const threadPoll = useQuery({
     queryKey: ["agent-thread", organizationId, threadId],
     queryFn: async () => {
-      const body = (await agentGetJson(`${base}?limit=50`, correlationId)) as ThreadsResponse;
-      return body.threads.find((row) => row.id === threadId) ?? null;
+      const body = (await agentGetJson(
+        `${base}/${threadId}`,
+        correlationId,
+      )) as { thread: ThreadSummary | null };
+      return body.thread ?? null;
     },
     enabled: threadId !== null,
     staleTime: AGENT_THREAD_POLL_MS,
@@ -697,7 +1005,11 @@ export function AgentDrawer({
                   disabledOptionValues={gatedChoices}
                   disabledOptionReason={gatedChoiceReason}
                   onSubmit={(answers) => {
-                    submitAnswers.mutate({ spec: questionnaire, answers });
+                    submitAnswers.mutate({
+                      spec: questionnaire,
+                      answers,
+                      idempotencyKey: crypto.randomUUID(),
+                    });
                   }}
                   onCancel={() => {
                     if (cardKey) setDismissedCards((previous) => [...previous, cardKey]);
@@ -730,7 +1042,12 @@ export function AgentDrawer({
                   <Button
                     type="button"
                     disabled={!canManageWatch || dispatchLane.isPending}
-                    onClick={() => dispatchLane.mutate({ action: "research_once" })}
+                    onClick={() =>
+                      dispatchLane.mutate({
+                        action: "research_once",
+                        idempotencyKey: crypto.randomUUID(),
+                      })
+                    }
                     title={
                       canManageWatch
                         ? "Queue one TinyFish research run for this chat. This click is the confirmation — the worker spends only inside its reserve-before-call budget."
@@ -767,8 +1084,38 @@ export function AgentDrawer({
                   ) : null}
                 </div>
               ) : null}
+              {routeResult?.intent === "watch" && threadId ? (
+                canManageWatch ? (
+                  <WatchDispatchForms
+                    defaultProjectId={liveThread?.linkedResearchProjectId ?? null}
+                    watchUpdateAvailable={watchUpdateAvailable}
+                    pending={dispatchLane.isPending}
+                    outcome={dispatchOutcome}
+                    error={dispatchError}
+                    onDispatch={(vars) => dispatchLane.mutate(vars)}
+                  />
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Needs the growth_intelligence.manage grant — enforcement stays server-side.
+                  </p>
+                )
+              ) : null}
             </TabsContent>
 
+            {/*
+              Direct-path asymmetry (Slice C decision: DOCUMENTED, not
+              aligned). This tab drives `adviseCampaign` straight at the
+              campaign-draft + links routes, while the dispatch route's
+              campaign lane admits through the same function from its
+              seam — and only the dispatch seam emits
+              `agent_thread.draft_requested`. Both paths stay governed
+              (same fences, same frozen snapshot, same idempotency keys);
+              only the audit event differs. Aligning means rewiring this
+              tab to the dispatch route once page context binds an
+              opportunity + advice (both null in practice today) — a
+              component + test change owned by a future slice, not this
+              polish roll-up.
+            */}
             <TabsContent value="draft" className="flex flex-col gap-3 overflow-y-auto">
               {routeResult?.intent === "campaign_advice" ? (
                 <AgentCampaignAdvice

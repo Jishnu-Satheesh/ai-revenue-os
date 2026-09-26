@@ -518,7 +518,18 @@ export type ResearchProjectRepository = {
       scopeFingerprint?: string;
     },
     options?: ResearchProjectEventOptions,
-  ): Promise<{ projectId: string; revisionNumber: number | null; replayed: boolean }>;
+  ): Promise<{
+    projectId: string;
+    revisionNumber: number | null;
+    replayed: boolean;
+    /**
+     * Scope-registry collision code (Slice C M10). Null when this update
+     * holds its fingerprint; `SCOPE_FINGERPRINT_COLLISION` when an older
+     * project kept the fingerprint and this project ended fingerprint-less.
+     * Callers must surface the code instead of proceeding silently.
+     */
+    reasonCode: string | null;
+  }>;
   persistReportVersion(
     input: {
       organizationId: string;
@@ -734,6 +745,7 @@ export function createAuthenticatedResearchProjectRepository(
         "watch schedule",
       );
       const revisionNumber = row["revisionNumber"];
+      const reasonCode = row["reasonCode"];
       const updated = {
         projectId: stringField(row, "projectId"),
         revisionNumber:
@@ -741,6 +753,10 @@ export function createAuthenticatedResearchProjectRepository(
             ? revisionNumber
             : null,
         replayed: booleanField(row, "replayed"),
+        // Slice C M10: the RPC keeps a collision code instead of leaving
+        // the project silently fingerprint-less. Absent (pre-migration
+        // rows) reads as null — no collision claimed.
+        reasonCode: typeof reasonCode === "string" && reasonCode.length > 0 ? reasonCode : null,
       };
       if (!updated.replayed) {
         await publishResearchEvent(options, {

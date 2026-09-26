@@ -7,6 +7,7 @@ import { useState } from "react";
 
 import {
   AgentDrawer,
+  buildDrawerRequestKeys,
   type AgentDrawerProps,
   type AgentDrawerTab,
   type PendingPrompt,
@@ -60,6 +61,8 @@ type FetchPlan = {
   route?: unknown | "hang" | { status: number; message: string };
   answers?: unknown | { status: number; message: string };
   threads?: ThreadSummary[];
+  /** Single-thread GET row (Slice C M9 poll endpoint). */
+  thread?: ThreadSummary | null;
   messages?: ThreadMessageView[];
 };
 
@@ -95,6 +98,8 @@ function mockAgentFetch(plan: FetchPlan = {}) {
           answers: { confirm_upgrade: "true" },
           resumeKey: "router:research_once:overview:abc123",
           intent: "answer_memory",
+          confidence: "high",
+          reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
           questionnaire: null,
           correlationId: "c6",
         },
@@ -112,6 +117,8 @@ function mockAgentFetch(plan: FetchPlan = {}) {
       return Response.json(
         (plan.route as unknown) ?? {
           intent: "answer_memory",
+          confidence: "high",
+          reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
           questionnaire: null,
           thread: THREAD,
           correlationId: "c3",
@@ -123,6 +130,14 @@ function mockAgentFetch(plan: FetchPlan = {}) {
         messages: plan.messages ?? [USER_MESSAGE],
         nextCursor: null,
         correlationId: "c5",
+      });
+    }
+    // Slice C M9: the checkpoint poll reads the single thread row, never
+    // the collection. Matched before the list branch below.
+    if (method === "GET" && /\/agent\/threads\/[^/?]+(\?.*)?$/.test(target)) {
+      return Response.json({
+        thread: plan.thread ?? THREAD,
+        correlationId: "c7",
       });
     }
     if (target.includes("/agent/threads") && method === "GET") {
@@ -677,11 +692,30 @@ describe("thread checkpoint polling", () => {
       ...THREAD,
       linkedResearchProjectId: "55555555-5555-4555-8555-555555555555",
     };
-    globalThis.fetch = mockAgentFetch({ threads: [linked] }) as never;
+    // Slice C M9: the poll reads the single thread row, not the list.
+    globalThis.fetch = mockAgentFetch({ thread: linked }) as never;
     render(<Harness tab="steps" threadId={THREAD.id} />);
     // The polled thread row carries the research link: the Steps tab shows
     // the Growth Intelligence receipt with no new message sent.
     expect(await screen.findByText(/linked research/i)).toBeInTheDocument();
+  });
+
+  it("polls one row per tick, never the thread collection", async () => {
+    globalThis.fetch = mockAgentFetch() as never;
+    render(<Harness tab="steps" threadId={THREAD.id} />);
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).endsWith(`/agent/threads/${THREAD.id}`) &&
+            ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+        ),
+      ).toBe(true);
+    });
+    expect(fetchMock.mock.calls.some(([url]) => /\/agent\/threads\?/.test(String(url)))).toBe(
+      false,
+    );
   });
 });
 
@@ -812,5 +846,241 @@ describe("opportunity-bound handoff", () => {
       threadId: THREAD.id,
       draftRequestId: DRAFT_REQUEST,
     });
+  });
+});
+describe("nonce idempotency keys (M8)", () => {
+  const SESSION = "33333333-3333-4333-8333-333333333333";
+
+  it("derives stable per-send keys from the session id and nonce", () => {
+    expect(buildDrawerRequestKeys(SESSION, 1)).toEqual({
+      threadKey: `${SESSION}:1:thread`,
+      messageKey: `${SESSION}:1:message`,
+      routeKey: `${SESSION}:1:route`,
+    });
+    // A new nonce mints a new triple; the same nonce replays the same one.
+    expect(buildDrawerRequestKeys(SESSION, 2).threadKey).not.toBe(
+      buildDrawerRequestKeys(SESSION, 1).threadKey,
+    );
+    expect(buildDrawerRequestKeys("other-session", 1).threadKey).not.toBe(
+      buildDrawerRequestKeys(SESSION, 1).threadKey,
+    );
+  });
+
+  it("sends thread, message, and route under the nonce triple", async () => {
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const keys: Record<string, string> = {};
+    for (const [url, init] of fetchMock.mock.calls) {
+      const target = String(url);
+      if ((init as RequestInit | undefined)?.method !== "POST") continue;
+      const payload = JSON.parse(String((init as RequestInit).body)) as { idempotencyKey: string };
+      if (target.endsWith("/agent/threads")) keys.thread = payload.idempotencyKey;
+      else if (target.includes("/messages")) keys.message = payload.idempotencyKey;
+      else if (target.includes("/route")) keys.route = payload.idempotencyKey;
+    }
+    expect(keys).toEqual({
+      thread: `${SESSION}:1:thread`,
+      message: `${SESSION}:1:message`,
+      route: `${SESSION}:1:route`,
+    });
+  });
+
+  it("mints the answers key once per submit and passes it through", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: {
+        intent: "research_once",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: UPGRADE,
+        thread: THREAD,
+        correlationId: "c3",
+      },
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
+    await user.click(screen.getByText("Yes"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    expect(await screen.findByText(/answers saved: confirm_upgrade: true/i)).toBeInTheDocument();
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const answersCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/answers"));
+    const payload = JSON.parse(String((answersCall?.[1] as RequestInit).body)) as {
+      idempotencyKey: string;
+    };
+    // Handler-minted (one per submit), long enough for the route floor,
+    // and distinct from the send triple so submits never collide.
+    expect(payload.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+    expect(payload.idempotencyKey).not.toContain(":thread");
+  });
+});
+
+describe("fresh routing codes (F2)", () => {
+  it("renders the re-route codes instead of the previous turn", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: {
+        intent: "research_once",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: UPGRADE,
+        thread: THREAD,
+        correlationId: "c3",
+      },
+      answers: {
+        message: ANSWERS_MESSAGE,
+        replayed: false,
+        answers: { confirm_upgrade: "true" },
+        resumeKey: UPGRADE.resumeKey,
+        intent: "answer_memory",
+        confidence: "low",
+        reasonCodes: ["LOW_CONFIDENCE_FALLBACK"],
+        questionnaire: null,
+        correlationId: "c6",
+      },
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
+    await user.click(screen.getByText("Yes"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    expect(await screen.findByText(/answers saved: confirm_upgrade: true/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("tab", { name: "Steps" }));
+    expect(await screen.findByText(/LOW_CONFIDENCE_FALLBACK/)).toBeInTheDocument();
+    expect(screen.queryByText(/MODEL_PROPOSAL_ACCEPTED/)).not.toBeInTheDocument();
+  });
+});
+
+describe("watch lane forms", () => {
+  const BRANCH = "66666666-6666-4666-8666-666666666666";
+  const watchRoute = {
+    intent: "watch",
+    confidence: "high",
+    reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+    questionnaire: null,
+    thread: THREAD,
+    correlationId: "c3",
+  };
+
+  function dispatchBody() {
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/dispatch"));
+    expect(call).toBeDefined();
+    return JSON.parse(String((call?.[1] as RequestInit).body)) as Record<string, unknown>;
+  }
+
+  it("posts a watch_create block with confirmation from the form", async () => {
+    globalThis.fetch = mockAgentFetch({ route: watchRoute }) as never;
+    const user = userEvent.setup();
+    render(
+      <Harness
+        pendingPrompt={sendPrompt()}
+        role="operator"
+        permissions={["growth_intelligence.manage"]}
+      />,
+    );
+    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Steps" }));
+
+    await user.type(screen.getByLabelText("Watch question"), "Track lunch prices");
+    await user.type(screen.getByLabelText("Research area"), "downtown lunch");
+    await user.type(screen.getByLabelText("Branch id"), BRANCH);
+    await user.click(screen.getByRole("button", { name: /start watch/i }));
+
+    await waitFor(() => {
+      expect(
+        (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(([url]) =>
+          String(url).includes("/dispatch"),
+        ),
+      ).toBe(true);
+    });
+    const payload = dispatchBody();
+    expect(payload).toMatchObject({
+      action: "watch_create",
+      confirmation: { confirmed: true },
+      watchCreate: {
+        branchId: BRANCH,
+        question: "Track lunch prices",
+        mode: "one-time",
+        researchArea: "downtown lunch",
+      },
+    });
+    expect(typeof payload.idempotencyKey).toBe("string");
+  });
+
+  it("refuses a watch_create without question and branch before posting", async () => {
+    globalThis.fetch = mockAgentFetch({ route: watchRoute }) as never;
+    const user = userEvent.setup();
+    render(
+      <Harness
+        pendingPrompt={sendPrompt()}
+        role="operator"
+        permissions={["growth_intelligence.manage"]}
+      />,
+    );
+    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Steps" }));
+    await user.click(screen.getByRole("button", { name: /start watch/i }));
+
+    expect(
+      await screen.findByText(/question and a research area are required/i),
+    ).toBeInTheDocument();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dispatch"))).toBe(false);
+  });
+
+  it("posts a watch_update with the linked project and chosen edits", async () => {
+    const PROJECT = "77777777-7777-4777-8777-777777777777";
+    globalThis.fetch = mockAgentFetch({
+      route: { ...watchRoute, thread: { ...THREAD, linkedResearchProjectId: PROJECT } },
+      thread: { ...THREAD, linkedResearchProjectId: PROJECT },
+    }) as never;
+    const user = userEvent.setup();
+    render(
+      <Harness
+        pendingPrompt={sendPrompt()}
+        role="operator"
+        permissions={["growth_intelligence.manage"]}
+      />,
+    );
+    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Steps" }));
+
+    // The project id falls back to the polled thread link.
+    expect(screen.getByLabelText("Watch project id")).toHaveAttribute("placeholder", PROJECT);
+    await user.click(screen.getByLabelText("Watch frequency"));
+    await user.click(await screen.findByRole("option", { name: "Weekly" }));
+    await user.type(screen.getByLabelText(/end date/i), "2026-12-31");
+    await user.click(screen.getByRole("button", { name: /update watch/i }));
+
+    await waitFor(() => {
+      expect(
+        (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(([url]) =>
+          String(url).includes("/dispatch"),
+        ),
+      ).toBe(true);
+    });
+    const payload = dispatchBody();
+    expect(payload).toMatchObject({
+      action: "watch_update",
+      confirmation: { confirmed: true },
+      watchUpdate: {
+        projectId: PROJECT,
+        edits: { frequency: "weekly", endDate: "2026-12-31" },
+      },
+    });
+  });
+
+  it("hides the forms without the manage grant", async () => {
+    globalThis.fetch = mockAgentFetch({ route: watchRoute }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={[]} />);
+    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: "Steps" }));
+
+    expect(screen.queryByLabelText("Watch question")).not.toBeInTheDocument();
+    expect(screen.getByText(/growth_intelligence\.manage grant/i)).toBeInTheDocument();
   });
 });

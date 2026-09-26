@@ -225,14 +225,16 @@ export type DispatchBody = z.infer<typeof dispatchBodySchema>;
  * Builds the exact confirmed POST body the drawer sends to the dispatch
  * route. One constructor shared by the drawer, tests, and Slice C, so the
  * wire shape cannot drift between callers. Confirmation is always true
- * here: this helper is only called from an explicit confirm click.
+ * here: this helper is only called from an explicit confirm click. Blocks
+ * take schema *input* types so Zod applies its defaults (competitors,
+ * investigation areas) instead of every caller repeating them.
  */
 export function buildDispatchPayload(input: {
   action: DispatchAction;
   idempotencyKey: string;
-  watchCreate?: DispatchWatchCreate;
-  watchUpdate?: DispatchWatchUpdate;
-  campaignAdvice?: DispatchCampaignAdvice;
+  watchCreate?: z.input<typeof dispatchWatchCreateSchema>;
+  watchUpdate?: z.input<typeof dispatchWatchUpdateSchema>;
+  campaignAdvice?: z.input<typeof dispatchCampaignAdviceSchema>;
 }): DispatchBody {
   return dispatchBodySchema.parse({ ...input, confirmation: { confirmed: true } });
 }

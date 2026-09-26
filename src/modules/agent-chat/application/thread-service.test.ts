@@ -319,8 +319,27 @@ describe("thread service", () => {
     );
     expect(out.answers).toEqual({ frequency: "weekly" });
     expect(out.intent).toBe("answer_memory");
+    // Slice C F2/M6: the re-route's fresh codes travel with the answers
+    // result — never the previous turn's carried forward.
+    expect(out.confidence).toBe("high");
+    expect(out.reasonCodes).toEqual(["MODEL_PROPOSAL_ACCEPTED"]);
     // The answers append and the reroute each publish once.
     expect(publish).toHaveBeenCalledTimes(2);
+  });
+
+  it("reads one thread for the checkpoint poll, foreign as not-found (M9)", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({ threads });
+    const out = await service.getThread({ organizationId: "o", threadId: "t1" });
+    expect(out.thread.id).toBe("t1");
+    expect(threads.listThreads).not.toHaveBeenCalled();
+
+    const foreign = createThreadService({
+      threads: mockThreads({ getThread: vi.fn(async () => null) }),
+    });
+    await expect(
+      foreign.getThread({ organizationId: "o", threadId: "nope" }),
+    ).rejects.toMatchObject({ code: "TENANT_SCOPE_ERROR" });
   });
 
   it("refuses answer submission for viewers before touching persistence", async () => {

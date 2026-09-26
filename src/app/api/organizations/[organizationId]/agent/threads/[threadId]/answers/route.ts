@@ -7,6 +7,7 @@ import { createEventPublisher } from "@/domain/events/publisher";
 import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { createLightModelProvider } from "@/modules/agent-router/infrastructure/light-model-provider";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
+import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
 import { createThreadService } from "@/modules/agent-chat/application/thread-service";
 import {
   submitAnswersBodySchema,
@@ -28,6 +29,9 @@ import {
  * before persistence. The body carries the idempotency key, the resume
  * key of the card being answered, the echoed spec, and the answer record
  * — thread, organization, actor, and correlation ids are server-owned.
+ * The response carries the re-route's fresh intent, confidence, and
+ * reason codes (Slice C F2/M6), digested over the real context pack
+ * (Slice C M7) — never the previous turn's codes.
  */
 
 export async function POST(
@@ -72,25 +76,42 @@ export async function POST(
       threads: createThreadRepository(agentPersistenceFor(context.supabase)),
       events: createEventPublisher(),
       proposeRouter: async (args) => createLightModelProvider().propose({ ...args, correlationId }),
+      // Slice C M7: the answers re-route digests the real HEAVY pack,
+      // like the classify-only route does — no more placeholder digest
+      // with its context-unavailable limitation on this path.
+      contextReaders: createAgentContextReaders(context.supabase),
       correlationId,
     });
-    const { message, replayed, answers, intent, questionnaire } = await service.submitAnswers({
-      organizationId,
-      actorId: context.user.id,
-      role: context.membership.role,
-      threadId: rawParams.threadId,
-      spec,
-      answers: body.answers,
-      idempotencyKey: body.idempotencyKey,
-      ...(page ? { page } : {}),
-    });
+    const { message, replayed, answers, intent, confidence, reasonCodes, questionnaire } =
+      await service.submitAnswers({
+        organizationId,
+        actorId: context.user.id,
+        role: context.membership.role,
+        threadId: rawParams.threadId,
+        spec,
+        answers: body.answers,
+        idempotencyKey: body.idempotencyKey,
+        ...(page ? { page } : {}),
+      });
     logger.info("agent_thread.answers_submitted", {
       organizationId,
       threadId: rawParams.threadId,
       correlationId,
     });
     return agentJsonResponse(
-      { message, replayed, answers, resumeKey: body.resumeKey, intent, questionnaire },
+      {
+        message,
+        replayed,
+        answers,
+        resumeKey: body.resumeKey,
+        intent,
+        // Slice C F2/M6: the re-route's fresh confidence + reason codes
+        // travel in this response, so the drawer never renders the
+        // previous turn's codes beside the new card.
+        confidence,
+        reasonCodes,
+        questionnaire,
+      },
       correlationId,
       replayed ? 200 : 201,
     );

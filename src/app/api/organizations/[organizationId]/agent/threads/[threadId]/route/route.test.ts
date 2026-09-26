@@ -24,9 +24,12 @@ vi.mock("@/modules/agent-router/infrastructure/light-model-provider", () => ({
 vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: mocks.publish }),
 }));
-vi.mock("@/lib/logger", () => ({
-  logger: { warn: vi.fn(), info: mocks.info, error: vi.fn() },
-}));
+vi.mock("@/lib/logger", async (importOriginal) => {
+  // Slice C F4: the route narrows codes through the real helper, so the
+  // mock keeps every real export and only swaps the sink.
+  const actual = await importOriginal<typeof import("@/lib/logger")>();
+  return { ...actual, logger: { warn: vi.fn(), info: mocks.info, error: vi.fn() } };
+});
 // The test organization sits inside the agent rollout allowlist; a refusal
 // below proves authorization or validation, never the feature being off.
 vi.mock("@/lib/env", () => ({

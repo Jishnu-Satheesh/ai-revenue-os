@@ -55,9 +55,11 @@ type LogContext = {
   confidence?: "high" | "medium" | "low";
   /**
    * Stable routing reason codes (e.g. `DEEPTHINK_UPGRADE_REQUIRED`). Codes
-   * chosen by the platform, never tenant text.
+   * chosen by the platform, never tenant text. Closed union (Slice C F4):
+   * a code must be added here before any call site may log it, so a new
+   * lane cannot smuggle free text through this field.
    */
-  reasonCodes?: string[];
+  reasonCodes?: AgentReasonCode[];
   /**
    * A thrown error's constructor name, such as `ZodError`. A code identifier
    * chosen by the platform, never tenant text — the message itself stays out
@@ -108,6 +110,65 @@ type LogContext = {
   metricsConsidered?: number;
   metricsRecorded?: number;
 };
+
+/**
+ * Closed agent reason-code vocabulary (Slice C F4).
+ *
+ * Every entry is minted verbatim by a deterministic disposal site: the
+ * agent router (`routeAgentMessage`), the campaign-advice eligibility
+ * check, the research-lane gate, the context-pack budget refusal, or the
+ * scope-registry collision path. No model text, no tenant text. Adding a
+ * new code means adding it here plus `logger.test.ts` — the log line is
+ * the fence, so the fence stays closed by construction.
+ */
+export const AGENT_REASON_CODES = [
+  // Router (`src/modules/agent-router/application/router-service.ts`).
+  "PROVIDER_FAIL_CLOSED",
+  "VIEWER_RESTRICTED",
+  "MODEL_PROPOSAL_OVERRIDDEN",
+  "RESEARCH_REQUIRES_MANAGE",
+  "WATCH_REQUIRES_MANAGE",
+  "CAMPAIGN_REQUIRES_CREATE",
+  "PROFILE_REQUIRES_MANAGE",
+  "LOW_CONFIDENCE_FALLBACK",
+  "DEEPTHINK_UPGRADE_REQUIRED",
+  "MISSING_FIELDS_CAPPED",
+  "QUESTIONNAIRE_REQUIRED",
+  "MODEL_PROPOSAL_ACCEPTED",
+  "DUPLICATE_WATCH_CANDIDATE",
+  // Campaign advice (`campaign-advise.ts` eligibility).
+  "ADVICE_NO_OPPORTUNITY",
+  "EVIDENCE_NOT_FREEZABLE",
+  "PROFILE_UNBOUND",
+  "POLICY_BLOCKED",
+  "CAPABILITY_BLOCKED",
+  "SCHEDULE_BLOCKED",
+  "AUDIENCE_NOT_READY",
+  // Research lane gate + worker blocks.
+  "CREDENTIAL_MISSING",
+  "LANE_DISABLED",
+  "PROVIDER_NOT_QUALIFIED",
+  "AGENT_CHAT_DISABLED",
+  "WATCH_UPDATE_UNAVAILABLE",
+  // Context-pack budget refusal.
+  "CONTEXT_PACK_OVERSIZED",
+  // Scope-registry collision (M10 migration).
+  "SCOPE_FINGERPRINT_COLLISION",
+] as const;
+
+export type AgentReasonCode = (typeof AGENT_REASON_CODES)[number];
+
+/**
+ * Narrows service-returned codes to the closed log vocabulary. Producers
+ * are closed (they mint only the codes above), so an unknown entry means
+ * the producer and this union drifted — it is dropped rather than logged,
+ * and the drift is fixed by extending `AGENT_REASON_CODES`, never by
+ * widening this field back to `string[]`.
+ */
+export function toAgentReasonCodes(codes: readonly string[]): AgentReasonCode[] {
+  const known = new Set<string>(AGENT_REASON_CODES);
+  return codes.filter((code): code is AgentReasonCode => known.has(code));
+}
 
 function write(level: "info" | "warn" | "error", message: string, context: LogContext = {}) {
   const payload = { level, message, ...context, timestamp: new Date().toISOString() };

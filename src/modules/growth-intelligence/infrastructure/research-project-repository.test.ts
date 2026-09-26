@@ -690,7 +690,7 @@ describe("keyed schedule update", () => {
       scopeFingerprint: SCOPE_FINGERPRINT,
     });
 
-    expect(outcome).toEqual({ projectId, revisionNumber: 2, replayed: false });
+    expect(outcome).toEqual({ projectId, revisionNumber: 2, replayed: false, reasonCode: null });
     expect(rpcCalls).toHaveLength(1);
     expect(rpcCalls[0]).toEqual({
       name: "update_research_project_schedule_keyed",
@@ -722,7 +722,36 @@ describe("keyed schedule update", () => {
       idempotencyKey: "schedule-key-00000000000002",
     });
 
-    expect(outcome).toEqual({ projectId, revisionNumber: null, replayed: true });
+    expect(outcome).toEqual({ projectId, revisionNumber: null, replayed: true, reasonCode: null });
+  });
+
+  it("surfaces the scope-registry collision code instead of proceeding silently (M10)", async () => {
+    const { client } = persistence({
+      "rpc:update_research_project_schedule_keyed": [
+        {
+          data: {
+            projectId,
+            revisionNumber: null,
+            replayed: false,
+            reasonCode: "SCOPE_FINGERPRINT_COLLISION",
+          },
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedResearchProjectRepository(client);
+
+    const outcome = await repository.updateProjectSchedule({
+      organizationId,
+      projectId,
+      schedule,
+      actorId,
+      idempotencyKey: "schedule-key-00000000000004",
+      scopeFingerprint: SCOPE_FINGERPRINT,
+    });
+
+    expect(outcome.reasonCode).toBe("SCOPE_FINGERPRINT_COLLISION");
+    expect(outcome.replayed).toBe(false);
   });
 
   it("maps key conflicts honestly without exposing internals", async () => {

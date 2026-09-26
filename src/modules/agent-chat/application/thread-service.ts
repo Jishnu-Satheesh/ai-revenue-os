@@ -519,6 +519,30 @@ export function createThreadService(deps: ThreadServiceDeps) {
       return { thread, replayed: created.replayed };
     },
 
+    /**
+     * Single-thread read for the drawer checkpoint poll (Slice C M9).
+     * Returns the one row whose worker-written links and terminal status
+     * the poll watches — never the collection. Foreign threads read as
+     * not-found, never as a denial. Any member may read; classification
+     * and answers stay behind their own gates.
+     */
+    async getThread(input: {
+      organizationId: string;
+      threadId: string;
+    }): Promise<{ thread: ThreadSummary }> {
+      const thread = await deps.threads.getThread({
+        organizationId: input.organizationId,
+        threadId: input.threadId,
+      });
+      if (!thread) {
+        throw new DomainError(
+          "TENANT_SCOPE_ERROR",
+          "This chat was not found in your organization.",
+        );
+      }
+      return { thread };
+    },
+
     async appendUserMessage(input: {
       organizationId: string;
       actorId: string;
@@ -734,6 +758,8 @@ export function createThreadService(deps: ThreadServiceDeps) {
       replayed: boolean;
       answers: Record<string, string>;
       intent: AgentIntent;
+      confidence: "high" | "medium" | "low";
+      reasonCodes: string[];
       questionnaire: QuestionnaireSpec | null;
       answer: RouteAnswer | null;
     }> {
@@ -785,6 +811,11 @@ export function createThreadService(deps: ThreadServiceDeps) {
         replayed: appended.replayed,
         answers: normalized,
         intent: routed.intent,
+        // Slice C F2/M6: the re-route's fresh codes travel with the
+        // answers response, so the drawer renders this turn's codes
+        // instead of carrying the previous classification forward.
+        confidence: routed.confidence,
+        reasonCodes: routed.reasonCodes,
         questionnaire: routed.questionnaire,
         answer: routed.answer,
       };

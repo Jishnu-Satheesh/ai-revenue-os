@@ -5,6 +5,7 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   getOrganizationContext: vi.fn(),
   createRepo: vi.fn(),
+  createReaders: vi.fn(),
   propose: vi.fn(),
   publish: vi.fn(),
 }));
@@ -19,6 +20,9 @@ vi.mock("@/modules/agent-chat/infrastructure/thread-repository", async (importOr
 });
 vi.mock("@/modules/agent-router/infrastructure/light-model-provider", () => ({
   createLightModelProvider: () => ({ propose: mocks.propose }),
+}));
+vi.mock("@/modules/agent-chat/application/api", () => ({
+  createAgentContextReaders: mocks.createReaders,
 }));
 vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: mocks.publish }),
@@ -103,6 +107,7 @@ const params = { params: Promise.resolve({ organizationId: ORGANIZATION, threadI
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getOrganizationContext.mockResolvedValue(operatorContext());
+  mocks.createReaders.mockReturnValue({});
 });
 
 describe("agent thread answers route", () => {
@@ -142,7 +147,44 @@ describe("agent thread answers route", () => {
       intent: "answer_memory",
       correlationId: CORRELATION,
     });
+    // Slice C F2/M6: the re-route's fresh codes travel in the response —
+    // the drawer never renders the previous turn's codes beside the card.
+    expect(body.confidence).toBe("high");
+    expect(body.reasonCodes).toEqual(["MODEL_PROPOSAL_ACCEPTED"]);
     expect(created.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("binds the real context readers so the re-route digests the pack (M7)", async () => {
+    const supabase = {};
+    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase });
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+    });
+    mocks.propose.mockResolvedValue({ intent: "answer_memory", confidence: "high", missing: [] });
+    const response = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "a-1234567890123456",
+            resumeKey: SPEC.resumeKey,
+            spec: SPEC,
+            answers: { frequency: "weekly" },
+          }),
+        },
+      ),
+      params,
+    );
+    expect(response.status).toBe(201);
+    expect(mocks.createReaders).toHaveBeenCalledWith(supabase);
   });
 
   it("refuses answers for viewers and invalid answers", async () => {
