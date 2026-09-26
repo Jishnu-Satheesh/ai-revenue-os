@@ -244,6 +244,24 @@ describe("studio repository rpc mappings", () => {
     });
   });
 
+  it("maps worker export failures to their own plain messages", async () => {
+    const cases: Array<[string, RegExp]> = [
+      ["studio_export_not_found", /no longer exists/i],
+      ["studio_export_receipt_mismatch", /does not match the admitted/i],
+    ];
+    for (const [code, pattern] of cases) {
+      const { client } = mockClient(() => fails(code));
+      const repository = createStudioRepository(client);
+      await expect(
+        repository.completeExport({
+          organizationId: ORG,
+          exportId: RUN,
+          receipt: {},
+        }),
+      ).rejects.toThrow(pattern);
+    }
+  });
+
   it("saves a policy version and maps worker settlements", async () => {
     const { client } = mockClient((fn: string) => {
       if (fn === "save_studio_generation_policy") return ok({ version: 5 });

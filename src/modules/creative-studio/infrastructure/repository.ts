@@ -200,6 +200,10 @@ function workerFailureMessage(cause: unknown): string {
       return "The event payload carries a forbidden key.";
     case "studio_run_not_reconcilable":
       return "The run is not in a state reconciliation can settle.";
+    case "studio_export_not_found":
+      return "The export run no longer exists.";
+    case "studio_export_receipt_mismatch":
+      return "The completion receipt does not match the admitted export request.";
     default:
       return "The Studio worker step failed.";
   }

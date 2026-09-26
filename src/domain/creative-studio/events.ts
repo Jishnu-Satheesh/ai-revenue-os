@@ -52,7 +52,11 @@ const TRANSITIONS: Readonly<Record<StudioRunEvent, Readonly<Record<string, Studi
   "studio.run.generation_started": { preparing: "generating" },
   "studio.run.preview_available": { generating: "previewing", previewing: "previewing" },
   "studio.run.output_validated": { generating: "validating", previewing: "validating" },
-  "studio.run.completed": { validating: "ready", cancel_requested: "ready" },
+  "studio.run.completed": {
+    validating: "ready",
+    cancel_requested: "ready",
+    outcome_unknown: "ready",
+  },
   "studio.run.failed": {
     queued: "failed",
     preparing: "failed",

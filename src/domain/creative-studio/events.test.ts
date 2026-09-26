@@ -58,6 +58,10 @@ describe("run stage transitions", () => {
     expect(transitionRunState("generating", "studio.run.outcome_unknown")).toBe("outcome_unknown");
   });
 
+  it("lands a retrieved provider result through recovery completion", () => {
+    expect(transitionRunState("outcome_unknown", "studio.run.completed")).toBe("ready");
+  });
+
   it("refuses to resurrect a terminal run", () => {
     for (const terminal of ["ready", "failed", "cancelled", "outcome_unknown"] as const) {
       expect(transitionReason(terminal, "studio.run.generation_started")).toBe(terminal);

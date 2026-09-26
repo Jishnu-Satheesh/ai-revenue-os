@@ -218,6 +218,16 @@ values
     'admin'
   );
 
+insert into public.campaign_briefs (
+  id, organization_id, objective, audience, created_by
+)
+values (
+  'd3170000-0000-4000-8000-000000000202'::uuid,
+  'd3170000-0000-4000-8000-000000000101'::uuid,
+  'Launch the summer menu', 'Neighborhood regulars',
+  'd3170000-0000-4000-8000-000000000001'::uuid
+);
+
 insert into public.campaigns (
   id, organization_id, title, source_kind, brief_id, created_by
 )
@@ -394,6 +404,63 @@ select extensions.throws_ok(
 
 reset role;
 
+select extensions.throws_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    select public.reserve_studio_upload(
+      'd3170000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'kind', 'design', 'declaredSize', 16777216,
+        'declaredMime', 'image/png', 'filename', 'huge.png',
+        'rightsAttestation', jsonb_build_object('accepted', true)
+      )
+    );
+  $$,
+  '22023', 'studio_upload_invalid',
+  'a reservation above the fifteen megabyte ceiling is refused'
+);
+
+reset role;
+
+select extensions.throws_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    select public.reserve_studio_upload(
+      'd3170000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'kind', 'design', 'declaredSize', 1024,
+        'declaredMime', 'image/gif', 'filename', 'anim.gif',
+        'rightsAttestation', jsonb_build_object('accepted', true)
+      )
+    );
+  $$,
+  '22023', 'studio_upload_invalid',
+  'a reservation with an unlisted mime is refused'
+);
+
+reset role;
+
+select extensions.throws_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    select public.reserve_studio_upload(
+      'd3170000-0000-4000-8000-000000000101'::uuid,
+      jsonb_build_object(
+        'kind', 'design', 'declaredSize', 1024,
+        'declaredMime', 'image/png', 'filename', '../escape.png',
+        'rightsAttestation', jsonb_build_object('accepted', true)
+      )
+    );
+  $$,
+  '22023', 'studio_upload_invalid',
+  'a reservation whose filename escapes its folder is refused'
+);
+
+reset role;
+
 select extensions.lives_ok(
   $$
     set local role authenticated;
@@ -500,6 +567,45 @@ select extensions.is(
   repeat('b', 64),
   'the ready upload pins its verified bytes hash'
 );
+
+select extensions.lives_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    insert into studio_fix (k, v)
+    select 'uploadTiny',
+      (public.reserve_studio_upload(
+        'd3170000-0000-4000-8000-000000000101'::uuid,
+        jsonb_build_object(
+          'kind', 'design', 'declaredSize', 1024,
+          'declaredMime', 'image/png', 'filename', 'tiny.png',
+          'rightsAttestation', jsonb_build_object('accepted', true)
+        )
+      )->>'uploadId');
+  $$,
+  'an operator reserves one more upload for the dimension bound'
+);
+
+reset role;
+
+select extensions.throws_ok(
+  $$
+    set local role service_role;
+    select public.complete_studio_upload(
+      'd3170000-0000-4000-8000-000000000101'::uuid,
+      (select v::uuid from studio_fix where k = 'uploadTiny'),
+      jsonb_build_object(
+        'verdict', 'ready', 'finalHash', repeat('b', 64),
+        'finalMime', 'image/png', 'finalWidth', 100, 'finalHeight', 1350,
+        'finalBytes', 900000
+      )
+    );
+  $$,
+  '22023', 'studio_upload_invalid',
+  'a verified receipt below the dimension floor is refused'
+);
+
+reset role;
 
 -- ---------------------------------------------------------------------------
 -- Admission refusals: roles, policy presence, ceilings, stale and foreign
@@ -775,6 +881,7 @@ insert into public.studio_runs (
 )
 values (
   'd3170000-0000-4000-8000-000000000401'::uuid,
+  'd3170000-0000-4000-8000-000000000102'::uuid,
   (select v::uuid from studio_fix where k = 'docB'),
   'd3170000-0000-4000-8000-000000000003'::uuid,
   'generate', 1, '{}'::jsonb, repeat('d', 64), 'seed-key-000000001',
@@ -1052,6 +1159,20 @@ select extensions.ok(
   'the worker claims the queued image run'
 );
 
+select extensions.is(
+  (select worker_id from public.studio_runs
+   where id = (select v::uuid from studio_fix where k = 'runImg1')),
+  'worker-lifecycle-1',
+  'the claim records the worker id on its own column'
+);
+
+select extensions.is(
+  (select provider_request_id from public.studio_runs
+   where id = (select v::uuid from studio_fix where k = 'runImg1')),
+  null,
+  'the claim leaves provider_request_id for the real provider id'
+);
+
 reset role;
 
 select extensions.throws_ok(
@@ -1247,8 +1368,8 @@ select extensions.is(
 select extensions.is(
   (select count(*) from public.studio_run_events
    where run_id = (select v::uuid from studio_fix where k = 'runImg1')),
-  6::bigint,
-  'accepted, prepared, started, two previews, validated, completed: six events'
+  7::bigint,
+  'accepted, prepared, started, two previews, validated, completed: seven events'
 );
 
 select extensions.ok(
@@ -1258,6 +1379,14 @@ select extensions.ok(
       and safe_payload ? 'anomaly'
   ),
   'a run with real previews completes without the missing-preview anomaly'
+);
+
+select extensions.ok(
+  (
+    select min(expires_at) from public.studio_preview_frames
+    where run_id = (select v::uuid from studio_fix where k = 'runImg1')
+  ) > now() + make_interval(hours => 23),
+  'settling the run pushes preview expiry out by a day'
 );
 
 reset role;
@@ -1436,22 +1565,8 @@ select extensions.lives_ok(
           'estimatedCostMinor', 50, 'currency', 'AED'
         ) from studio_fix where k = 'docA')
       )->>'runId');
-    insert into studio_fix (k, v)
-    select 'runCancel',
-      (public.admit_studio_run(
-        'd3170000-0000-4000-8000-000000000101'::uuid,
-        (select jsonb_build_object(
-          'documentId', v,
-          'expectedRevision', (select revision from public.studio_documents
-           where id = (select v::uuid from studio_fix where k = 'docA')),
-          'operation', 'generate', 'idempotencyKey', 'cancel-key-0000001',
-          'profileId', 'd3170000-0000-4000-8000-000000000301',
-          'requestDigest', repeat('3', 64), 'request', '{}'::jsonb,
-          'estimatedCostMinor', 50, 'currency', 'AED'
-        ) from studio_fix where k = 'docA')
-      )->>'runId');
   $$,
-  'four runs admit for the suggestion, failure, unknown, and cancel paths'
+  'three runs admit for the suggestion, failure, and unknown paths'
 );
 
 reset role;
@@ -1501,7 +1616,8 @@ select extensions.is(
       'suggestion', jsonb_build_object(
         'originalPromptDigest', repeat('0', 64),
         'suggestedPrompt', 'A calmer hero line.',
-        'operation', 'enhance'
+        'operation', 'enhance',
+        'usage', jsonb_build_object('inputTokens', 120, 'outputTokens', 60)
       )
     )
   )->>'suggestion',
@@ -1544,6 +1660,36 @@ select extensions.is(
   500::bigint,
   'a definite failure records its settled spend'
 );
+
+reset role;
+
+-- The cancel-path run admits only now: while runFail was still queued the
+-- document-busy fence would have refused a second image run on docA.
+select extensions.lives_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    insert into studio_fix (k, v)
+    select 'runCancel',
+      (public.admit_studio_run(
+        'd3170000-0000-4000-8000-000000000101'::uuid,
+        (select jsonb_build_object(
+          'documentId', v,
+          'expectedRevision', (select revision from public.studio_documents
+           where id = (select v::uuid from studio_fix where k = 'docA')),
+          'operation', 'generate', 'idempotencyKey', 'cancel-key-0000001',
+          'profileId', 'd3170000-0000-4000-8000-000000000301',
+          'requestDigest', repeat('3', 64), 'request', '{}'::jsonb,
+          'estimatedCostMinor', 50, 'currency', 'AED'
+        ) from studio_fix where k = 'docA')
+      )->>'runId');
+  $$,
+  'the cancel-path run admits once the settled failure frees the fence'
+);
+
+reset role;
+
+set local role service_role;
 
 select public.append_studio_run_event(
   (select v::uuid from studio_fix where k = 'runUnknown'),
@@ -1697,6 +1843,24 @@ select extensions.is(
   'reclaiming an expired lease starts attempt 2'
 );
 
+select extensions.is(
+  public.fail_studio_run(
+    (select v::uuid from studio_fix where k = 'runCancel'),
+    (select v::uuid from studio_fix where k = 'leaseCancel2'),
+    '{"safeCode": "cancelled", "certainty": "definite"}'::jsonb
+  )->>'state',
+  'cancelled',
+  'a worker-confirmed cancellation settles as cancelled, not failed'
+);
+
+select extensions.is(
+  (select count(*) from public.studio_run_events
+   where run_id = (select v::uuid from studio_fix where k = 'runCancel')
+     and kind = 'studio.run.cancelled'),
+  1::bigint,
+  'the confirmed cancellation is a durable event'
+);
+
 reset role;
 
 -- Recovery: the unknown run settles failed from a documented retrieval.
@@ -1722,8 +1886,262 @@ select extensions.throws_ok(
         "versionId": "d3170000-0000-4000-8000-000000000399"}'::jsonb
     );
   $$,
+  '22023', 'studio_run_invalid',
+  'success cannot be invented through reconciliation: settled must be failed'
+);
+
+reset role;
+
+select extensions.throws_ok(
+  $$
+    set local role service_role;
+    select public.reconcile_studio_run(
+      (select v::uuid from studio_fix where k = 'runImg1'),
+      '{"settled": "failed", "safeCode": "provider_failed"}'::jsonb
+    );
+  $$,
   '22023', 'studio_run_not_reconcilable',
-  'a settled run cannot be reconciled, and success cannot be invented'
+  'a settled run cannot be reconciled even with a failed receipt'
+);
+
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- Settlement edges: cancel after terminal, completion after cancel requested,
+-- recovery completion of an unknown run, and provider id capture.
+-- ---------------------------------------------------------------------------
+
+select extensions.lives_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    insert into studio_fix (k, v)
+    select 'cancelTerminal',
+      (public.cancel_studio_run(
+        'd3170000-0000-4000-8000-000000000101'::uuid,
+        (select v::uuid from studio_fix where k = 'runImg1')
+      )->>'alreadyTerminal');
+  $$,
+  'the operator cancels an already-ready run'
+);
+
+reset role;
+
+select extensions.is(
+  (select v from studio_fix where k = 'cancelTerminal'),
+  'true',
+  'cancelling a terminal run is an honest no-op'
+);
+
+select extensions.lives_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    insert into studio_fix (k, v)
+    select 'runRace',
+      (public.admit_studio_run(
+        'd3170000-0000-4000-8000-000000000101'::uuid,
+        (select jsonb_build_object(
+          'documentId', v,
+          'expectedRevision', (select revision from public.studio_documents
+           where id = (select v::uuid from studio_fix where k = 'docA')),
+          'operation', 'generate', 'idempotencyKey', 'race-key-000000001',
+          'profileId', 'd3170000-0000-4000-8000-000000000301',
+          'requestDigest', repeat('c', 64), 'request', '{}'::jsonb,
+          'estimatedCostMinor', 50, 'currency', 'AED'
+        ) from studio_fix where k = 'docA')
+      )->>'runId');
+    select public.cancel_studio_run(
+      'd3170000-0000-4000-8000-000000000101'::uuid,
+      (select v::uuid from studio_fix where k = 'runRace')
+    );
+  $$,
+  'a race-path run admits and is cancelled before any worker claims it'
+);
+
+reset role;
+
+set local role service_role;
+
+insert into studio_fix (k, v)
+select 'leaseRace',
+  (public.claim_studio_run(
+    (select v::uuid from studio_fix where k = 'runRace'),
+    'worker-race-1', 600
+  )->>'leaseToken');
+
+select extensions.is(
+  public.complete_studio_run(
+    (select v::uuid from studio_fix where k = 'runRace'),
+    (select v::uuid from studio_fix where k = 'leaseRace'),
+    jsonb_build_object(
+      'output', jsonb_build_object(
+        'outputHash', repeat('d', 64), 'outputMime', 'image/png',
+        'outputWidth', 1080, 'outputHeight', 1350, 'outputBytes', 1000000,
+        'outputPath', 'd3170000-0000-4000-8000-000000000101/docA/v3/final.png',
+        'inputDigest', repeat('c', 64), 'exactTextCopy', ''
+      ),
+      'continuation', jsonb_build_object(
+        'privateObjectPath',
+        'd3170000-0000-4000-8000-000000000101/docA/v3/context.bin',
+        'privateObjectHash', repeat('e', 64)
+      )
+    )
+  )->>'state',
+  'ready',
+  'a run that finished despite the cancel request completes honestly'
+);
+
+reset role;
+
+select extensions.lives_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    insert into studio_fix (k, v)
+    select 'runUnknown2',
+      (public.admit_studio_run(
+        'd3170000-0000-4000-8000-000000000101'::uuid,
+        (select jsonb_build_object(
+          'documentId', v,
+          'expectedRevision', (select revision from public.studio_documents
+           where id = (select v::uuid from studio_fix where k = 'docA')),
+          'operation', 'enhance', 'idempotencyKey', 'unknown2-key-000001',
+          'profileId', 'd3170000-0000-4000-8000-000000000301',
+          'requestDigest', repeat('e', 64), 'request', '{}'::jsonb,
+          'estimatedCostMinor', 50, 'currency', 'AED'
+        ) from studio_fix where k = 'docA')
+      )->>'runId');
+  $$,
+  'a second unknown-path run admits for the recovery arm'
+);
+
+reset role;
+
+set local role service_role;
+
+insert into studio_fix (k, v)
+select 'leaseUnknown2',
+  (public.claim_studio_run(
+    (select v::uuid from studio_fix where k = 'runUnknown2'),
+    'worker-unknown-2', 600
+  )->>'leaseToken');
+
+select public.append_studio_run_event(
+  (select v::uuid from studio_fix where k = 'runUnknown2'),
+  (select v::uuid from studio_fix where k = 'leaseUnknown2'),
+  '{"kind": "studio.run.references_prepared"}'::jsonb
+);
+select public.append_studio_run_event(
+  (select v::uuid from studio_fix where k = 'runUnknown2'),
+  (select v::uuid from studio_fix where k = 'leaseUnknown2'),
+  '{"kind": "studio.run.generation_started"}'::jsonb
+);
+
+select extensions.is(
+  public.fail_studio_run(
+    (select v::uuid from studio_fix where k = 'runUnknown2'),
+    (select v::uuid from studio_fix where k = 'leaseUnknown2'),
+    '{"safeCode": "stream_lost", "certainty": "unknown"}'::jsonb
+  )->>'state',
+  'outcome_unknown',
+  'the second run parks as unknown after a lost stream'
+);
+
+reset role;
+
+update public.studio_runs
+set lease_expires_at = now() - make_interval(mins => 1)
+where id = (select v::uuid from studio_fix where k = 'runUnknown2');
+
+set local role service_role;
+
+insert into studio_fix (k, v)
+select 'leaseUnknown2b',
+  (public.claim_studio_run(
+    (select v::uuid from studio_fix where k = 'runUnknown2'),
+    'worker-unknown-3', 600
+  )->>'leaseToken');
+
+select extensions.is(
+  public.complete_studio_run(
+    (select v::uuid from studio_fix where k = 'runUnknown2'),
+    (select v::uuid from studio_fix where k = 'leaseUnknown2b'),
+    jsonb_build_object(
+      'suggestion', jsonb_build_object(
+        'originalPromptDigest', repeat('e', 64),
+        'suggestedPrompt', 'Recovered from the provider log.',
+        'operation', 'enhance',
+        'usage', jsonb_build_object('inputTokens', 40, 'outputTokens', 20)
+      )
+    )
+  )->>'state',
+  'ready',
+  'a retrieved provider result lands through recovery-claim plus completion'
+);
+
+reset role;
+
+select extensions.lives_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    insert into studio_fix (k, v)
+    select 'runProv',
+      (public.admit_studio_run(
+        'd3170000-0000-4000-8000-000000000101'::uuid,
+        (select jsonb_build_object(
+          'documentId', v,
+          'expectedRevision', (select revision from public.studio_documents
+           where id = (select v::uuid from studio_fix where k = 'docA')),
+          'operation', 'enhance', 'idempotencyKey', 'prov-key-000000001',
+          'profileId', 'd3170000-0000-4000-8000-000000000301',
+          'requestDigest', repeat('f', 64), 'request', '{}'::jsonb,
+          'estimatedCostMinor', 50, 'currency', 'AED'
+        ) from studio_fix where k = 'docA')
+      )->>'runId');
+  $$,
+  'a provider-id probe run admits'
+);
+
+reset role;
+
+set local role service_role;
+
+insert into studio_fix (k, v)
+select 'leaseProv',
+  (public.claim_studio_run(
+    (select v::uuid from studio_fix where k = 'runProv'),
+    'worker-prov-1', 600
+  )->>'leaseToken');
+
+select public.append_studio_run_event(
+  (select v::uuid from studio_fix where k = 'runProv'),
+  (select v::uuid from studio_fix where k = 'leaseProv'),
+  '{"kind": "studio.run.references_prepared"}'::jsonb
+);
+select public.append_studio_run_event(
+  (select v::uuid from studio_fix where k = 'runProv'),
+  (select v::uuid from studio_fix where k = 'leaseProv'),
+  '{"kind": "studio.run.generation_started",
+    "providerRequestId": "prov-req-00000001"}'::jsonb
+);
+
+select extensions.is(
+  (select provider_request_id from public.studio_runs
+   where id = (select v::uuid from studio_fix where k = 'runProv')),
+  'prov-req-00000001',
+  'generation_started captures the real provider request id'
+);
+
+select extensions.is(
+  public.fail_studio_run(
+    (select v::uuid from studio_fix where k = 'runProv'),
+    (select v::uuid from studio_fix where k = 'leaseProv'),
+    '{"safeCode": "provider_failed", "certainty": "definite"}'::jsonb
+  )->>'state',
+  'failed',
+  'the probe run settles so later counts stay legible'
 );
 
 reset role;
@@ -1780,6 +2198,13 @@ select extensions.is(
   'the export run reserves zero provider spend'
 );
 
+select extensions.is(
+  (select expected_revision from public.studio_runs
+   where id = (select v::uuid from studio_fix where k = 'exportRun')),
+  1,
+  'the export run pins expected revision 1: derivatives never race documents'
+);
+
 set local role service_role;
 
 insert into studio_fix (k, v)
@@ -1789,12 +2214,43 @@ select 'leaseExport',
     'worker-export-1', 600
   )->>'leaseToken');
 
+-- Already service_role from the outer set local: no reset follows, so the
+-- happy-path completion below keeps its worker role.
+select extensions.throws_ok(
+  $$
+    select public.complete_studio_export(
+      'd3170000-0000-4000-8000-000000000101'::uuid,
+      (select v::uuid from studio_fix where k = 'exportId'),
+      jsonb_build_object(
+        'runId', (select v from studio_fix where k = 'exportRun'),
+        'versionId', 'd3170000-0000-4000-8000-000000000399',
+        'transformVersion', 1, 'presetVersion', 1,
+        'preset', 'instagram_feed',
+        'transform', jsonb_build_object(
+          'kind', 'proportional_resize',
+          'targetWidth', 1080, 'targetHeight', 1350
+        ),
+        'output', jsonb_build_object(
+          'outputHash', repeat('5', 64), 'outputMime', 'image/jpeg',
+          'outputWidth', 1080, 'outputHeight', 1350, 'outputBytes', 400000,
+          'outputPath',
+          'd3170000-0000-4000-8000-000000000101/docA/v1/export-1080.jpg'
+        )
+      )
+    );
+  $$,
+  '22023', 'studio_export_receipt_mismatch',
+  'a completion receipt naming the wrong version is refused loudly'
+);
+
 select extensions.is(
   public.complete_studio_export(
     'd3170000-0000-4000-8000-000000000101'::uuid,
     (select v::uuid from studio_fix where k = 'exportId'),
     (select jsonb_build_object(
+      'runId', (select v from studio_fix where k = 'exportRun'),
       'versionId', v, 'transformVersion', 1, 'presetVersion', 1,
+      'preset', 'instagram_feed',
       'transform', jsonb_build_object(
         'kind', 'proportional_resize',
         'targetWidth', 1080, 'targetHeight', 1350
@@ -1842,6 +2298,37 @@ select extensions.is(
   (select v from studio_fix where k = 'exportReplay'),
   (select v from studio_fix where k = 'exportId'),
   'export dedup returns the original export id'
+);
+
+select extensions.lives_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    insert into studio_fix (k, v)
+    select 'exportOtherPreset',
+      (public.create_studio_export(
+        'd3170000-0000-4000-8000-000000000101'::uuid,
+        (select jsonb_build_object(
+          'versionId', v, 'transformVersion', 1,
+          'transform', jsonb_build_object(
+            'kind', 'proportional_resize',
+            'targetWidth', 1080, 'targetHeight', 1350
+          ),
+          'preset', 'google_square', 'presetVersion', 1,
+          'idempotencyKey', 'export-key-00000003',
+          'requestDigest', repeat('7', 64)
+        ) from studio_fix where k = 'completeImg1')
+      )->>'exportId');
+  $$,
+  'the same transform under another preset admits a distinct export'
+);
+
+reset role;
+
+select extensions.ok(
+  (select v from studio_fix where k = 'exportOtherPreset')
+    is distinct from (select v from studio_fix where k = 'exportId'),
+  'same dimensions, other preset: a different export id'
 );
 
 select extensions.throws_ok(
@@ -1943,25 +2430,76 @@ select extensions.throws_ok(
 
 reset role;
 
-select extensions.lives_ok(
+select extensions.throws_ok(
   $$
     set local role authenticated;
     set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    update public.studio_documents set title = 'Sneaky direct update'
+    where id = (select v::uuid from studio_fix where k = 'docA');
+  $$,
+  '42501', null,
+  'a member cannot update a document directly either'
+);
+
+reset role;
+
+select extensions.throws_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    delete from public.studio_documents
+    where id = (select v::uuid from studio_fix where k = 'docA');
+  $$,
+  '42501', null,
+  'a member cannot delete a document directly either'
+);
+
+reset role;
+
+select extensions.lives_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000002';
     insert into studio_fix (k, v)
-    select 'continuationsVisible', count(*)::text
-    from public.studio_continuations
+    select 'viewerVisible', count(*)::text
+    from public.studio_documents
     where organization_id = 'd3170000-0000-4000-8000-000000000101'::uuid;
   $$,
-  'a tenant A operator queries tenant A continuations'
+  'a tenant A viewer queries tenant A documents'
 );
 
 reset role;
 
 select extensions.is(
-  (select v from studio_fix where k = 'continuationsVisible'),
-  '0',
-  'members read zero continuations: no policy, no grant'
+  (select v from studio_fix where k = 'viewerVisible'),
+  '1',
+  'a viewer reads the documents they may not change'
 );
+
+select extensions.throws_ok(
+  $$
+    update public.studio_versions set ordinal = 99
+    where id = (select v::uuid from studio_fix where k = 'completeImg1');
+  $$,
+  '42501', 'studio_immutable',
+  'even the table owner cannot rewrite an immutable version row'
+);
+
+reset role;
+
+select extensions.throws_ok(
+  $$
+    set local role authenticated;
+    set local request.jwt.claim.sub = 'd3170000-0000-4000-8000-000000000001';
+    select count(*)
+    from public.studio_continuations
+    where organization_id = 'd3170000-0000-4000-8000-000000000101'::uuid;
+  $$,
+  '42501', null,
+  'members cannot read continuations at all: no policy, no grant'
+);
+
+reset role;
 
 select extensions.ok(
   (select count(*) from public.studio_continuations
