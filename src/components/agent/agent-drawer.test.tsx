@@ -693,21 +693,22 @@ describe("duplicate-watch gating", () => {
     correlationId: "c3",
   };
 
-  it("disables Update fields until the schedule migration lands, viewing stays free", async () => {
+  it("disables Update fields when the flag is off, viewing stays free", async () => {
     globalThis.fetch = mockAgentFetch({ route: watchRoute }) as never;
     render(
       <Harness
         pendingPrompt={sendPrompt()}
         role="operator"
         permissions={["growth_intelligence.manage"]}
+        watchUpdateAvailable={false}
       />,
     );
     expect(await screen.findByText("Watch already running")).toBeInTheDocument();
-    // The grant is held but the migration is unpushed: Update fields is
+    // The grant is held but the flag is off: Update fields is
     // unavailable with honest copy, View existing stays enabled.
     expect(screen.getByRole("radio", { name: /update fields/i })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /view existing/i })).toBeEnabled();
-    expect(screen.getByText(/pending migration is applied/i)).toBeInTheDocument();
+    expect(screen.getByText(/unavailable for this chat/i)).toBeInTheDocument();
   });
 
   it("disables Update and Start-fresh without the manage grant", async () => {

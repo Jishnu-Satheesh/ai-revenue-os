@@ -532,11 +532,11 @@ export function AgentDrawer({
     questionnaire && cardKey && !submittedAnswers[cardKey] && !dismissedCards.includes(cardKey),
   );
 
-  // Duplicate-watch gating (spec section 12 + M2 stage gate). Viewing the
-  // existing watch and cancelling stay free for every member; Update-fields
-  // needs the manage grant AND the applied schedule-update migration, and
-  // Start-fresh needs the grant (it mints a second watch). The server
-  // rechecks the grant on submit; the migration gate fails closed below it.
+  // Duplicate-watch gating (spec section 12). Viewing the existing
+  // watch and cancelling stay free for every member; Update-fields needs
+  // the manage grant AND the watchUpdateAvailable flag, and Start-fresh
+  // needs the grant (it mints a second watch). The server rechecks the
+  // grant on submit; the flag only shapes what the card offers.
   const isDuplicateCard = questionnaire?.kind === "duplicate_watch";
   const gatedChoices: string[] = [];
   if (isDuplicateCard && !canManageWatch) gatedChoices.push("update_fields", "start_fresh");
