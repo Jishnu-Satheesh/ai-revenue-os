@@ -123,9 +123,11 @@ export function UniversalAgentShell({
   if (!isAgentShellPage(page)) return null;
 
   const canManage = permissions.includes("growth_intelligence.manage");
-  const canSend = input.trim().length > 0;
+  const isViewer = role === "viewer";
+  const canSend = input.trim().length > 0 && !isViewer;
 
   function handleSend() {
+    if (isViewer) return;
     const body = input.trim();
     if (!body) return;
     const next = nonce + 1;
@@ -273,11 +275,20 @@ export function UniversalAgentShell({
                 onClick={handleSend}
                 disabled={!canSend}
                 aria-label="Send message"
-                title="Send"
+                title={
+                  isViewer
+                    ? "Viewers cannot change this chat — ask an operator to send."
+                    : "Send"
+                }
               >
                 <SendIcon aria-hidden="true" />
               </Button>
             </div>
+            {isViewer ? (
+              <p className="px-1 text-sm text-zinc-400">
+                Viewers cannot change this chat — ask an operator to send.
+              </p>
+            ) : null}
             {!drawerOpen && input.trim() === "" ? (
               <div className="flex flex-wrap gap-2 px-1 pt-1 pb-1">
                 {SUGGESTIONS.map((suggestion) => (

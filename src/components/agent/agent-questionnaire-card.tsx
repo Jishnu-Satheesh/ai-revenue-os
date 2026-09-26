@@ -19,6 +19,7 @@ import {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@/components/ui/questionnaire";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type {
   QuestionnaireItem as QuestionnaireItemSpec,
@@ -367,13 +368,15 @@ export function AgentQuestionnaireCard({
         <p className="text-sm text-muted-foreground">{disabledOptionReason}</p>
       ) : null}
       {onCancel ? (
-        <button
+        <Button
           type="button"
-          className="self-start text-sm text-muted-foreground underline underline-offset-4 hover:text-foreground"
+          variant="link"
+          size="sm"
+          className="self-start px-0 text-muted-foreground"
           onClick={onCancel}
         >
           Cancel this step
-        </button>
+        </Button>
       ) : null}
     </div>
   );

@@ -41,7 +41,7 @@ const INTENT_LABEL: Record<AgentIntent, string> = {
  * streaming text uses a pulse shimmer; labeled dividers use
  * variant="separator"; row boundaries use variant="border"; the
  * Growth Intelligence link renders a real focusable anchor via
- * render={<a href>}. Decorative icons stay aria-hidden; icon-only Markers
+ * <Marker asChild> wrapping a real <a> child. Decorative icons stay aria-hidden; icon-only Markers
  * carry an aria-label.
  */
 export function AgentThreadSteps({

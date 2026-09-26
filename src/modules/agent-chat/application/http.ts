@@ -26,7 +26,10 @@ export function agentCorrelationState(request: Request) {
   return {
     responseId: z.string().uuid().safeParse(supplied).success ? supplied! : fallback,
     parseAfterAuthorization() {
-      return supplied === null ? fallback : z.string().uuid().parse(supplied);
+      // A garbage optional header must not fail an authed request: fall
+      // back to the generated response id when the supplied value is not
+      // a valid uuid.
+      return z.string().uuid().safeParse(supplied).success ? supplied! : fallback;
     },
   };
 }
