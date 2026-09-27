@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUpRightIcon, CheckIcon, CircleAlertIcon } from "lucide-react";
+import { ArrowUpRightIcon, BrainIcon, CheckIcon, CircleAlertIcon, SearchIcon } from "lucide-react";
 
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Spinner } from "@/components/ui/spinner";
@@ -35,14 +35,17 @@ const INTENT_LABEL: Record<AgentIntent, string> = {
 };
 
 /**
- * Honest pipeline markers for one agent turn (spec section 5.2). Steps use
- * the installed Marker primitive exactly: Marker + MarkerIcon +
- * MarkerContent. The in-progress step carries role="status" with a Spinner;
- * streaming text uses a pulse shimmer; labeled dividers use
- * variant="separator"; row boundaries use variant="border"; the
- * Growth Intelligence link renders a real focusable anchor via
- * <Marker asChild> wrapping a real <a> child. Decorative icons stay aria-hidden; icon-only Markers
- * carry an aria-label.
+ * Honest pipeline markers for one agent turn (spec section 5.2). Steps are
+ * always visible inline in marker language — no collapse control, no
+ * separator divider, no border container: every row is a default-variant
+ * Marker (Marker + MarkerIcon + MarkerContent) at marker scale. The
+ * in-progress row carries role="status" with a Spinner and a "Thinking…"
+ * pulse; a second exploring row covers the routing and worker-running
+ * phases; a mode-flip row names the switch when the thread runs DeepThink;
+ * the intent shows only inside this icon-led list. The Growth Intelligence
+ * link renders a real focusable anchor via <Marker asChild> wrapping a real
+ * <a> child. Decorative icons stay aria-hidden; icon-only Markers carry an
+ * aria-label.
  */
 export function AgentThreadSteps({
   phase,
@@ -57,25 +60,45 @@ export function AgentThreadSteps({
     growthIntelligenceHref ??
     (thread ? `/organizations/${thread.organizationId}/growth-intelligence` : null);
 
+  // The run is still exploring while the route is in flight or the
+  // background worker owns the thread (status running via the checkpoint
+  // poll) — both phases share one honest row, never invented per-dimension
+  // progress.
+  const exploring = phase === "routing" || thread?.status === "running";
+
   return (
     <div className={cn("flex flex-col gap-2", className)} aria-label="Agent run steps">
-      <Marker variant="separator">
-        <MarkerContent>This run</MarkerContent>
-      </Marker>
-
       {phase === "routing" ? (
         <Marker role="status">
           <MarkerIcon>
             <Spinner aria-hidden="true" />
           </MarkerIcon>
           <MarkerContent>
-            <span className="animate-pulse">Routing your message…</span>
+            <span className="animate-pulse">Thinking…</span>
           </MarkerContent>
         </Marker>
       ) : null}
 
+      {exploring ? (
+        <Marker>
+          <MarkerIcon>
+            <SearchIcon aria-hidden="true" />
+          </MarkerIcon>
+          <MarkerContent>Exploring…</MarkerContent>
+        </Marker>
+      ) : null}
+
+      {thread && thread.mode === "deepthink" ? (
+        <Marker>
+          <MarkerIcon aria-label="Mode switched">
+            <BrainIcon aria-hidden="true" />
+          </MarkerIcon>
+          <MarkerContent>Switched to DeepThink</MarkerContent>
+        </Marker>
+      ) : null}
+
       {phase === "done" && intent ? (
-        <Marker variant="border">
+        <Marker>
           <MarkerIcon aria-label="Routed">
             <CheckIcon aria-hidden="true" />
           </MarkerIcon>
@@ -89,7 +112,7 @@ export function AgentThreadSteps({
       ) : null}
 
       {phase === "error" ? (
-        <Marker role="status" variant="border">
+        <Marker role="status">
           <MarkerIcon aria-label="Run failed">
             <CircleAlertIcon aria-hidden="true" className="text-destructive" />
           </MarkerIcon>
@@ -113,7 +136,7 @@ export function AgentThreadSteps({
       ) : null}
 
       {thread?.linkedDraftRequestId ? (
-        <Marker variant="border">
+        <Marker>
           <MarkerIcon aria-label="Draft requested">
             <CheckIcon aria-hidden="true" />
           </MarkerIcon>

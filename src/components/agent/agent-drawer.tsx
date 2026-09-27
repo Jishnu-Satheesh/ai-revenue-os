@@ -34,7 +34,6 @@ import { AgentThreadSteps, type AgentStepPhase } from "@/components/agent/agent-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -1357,7 +1356,8 @@ export function AgentDrawer({
                   liveNote={liveStream.phase === "dropped" ? AGENT_STREAM_DROP_NOTE : null}
                 />
               ) : null}
-              {send.isPending || streamActive ? (
+              {!reopen.isPending &&
+              (send.isPending || streamActive || routeResult || liveThread || sendError) ? (
                 <AgentThreadSteps
                   phase={phase}
                   intent={routeResult?.intent ?? null}
@@ -1366,25 +1366,6 @@ export function AgentDrawer({
                   error={sendError}
                   growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
                 />
-              ) : null}
-              {!send.isPending && !streamActive && (routeResult || liveThread) ? (
-                <Collapsible>
-                  <CollapsibleTrigger asChild>
-                    <Button type="button" variant="ghost" size="sm" className="self-start">
-                      Steps
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent>
-                    <AgentThreadSteps
-                      phase={phase}
-                      intent={routeResult?.intent ?? null}
-                      reasonCodes={routeResult?.reasonCodes ?? []}
-                      thread={liveThread}
-                      error={sendError}
-                      growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
-                    />
-                  </CollapsibleContent>
-                </Collapsible>
               ) : null}
               {messages
                 .filter((message) => message.questionnaireAnswers)

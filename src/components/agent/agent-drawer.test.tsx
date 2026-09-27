@@ -287,7 +287,7 @@ describe("drawer chrome", () => {
     const user = userEvent.setup();
     render(<Harness pendingPrompt={sendPrompt()} />);
 
-    expect(await screen.findByText(/routing your message/i)).toBeInTheDocument();
+    expect(await screen.findByText(/thinking/i)).toBeInTheDocument();
     fireEvent.keyDown(screen.getByLabelText("AI agent conversation"), { key: "Escape" });
 
     const strip = await screen.findByRole("button", { name: /expand conversation/i });
@@ -296,14 +296,14 @@ describe("drawer chrome", () => {
     expect(within(strip).getByLabelText("Loading")).toBeInTheDocument();
 
     await user.click(strip);
-    expect(await screen.findByText(/routing your message/i)).toBeInTheDocument();
+    expect(await screen.findByText(/thinking/i)).toBeInTheDocument();
   });
 
   it("attaches the collapsed strip in-flow with no fixed positioning", async () => {
     globalThis.fetch = mockAgentFetch({ route: "hang" }) as never;
     render(<Harness pendingPrompt={sendPrompt()} />);
 
-    expect(await screen.findByText(/routing your message/i)).toBeInTheDocument();
+    expect(await screen.findByText(/thinking/i)).toBeInTheDocument();
     fireEvent.keyDown(screen.getByLabelText("AI agent conversation"), { key: "Escape" });
 
     const strip = await screen.findByRole("button", { name: /expand conversation/i });
@@ -317,13 +317,17 @@ describe("drawer chrome", () => {
 });
 
 describe("send pipeline", () => {
-  it("shows the routing Marker with status role, spinner, and shimmer while sending", async () => {
+  it("shows the thinking Marker with status role, spinner, and shimmer while sending", async () => {
     globalThis.fetch = mockAgentFetch({ route: "hang" }) as never;
     render(<Harness pendingPrompt={sendPrompt()} />);
 
-    const marker = await screen.findByText(/routing your message/i);
+    const marker = await screen.findByText(/thinking/i);
     expect(marker.closest('[role="status"]')).not.toBeNull();
     expect(marker.className).toMatch(/animate-pulse/);
+    // The in-progress loader owns role="status" + Spinner; the exploring
+    // row beside it states the phase with no second live region.
+    expect(await screen.findByText(/exploring/i)).toBeInTheDocument();
+    expect(screen.queryByText(/this run/i)).toBeNull();
     // The send pipeline posts thread + message + route; the
     // thread-checkpoint poll adds a no-store GET alongside, so only the
     // posts are counted here.
@@ -341,12 +345,18 @@ describe("send pipeline", () => {
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     const userMessage = within(thread).getByText("What do we know?");
     expect(userMessage).toBeInTheDocument();
+    // Steps stay always visible inline: the routed intent renders in the
+    // icon-led Marker list with no Steps collapse trigger anywhere.
+    expect(within(thread).getByText("Memory answer")).toBeInTheDocument();
+    expect(within(thread).queryByRole("button", { name: /^steps$/i })).toBeNull();
+    expect(within(thread).queryByText(/this run/i)).toBeNull();
+    // The routed intent shows only inside the icon-led Marker list — the
+    // Routed-to row sits in the steps region under an icon-led Marker.
+    const routed = within(thread).getByText(/^routed to$/i);
+    expect(routed.closest('[aria-label="Agent run steps"]')).not.toBeNull();
     expect(
-      within(thread).getByRole("button", { name: /^steps$/i }),
-    ).toBeInTheDocument();
-    // The routed intent shows only inside the icon-led Marker list — no
-    // separate Routed-to badge line beside the thread.
-    expect(within(thread).queryByText(/^routed to$/i)).toBeNull();
+      routed.closest('[data-slot="marker"]')?.querySelector('[data-slot="marker-icon"]'),
+    ).not.toBeNull();
     // The user bubble follows the dark-grey scheme, never the green primary.
     const bubble = userMessage.closest("[data-slot='card']") as HTMLElement;
     expect(bubble.className).toMatch(/bg-white\/10/);
@@ -371,6 +381,11 @@ describe("send pipeline", () => {
     render(<Harness pendingPrompt={sendPrompt()} role="viewer" />);
     expect(await screen.findByRole("alert")).toHaveTextContent(/viewers cannot change/i);
     expect(screen.getByLabelText("AI agent conversation")).toBeInTheDocument();
+    // The failed turn keeps its steps inline (marker language, no trigger):
+    // the refusal copy renders in the steps list beside the alert.
+    const thread = screen.getByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getAllByText(/viewers cannot change/i).length).toBeGreaterThanOrEqual(2);
+    expect(within(thread).queryByRole("button", { name: /^steps$/i })).toBeNull();
   });
 
   it("sends no-store plus one session correlation id on every fetch", async () => {
@@ -933,12 +948,24 @@ describe("thread checkpoint polling", () => {
     };
     // Slice C M9: the poll reads the single thread row, not the list.
     globalThis.fetch = mockAgentFetch({ thread: linked }) as never;
-    const user = userEvent.setup();
     render(<Harness view="thread" threadId={THREAD.id} />);
-    // The polled thread row carries the research link: the inline Steps
-    // summary opens with no new message sent.
-    await user.click(await screen.findByRole("button", { name: /^steps$/i }));
-    expect(await screen.findByText(/linked research/i)).toBeInTheDocument();
+    // The polled thread row carries the research link: steps stay always
+    // visible inline, so the link renders with no new message sent and no
+    // Steps trigger in the DOM.
+    const link = await screen.findByRole("link", { name: /linked research/i });
+    expect(link).toBeInTheDocument();
+    expect(link.getAttribute("href")).toContain("/growth-intelligence");
+    expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
+    // A Quick thread never switched modes, so no mode-flip row appears.
+    expect(screen.queryByText(/switched to deepthink/i)).toBeNull();
+  });
+
+  it("names the mode switch for a DeepThink thread", async () => {
+    const deepthink: ThreadSummary = { ...THREAD, mode: "deepthink" };
+    globalThis.fetch = mockAgentFetch({ thread: deepthink }) as never;
+    render(<Harness view="thread" threadId={THREAD.id} />);
+    expect(await screen.findByText(/switched to deepthink/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
   });
 
   it("polls one row per tick, never the thread collection", async () => {
@@ -1339,7 +1366,9 @@ describe("fresh routing codes (F2)", () => {
     await user.click(screen.getByRole("button", { name: /submit/i }));
     expect(await screen.findByText(/answers saved: confirm_upgrade: true/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^steps$/i }));
+    // Steps stay always visible inline: the re-route codes render with no
+    // Steps trigger to open first.
+    expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
     expect(await screen.findByText(/LOW_CONFIDENCE_FALLBACK/)).toBeInTheDocument();
     expect(screen.queryByText(/MODEL_PROPOSAL_ACCEPTED/)).not.toBeInTheDocument();
   });
