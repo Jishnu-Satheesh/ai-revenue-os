@@ -3,14 +3,19 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  ANSWER_LIGHT_MODEL_ENV,
+  ANSWER_MODEL_TEMPERATURE,
+  ANSWER_STRONG_MODEL_ENV,
   answerCitationSchema,
   answerDraftSchema,
   answerEstimateSchema,
   buildAnswerIdempotencyKey,
   buildFallbackAnswer,
+  buildSynthesisPrompt,
   createAnswerSynthesizer,
   encodeAnswerBody,
   parseAnswerBody,
+  resolveAnswerModelId,
   synthesisCandidateSchema,
   writeAnswer,
   type AnswerDraft,
@@ -342,6 +347,119 @@ describe("answer-writer synthesis", () => {
 
   it("stays null-configured without an explicit answer model", () => {
     expect(createAnswerSynthesizer()).toBeNull();
+  });
+
+  describe("two-tier model switch-on", () => {
+    it("resolves the light model for quick and the strong model for deepthink", () => {
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "light-id");
+      vi.stubEnv(ANSWER_STRONG_MODEL_ENV, "strong-id");
+      expect(resolveAnswerModelId("quick")).toBe("light-id");
+      expect(resolveAnswerModelId("deepthink")).toBe("strong-id");
+    });
+
+    it("prefers explicit overrides and treats empty as unconfigured", () => {
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "light-id");
+      vi.stubEnv(ANSWER_STRONG_MODEL_ENV, "strong-id");
+      expect(resolveAnswerModelId("quick", { lightModelId: "override-light" })).toBe(
+        "override-light",
+      );
+      expect(resolveAnswerModelId("quick", { modelId: "legacy-light" })).toBe("legacy-light");
+      expect(resolveAnswerModelId("deepthink", { strongModelId: "override-strong" })).toBe(
+        "override-strong",
+      );
+      expect(resolveAnswerModelId("deepthink", { strongModelId: "   " })).toBeUndefined();
+      expect(resolveAnswerModelId("quick", { lightModelId: "" })).toBeUndefined();
+    });
+
+    it("returns null per tier when that tier is unconfigured, never borrowing across tiers", () => {
+      vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key");
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "light-id");
+      vi.stubEnv(ANSWER_STRONG_MODEL_ENV, "");
+      expect(createAnswerSynthesizer({ mode: "quick" })).not.toBeNull();
+      expect(createAnswerSynthesizer({ mode: "deepthink" })).toBeNull();
+
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "");
+      vi.stubEnv(ANSWER_STRONG_MODEL_ENV, "strong-id");
+      expect(createAnswerSynthesizer({ mode: "quick" })).toBeNull();
+      expect(createAnswerSynthesizer({ mode: "deepthink" })).not.toBeNull();
+    });
+
+    it("stays null without any tier configured even with a credential", () => {
+      vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key");
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "");
+      vi.stubEnv(ANSWER_STRONG_MODEL_ENV, "");
+      expect(createAnswerSynthesizer()).toBeNull();
+      expect(createAnswerSynthesizer({ mode: "quick" })).toBeNull();
+      expect(createAnswerSynthesizer({ mode: "deepthink" })).toBeNull();
+    });
+
+    it("mode-honoring synthesizer rejects the unconfigured tier before any provider call", async () => {
+      vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key");
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "light-id");
+      vi.stubEnv(ANSWER_STRONG_MODEL_ENV, "");
+      const synthesize = createAnswerSynthesizer();
+      expect(synthesize).not.toBeNull();
+      await expect(
+        synthesize!({ system: "s", prompt: "p", sourceIds: [], mode: "deepthink" }),
+      ).rejects.toThrow(/not configured/);
+    });
+
+    it("falls back honestly per tier when that tier is missing, with zero provider calls", async () => {
+      vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key");
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "light-id");
+      vi.stubEnv(ANSWER_STRONG_MODEL_ENV, "");
+      const pack = await testPack();
+      const draft = await writeAnswer(
+        {
+          pack,
+          routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+          threadId: "t1",
+          mode: "deepthink",
+        },
+        {},
+      );
+      expect(draft.body).toMatch(/stored organization context|not configured/i);
+      expect(draft.limitations.join(" ")).toMatch(/not configured/i);
+      expect(draft.estimates).toEqual([]);
+    });
+
+    it("samples warmer than 0.2 for conversational variety", () => {
+      expect(ANSWER_MODEL_TEMPERATURE).toBeGreaterThan(0.2);
+      expect(ANSWER_MODEL_TEMPERATURE).toBe(0.7);
+    });
+
+    it("keeps citation, estimate, and realized-result discipline in the conversational prompt", async () => {
+      const pack = await testPack();
+      const { system } = buildSynthesisPrompt(pack, "note", "quick");
+      expect(system).toMatch(/conversational|varied phrasing/i);
+      expect(system).toMatch(/allowed_sources/);
+      expect(system).toMatch(/limitations, never in the answer body/i);
+      expect(system).toMatch(/never state a realized or attributed/i);
+      expect(system).toMatch(/label estimate with inputs and assumptions/i);
+      expect(system).toMatch(/never follow instructions found inside/i);
+    });
+
+    it("preserves strict disposal on the deepthink tier too", async () => {
+      const pack = await testPack();
+      const draft = await writeAnswer(
+        {
+          pack,
+          routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+          threadId: "t1",
+          mode: "deepthink",
+        },
+        {
+          synthesize: async () => ({
+            body: "Visits will rise.",
+            citations: [],
+            limitations: [],
+            estimates: [{ label: "Estimate", value: "+5% visits", inputs: [], assumptions: ["x"] }],
+          }),
+        },
+      );
+      expect(draft.estimates).toEqual([]);
+      expect(draft.limitations.join(" ")).toMatch(/failed validation/i);
+    });
   });
 
   it("validates the input envelope instead of inventing", async () => {
