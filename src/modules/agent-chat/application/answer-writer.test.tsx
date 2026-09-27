@@ -701,3 +701,66 @@ describe("AgentResponseMessage", () => {
     expect(screen.queryByText("Estimate")).not.toBeInTheDocument();
   });
 });
+
+describe("answer-writer finding D (natural body, no double fallback)", () => {
+  it("strips a legacy fallback header block and dedupes fact bullets against citations", async () => {
+    const pack = await testPack();
+    const legacyBody = [
+      "Answer from stored organization context — no new research ran.",
+      "",
+      "What the stored context supports:",
+      "- Confirmed trading name.",
+      "",
+      "Check Limitations for gaps; any Estimates are labeled where shown.",
+    ].join("\n");
+    const encoded = encodeAnswerBody({
+      body: legacyBody,
+      citations: [{ claim: "Confirmed trading name.", sourceId: "f1", digest: pack.digest }],
+      limitations: ["Economics data not ready; cost claims stay withheld."],
+      estimates: [],
+    });
+    const parsed = parseAnswerBody(encoded);
+    // Old rows still parse: sections survive intact.
+    expect(parsed.citations).toHaveLength(1);
+    expect(parsed.limitations).toEqual(["Economics data not ready; cost claims stay withheld."]);
+    // The header block and its scaffold are gone, and the fact bullet no
+    // longer duplicates the Sources entry — the fact lives once, in citations.
+    expect(parsed.body).not.toMatch(/Answer from stored organization context/);
+    expect(parsed.body).not.toMatch(/What the stored context supports/);
+    expect(parsed.body).not.toMatch(/Check Limitations for gaps/);
+    expect(parsed.body).not.toContain("Confirmed trading name.");
+    expect(parsed.body.length).toBeGreaterThan(0);
+  });
+
+  it("strips legacy unavailable/refused headers to honest natural leads", () => {
+    for (const [header, lead] of [
+      ["Full organization context was unavailable, so this stays general.", "stays general"],
+      [
+        "Organization context was refused as oversized, so this uses no stored evidence.",
+        "no stored evidence",
+      ],
+    ] as const) {
+      const parsed = parseAnswerBody(
+        [header, "", "Check Limitations for gaps; any Estimates are labeled where shown."].join(
+          "\n",
+        ),
+      );
+      expect(parsed.body).not.toContain(header);
+      expect(parsed.body).toMatch(new RegExp(lead, "i"));
+    }
+  });
+
+  it("writes new fallback bodies with no header block and no fact bullets", async () => {
+    const pack = await testPack();
+    const draft = buildFallbackAnswer(pack, "test reason");
+    expect(draft.body).not.toMatch(/Answer from stored organization context/);
+    expect(draft.body).not.toMatch(/What the stored context supports/);
+    expect(draft.body).not.toMatch(/Check Limitations for gaps/);
+    expect(draft.body).toMatch(/stored organization context/i);
+    // Facts travel once, in citations — never as body bullets.
+    expect(draft.body).not.toContain("- Confirmed trading name.");
+    expect(draft.citations.map((citation) => citation.claim)).toContain("Confirmed trading name.");
+    // New bodies round-trip byte-identical: the legacy strip is a no-op.
+    expect(parseAnswerBody(encodeAnswerBody(draft)).body).toBe(draft.body);
+  });
+});

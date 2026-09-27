@@ -114,6 +114,7 @@ Built per message by deterministic readers only; digested into the router note a
 - Drawer streams immediately: Marker steps (queued → claimed → searching (per-dimension honest status) → grading → synthesis → done/blocked), synthesis preview with citations, hyperlink Marker to the GI research tab (project/report/request id). Polling via TanStack Query on leased rows; answers render poll-rendered from durable assistant rows (no token-streaming endpoint — see ADR 0071). No live provider call from the page.
 - Replay safety: identical re-click returns kept rows (`replayed: true`); terminal rows never reopen; lost dispatch recovered by sweeper reading the due index + cooldown, never worker memory.
 - Agreement basis: `tiny-fish-agreement.txt` ACTIVE (v1.3.0, 2026-09-20→2040-09-19, all six uses granted, $0 unlimited, training opt-out CONFIRMED). Contract doc `docs/provider-contracts/market-research-v1.md` still says blocked — stale; implementation plan must update it to the TinyFish lane (Brave stays ephemeral-preview only, Exa out).
+- Answer rendering: the durable body renders as natural paragraphs with numbered `[n]` citation superscripts (hover/focus Tooltip carries claim + source); the Sources list sits outside and below the synthesis card, Limitations compact beneath it, Estimates labeled with inputs + assumptions on the same surface; legacy stored-context header blocks are stripped at the parse boundary so reopened history renders once.
 
 ### 10.2 Keep monitoring (`watch`)
 

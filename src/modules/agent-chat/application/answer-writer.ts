@@ -361,6 +361,10 @@ export function buildSynthesisPrompt(
  * names every gap, estimates nothing, researches nothing. Used when no
  * synthesizer is configured, when the model fails or returns an invalid
  * candidate, and when the pack itself is missing or refused.
+ *
+ * The body stays a short natural paragraph (finding D): cited facts travel
+ * once, in `citations` (rendered as the numbered Sources list), never as
+ * an embedded header + bullet block in the body text.
  */
 export function buildFallbackAnswer(pack: ContextPack | null, reason: string): AnswerDraft {
   const limitations: string[] = [];
@@ -382,26 +386,20 @@ export function buildFallbackAnswer(pack: ContextPack | null, reason: string): A
   if (pack && !pack.refused && facts.length === 0) {
     limitations.push("No confirmed business facts were available; claims stay general.");
   }
-  const header =
+  const body =
     pack === null
-      ? "Full organization context was unavailable, so this stays general."
+      ? "I couldn't reach your full organization context, so this stays general."
       : pack.refused
-        ? "Organization context was refused as oversized, so this uses no stored evidence."
-        : "Answer from stored organization context — no new research ran.";
-  const lines = [header, ""];
-  if (facts.length > 0) {
-    lines.push("What the stored context supports:");
-    for (const fact of facts) lines.push(`- ${fact.statement}`);
-    lines.push("");
-  }
-  lines.push("Check Limitations for gaps; any Estimates are labeled where shown.");
-  const body = lines.join("\n").slice(0, FALLBACK_BODY_BUDGET);
+        ? "Your organization context was too large to use here, so this answer uses no stored evidence."
+        : facts.length > 0
+          ? "Here's what I found in your stored organization context — no new research ran for this one."
+          : "Your stored organization context had no confirmed facts for this one — no new research ran.";
   const citations: AnswerDraft["citations"] =
     pack === null || pack.refused
       ? []
       : facts.map((fact) => ({ claim: fact.statement, sourceId: fact.id, digest: pack.digest }));
   return answerDraftSchema.parse({
-    body,
+    body: body.slice(0, FALLBACK_BODY_BUDGET),
     citations,
     limitations: limitations.slice(0, 60),
     estimates: [],
@@ -602,9 +600,31 @@ export function encodeAnswerBody(draft: AnswerDraft): string {
 }
 
 /**
+ * Legacy fallback scaffolding (pre-finding-D `buildFallbackAnswer` bodies):
+ * a templated header block plus an embedded fact-bullet list that duplicates
+ * the encoded Sources section. Old durable rows still carry this shape, so
+ * the parser strips it — the facts live once, in citations.
+ */
+const LEGACY_FALLBACK_LEADS: Readonly<Record<string, string>> = {
+  "Answer from stored organization context — no new research ran.":
+    "Here's what your stored context supports — no new research ran for this answer.",
+  "Full organization context was unavailable, so this stays general.":
+    "I couldn't reach your full organization context, so this stays general.",
+  "Organization context was refused as oversized, so this uses no stored evidence.":
+    "Your organization context was too large to use here, so this answer uses no stored evidence.",
+};
+const LEGACY_SCAFFOLD_LINES: ReadonlySet<string> = new Set([
+  "What the stored context supports:",
+  "Check Limitations for gaps; any Estimates are labeled where shown.",
+]);
+
+/**
  * Best-effort inverse of `encodeAnswerBody` for poll-rendered reads and
  * history reopen. A plain body with no sections parses as body-only;
- * malformed section lines are skipped, never thrown on.
+ * malformed section lines are skipped, never thrown on. Legacy fallback
+ * rows (header block + fact bullets duplicating Sources) are cleaned so
+ * the answer renders once, as natural paragraphs — with an honest natural
+ * lead standing in for the removed header.
  */
 export function parseAnswerBody(body: string): {
   body: string;
@@ -614,9 +634,14 @@ export function parseAnswerBody(body: string): {
 } {
   const text = typeof body === "string" ? body : "";
   const [head, ...rest] = text.split(BODY_DIVIDER);
-  const main = (head ?? "").trim();
+  const rawMain = (head ?? "").trim();
   if (rest.length === 0) {
-    return { body: main, citations: [], limitations: [], estimates: [] };
+    return {
+      body: stripLegacyFallbackBody(rawMain, new Set()),
+      citations: [],
+      limitations: [],
+      estimates: [],
+    };
   }
   const citations: AnswerDraft["citations"] = [];
   for (const line of sectionLines(text, "Sources")) {
@@ -649,5 +674,44 @@ export function parseAnswerBody(body: string): {
       estimates.push({ label: "Estimate", value, inputs, assumptions });
     }
   }
-  return { body: main, citations, limitations, estimates };
+  return {
+    body: stripLegacyFallbackBody(rawMain, new Set(citations.map((citation) => citation.claim))),
+    citations,
+    limitations,
+    estimates,
+  };
+}
+
+/**
+ * Removes pre-finding-D fallback scaffolding from a parsed body head: the
+ * templated header line (replaced by an honest natural lead so the answer
+ * never renders empty), the scaffold lines, and `- ` bullets that repeat a
+ * parsed citation claim verbatim (the Sources list carries them). Bodies
+ * without a legacy header pass through untouched — model prose is never
+ * rewritten.
+ */
+function stripLegacyFallbackBody(main: string, claims: ReadonlySet<string>): string {
+  const lines = main.split("\n");
+  const hasLegacyHeader = lines.some((line) => LEGACY_FALLBACK_LEADS[line.trim()] !== undefined);
+  if (!hasLegacyHeader) return main;
+  const kept: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const lead = LEGACY_FALLBACK_LEADS[trimmed];
+    if (lead !== undefined) {
+      kept.push(lead);
+      continue;
+    }
+    if (LEGACY_SCAFFOLD_LINES.has(trimmed)) continue;
+    if (trimmed.startsWith("- ")) {
+      // Drop only bullets that repeat a parsed citation claim: without a
+      // Sources section the bullets are the only copy and must stay.
+      if (claims.has(trimmed.slice(2).trim())) continue;
+    }
+    kept.push(line);
+  }
+  return kept
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }

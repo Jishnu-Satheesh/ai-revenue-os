@@ -14,6 +14,8 @@ import {
   type PendingPrompt,
 } from "@/components/agent/agent-drawer";
 import { AgentQuestionnaireCard } from "@/components/agent/agent-questionnaire-card";
+import { AgentResponseMessage } from "@/components/agent/agent-response-message";
+import { encodeAnswerBody } from "@/modules/agent-chat/application/answer-writer";
 import type { QuestionnaireSpec } from "@/domain/agent-router/contracts";
 import type {
   ThreadMessageView,
@@ -1702,5 +1704,113 @@ describe("live answer stream", () => {
     expect(within(reopened).getByText("Durable answer with citations.")).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(streamCalls()).toHaveLength(1);
+  });
+});
+
+describe("answer rendering (finding D)", () => {
+  const DIGEST = "abc123abc123";
+
+  function assistantMessage(body: string): ThreadMessageView {
+    return {
+      id: "99999999-9999-4999-8999-999999999999",
+      threadId: THREAD.id,
+      role: "assistant",
+      body,
+      questionnaireAnswers: null,
+      markerReceipts: null,
+      citations: null,
+      createdAt: "2026-09-25T10:00:03.000Z",
+    };
+  }
+
+  function naturalEncoded(): string {
+    return encodeAnswerBody({
+      body: "First paragraph names weekday demand.\n\nSecond paragraph carries the detail.",
+      citations: [
+        { claim: "Confirmed trading name.", sourceId: "f1", digest: DIGEST },
+        { claim: "Weekday covers held steady.", sourceId: "ledger", digest: DIGEST },
+      ],
+      limitations: ["Economics data not ready."],
+      estimates: [],
+    });
+  }
+
+  function legacyEncoded(): string {
+    return encodeAnswerBody({
+      body: [
+        "Answer from stored organization context — no new research ran.",
+        "",
+        "What the stored context supports:",
+        "- Confirmed trading name.",
+        "",
+        "Check Limitations for gaps; any Estimates are labeled where shown.",
+      ].join("\n"),
+      citations: [{ claim: "Confirmed trading name.", sourceId: "f1", digest: DIGEST }],
+      limitations: ["Economics data not ready."],
+      estimates: [],
+    });
+  }
+
+  it("renders a legacy fallback row once, with no header block", () => {
+    const { container } = render(
+      <AgentResponseMessage message={assistantMessage(legacyEncoded())} />,
+    );
+    // No stored-context fallback header block, no scaffold, no repeated fact.
+    expect(screen.queryByText(/answer from stored organization context/i)).toBeNull();
+    expect(screen.queryByText(/what the stored context supports/i)).toBeNull();
+    expect(screen.getAllByText(/confirmed trading name/i)).toHaveLength(1);
+    // One natural paragraph in the synthesis card — the body is not doubled.
+    const card = container.querySelector('[data-slot="card"]') as HTMLElement;
+    expect(card.querySelectorAll("p")).toHaveLength(1);
+  });
+
+  it("renders the body as natural paragraphs", () => {
+    const { container } = render(
+      <AgentResponseMessage message={assistantMessage(naturalEncoded())} />,
+    );
+    const card = container.querySelector('[data-slot="card"]') as HTMLElement;
+    const paragraphs = card.querySelectorAll("p");
+    expect(paragraphs).toHaveLength(2);
+    expect(paragraphs[0]).toHaveTextContent("First paragraph names weekday demand.");
+    expect(paragraphs[1]).toHaveTextContent("Second paragraph carries the detail.");
+  });
+
+  it("numbers citations with tooltip claim + source on hover", async () => {
+    const user = userEvent.setup();
+    render(<AgentResponseMessage message={assistantMessage(naturalEncoded())} />);
+    const first = screen.getByRole("button", { name: /source 1: confirmed trading name/i });
+    const second = screen.getByRole("button", { name: /source 2: weekday covers/i });
+    expect(first).toHaveTextContent("[1]");
+    expect(second).toHaveTextContent("[2]");
+
+    await user.hover(first);
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Confirmed trading name.");
+    expect(tooltip).toHaveTextContent("f1");
+  });
+
+  it("opens the source tooltip by keyboard focus", async () => {
+    render(<AgentResponseMessage message={assistantMessage(naturalEncoded())} />);
+    fireEvent.focus(screen.getByRole("button", { name: /source 1: confirmed trading name/i }));
+    const tooltip = await screen.findByRole("tooltip");
+    expect(tooltip).toHaveTextContent("Confirmed trading name.");
+    expect(tooltip).toHaveTextContent("f1");
+  });
+
+  it("keeps Sources outside and below the synthesis card, Limitations beneath", () => {
+    const { container } = render(
+      <AgentResponseMessage message={assistantMessage(naturalEncoded())} />,
+    );
+    const card = container.querySelector('[data-slot="card"]') as HTMLElement;
+    const sources = screen.getByRole("list", { name: "Answer sources" });
+    const limitations = screen.getByRole("list", { name: "Answer limitations" });
+    // Outside the box, never inside it.
+    expect(card.contains(sources)).toBe(false);
+    expect(card.contains(limitations)).toBe(false);
+    // Below the box, in order: synthesis, then sources, then limitations.
+    expect(card.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(
+      sources.compareDocumentPosition(limitations) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
