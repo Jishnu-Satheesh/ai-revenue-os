@@ -10,14 +10,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import {
   buildCampaignMarkerReceipts,
   campaignBundleLink,
-  type AdviseCampaignSeams,
   type CampaignEstimate,
   type CampaignEvidenceSnapshot,
   type IdeaDraftOutcome,
 } from "@/modules/agent-chat/application/campaign-advise";
 import type { ThreadSummary } from "@/modules/agent-chat/infrastructure/thread-repository";
 
-/** Opportunity binding the draft request admits. Absent in the drawer today. */
+/** Opportunity binding the draft request admits. Bound server-side; kept for callers. */
 export type CampaignAdviceOpportunity = { id: string; version: number };
 
 /** Full advice context. Absent in the drawer today — nothing is invented to fill it. */
@@ -35,21 +34,9 @@ export type CampaignAdviceContext = {
 
 export type AgentCampaignAdviceProps = {
   organizationId: string;
-  actorId?: string;
-  threadId: string | null;
   thread: ThreadSummary | null;
   canDraft: boolean;
   isViewer: boolean;
-  /** Retained for call-site stability; the form-first flow is removed (see below). */
-  opportunity?: CampaignAdviceOpportunity | null;
-  /** Retained for call-site stability; the form-first flow is removed (see below). */
-  advice?: CampaignAdviceContext | null;
-  /**
-   * Retained for call-site stability; ignored. Drafts are requested
-   * server-side on pick through the answers route — the client-side draft
-   * path (and its seams) is removed.
-   */
-  seams?: AdviseCampaignSeams;
   /**
    * Pick-to-draft envelope from the answers route: draft id plus inline
    * approve action plus Studio hyperlink in one payload — or the retained
@@ -66,13 +53,24 @@ type RecommendationState = "idle" | "saved" | "planned" | "snoozed" | "dismissed
  * There is no form here: the pick happens on the ideas questionnaire card,
  * and the answers route calls the draft seam immediately in the same POST.
  * This card renders the result — the picked idea, the draft receipt with
- * its exact-version binding, the inline review-and-approve button, and the
- * Studio hyperlink — or the pre-filled `/campaigns/new` brief with named
- * reason codes when the pick was ineligible. Draft creation is never
- * approval, never publish, never spend; approval binds the exact version
- * in review, and material edits need a new request. The secondary button
- * saves a manual outside-platform recommendation with plan/snooze/dismiss
- * semantics that never auto-completes.
+ * its exact-version binding, the inline approve action, and the Studio
+ * hyperlink — or the pre-filled `/campaigns/new` brief with named reason
+ * codes when the pick was ineligible. Draft creation is never approval,
+ * never publish, never spend.
+ *
+ * Dual surfaces, honestly gated: the Studio link tracks the request from
+ * pick time (list, then the campaign page once the worker links it). The
+ * inline approve action stays disabled with pending copy until the thread
+ * links the campaign — there is no Bundle version to approve before the
+ * worker builds it. Once linked, it lands directly on the version-pinned
+ * campaign review carrying the fingerprint
+ * (`?adviceFingerprint=<16hex>`), and approval binds that exact version
+ * in review; material edits need a new request. No review surface
+ * consumes the fingerprint param yet, so the binding is enforced by the
+ * pending gate plus the displayed version, with the param carried for
+ * audit and forward compatibility. The secondary button saves a manual
+ * outside-platform recommendation with plan/snooze/dismiss semantics that
+ * never auto-completes.
  */
 export function AgentCampaignAdvice({
   organizationId,
@@ -84,13 +82,27 @@ export function AgentCampaignAdvice({
   const [recommendation, setRecommendation] = useState<RecommendationState>("idle");
 
   const gated = !canDraft || isViewer;
-  const draftRequestId =
-    ideaDraft?.outcome === "draft_requested" ? ideaDraft.draftRequestId : null;
+  const draft = ideaDraft?.outcome === "draft_requested" ? ideaDraft : null;
+  const draftRequestId = draft?.draftRequestId ?? null;
   const priorDraftRequestId = draftRequestId ?? thread?.linkedDraftRequestId ?? null;
-  const markers =
-    ideaDraft?.outcome === "draft_requested"
-      ? ideaDraft.markers
-      : buildCampaignMarkerReceipts("requested");
+  const markers = draft ? draft.markers : buildCampaignMarkerReceipts("requested");
+  // Version-pinned review: only constructible once the worker links the
+  // campaign — the current version there is the draft's version. Before
+  // that the approve action stays pending (never a dead link).
+  const reviewHref =
+    draft && thread?.linkedCampaignId
+      ? `/organizations/${organizationId}/campaigns/${thread.linkedCampaignId}?adviceFingerprint=${draft.adviceFingerprint}`
+      : null;
+  const studioHref = draft
+    ? thread?.linkedCampaignId
+      ? `/organizations/${organizationId}/campaigns/${thread.linkedCampaignId}`
+      : draft.studioLink.href
+    : null;
+  const approveCopy = gated
+    ? "Needs the campaign.create grant — enforcement stays server-side."
+    : reviewHref
+      ? "Opens the version-pinned review. Approval binds the version shown; edits need a new request."
+      : "Draft in progress — review opens once the version exists.";
 
   return (
     <TooltipProvider>
@@ -110,49 +122,48 @@ export function AgentCampaignAdvice({
           </div>
         ) : null}
 
-        {ideaDraft?.outcome === "draft_requested" ? (
+        {draft ? (
           <div className="flex flex-col gap-2 rounded-lg border border-border p-2">
-            {ideaDraft.replayed ? (
+            {draft.replayed ? (
               <p className="text-xs text-muted-foreground">
                 Already requested — showing the kept draft. Nothing was created twice.
               </p>
             ) : null}
             <p className="text-xs text-muted-foreground">
-              Version {ideaDraft.adviceFingerprint.slice(0, 8)} — approval binds this exact
-              version; edits need a new request. Draft creation is never approval, never publish,
-              never spend.
+              Version {draft.adviceFingerprint.slice(0, 8)} — approval binds this exact version;
+              edits need a new request. Draft creation is never approval, never publish, never
+              spend.
             </p>
+            {!reviewHref && !gated ? (
+              <p className="text-xs text-muted-foreground">
+                Draft in progress — review opens once the version exists.
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span className="inline-flex">
                     <Button
                       type="button"
-                      disabled={gated}
-                      asChild={!gated}
-                      title={
-                        gated
-                          ? "Needs the campaign.create grant — enforcement stays server-side."
-                          : "Opens review for this exact version. Approval binds the version shown; edits need a new request."
-                      }
+                      disabled={gated || !reviewHref}
+                      asChild={!gated && !!reviewHref}
+                      title={approveCopy}
                     >
-                      {gated ? (
+                      {gated || !reviewHref ? (
                         <span>Review and approve this version</span>
                       ) : (
-                        <a href={ideaDraft.approveAction.href}>Review and approve this version</a>
+                        <a href={reviewHref}>Review and approve this version</a>
                       )}
                     </Button>
                   </span>
                 </TooltipTrigger>
-                <TooltipContent>
-                  {gated
-                    ? "Needs the campaign.create grant — enforcement stays server-side."
-                    : "Opens review for this exact version. Approval binds the version shown; edits need a new request."}
-                </TooltipContent>
+                <TooltipContent>{approveCopy}</TooltipContent>
               </Tooltip>
-              <Button type="button" variant="outline" asChild>
-                <a href={ideaDraft.studioLink.href}>Open in Studio</a>
-              </Button>
+              {studioHref ? (
+                <Button type="button" variant="outline" asChild>
+                  <a href={studioHref}>Open in Studio</a>
+                </Button>
+              ) : null}
             </div>
           </div>
         ) : null}
@@ -176,12 +187,18 @@ export function AgentCampaignAdvice({
             ))}
             {(() => {
               const link =
-                ideaDraft?.outcome === "draft_requested"
-                  ? ideaDraft.studioLink
-                  : campaignBundleLink(organizationId, {
-                      draftRequestId: priorDraftRequestId,
-                      ...(thread?.linkedCampaignId ? { campaignId: thread.linkedCampaignId } : {}),
-                    });
+                draft && thread?.linkedCampaignId
+                  ? {
+                      href: `/organizations/${organizationId}/campaigns/${thread.linkedCampaignId}`,
+                    }
+                  : draft
+                    ? draft.studioLink
+                    : campaignBundleLink(organizationId, {
+                        draftRequestId: priorDraftRequestId,
+                        ...(thread?.linkedCampaignId
+                          ? { campaignId: thread.linkedCampaignId }
+                          : {}),
+                      });
               return (
                 <Marker asChild>
                   <a href={link.href}>

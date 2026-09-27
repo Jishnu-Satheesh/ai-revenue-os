@@ -974,6 +974,7 @@ describe("opportunity-bound handoff", () => {
     draftRequestId: DRAFT_REQUEST,
     replayed: false,
     idempotencyKey: `agent_thread:${THREAD.id}:abc123abc123abc1`,
+    opportunityId: OPPORTUNITY.id,
     idea: {
       value: "idea-b",
       title: "Weekend family table",
@@ -985,7 +986,9 @@ describe("opportunity-bound handoff", () => {
       kind: "campaign_idea_approve",
       draftRequestId: DRAFT_REQUEST,
       adviceFingerprint: FINGERPRINT,
-      href: `/organizations/${ORGANIZATION}/campaigns`,
+      // No reviewable version at pick time: pending until the thread
+      // links the campaign.
+      href: null,
     },
     studioLink: {
       href: `/organizations/${ORGANIZATION}/campaigns`,
@@ -1020,7 +1023,7 @@ describe("opportunity-bound handoff", () => {
     return JSON.parse(String(init.body)) as Record<string, unknown>;
   }
 
-  it("sends the bound opportunity with the pick and renders both approval surfaces", async () => {
+  it("sends the pick without steering and renders the pending receipt", async () => {
     globalThis.fetch = mockAgentFetch({
       route: ideasRoute,
       answers: {
@@ -1047,22 +1050,66 @@ describe("opportunity-bound handoff", () => {
     );
     await pickRecommendedIdea();
 
-    // The re-route moves on, but the draft receipt stays mounted: inline
-    // approve action plus the Studio hyperlink, one payload.
-    const approve = await screen.findByRole("link", {
-      name: /review and approve this version/i,
-    });
-    expect(approve.getAttribute("href")).toBe(`/organizations/${ORGANIZATION}/campaigns`);
+    // The re-route moves on, but the draft receipt stays mounted. No
+    // reviewable version yet: the approve action is pending (never a dead
+    // link) while the Studio tracking link stays available.
+    expect(await screen.findByText(/draft in progress/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /review and approve this version/i }),
+    ).toBeDisabled();
     expect(screen.getByRole("link", { name: /open in studio/i })).toHaveAttribute(
       "href",
       `/organizations/${ORGANIZATION}/campaigns`,
     );
     expect(screen.getByText(/approval binds this exact version/i)).toBeInTheDocument();
-    // The bound opportunity rode the pick so the route could draft immediately.
-    expect(answersCall()).toMatchObject({
-      answers: { idea: "idea-b" },
-      opportunity: OPPORTUNITY,
+    // The pick travels with no opportunity block: binding resolves
+    // server-side, so no caller steers execution toward a proposal.
+    expect(answersCall()).toMatchObject({ answers: { idea: "idea-b" } });
+    expect(answersCall()).not.toHaveProperty("opportunity");
+  });
+
+  it("pins the approve action to the version once the thread links the campaign", async () => {
+    const campaignId = "55555555-5555-4555-8555-555555555555";
+    globalThis.fetch = mockAgentFetch({
+      route: ideasRoute,
+      thread: { ...THREAD, linkedDraftRequestId: DRAFT_REQUEST, linkedCampaignId: campaignId },
+      answers: {
+        message: IDEAS_MESSAGE,
+        replayed: false,
+        answers: { idea: "idea-b" },
+        resumeKey: CAMPAIGN_IDEAS.resumeKey,
+        intent: "answer_memory",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: null,
+        ideaDraft,
+        correlationId: "c6",
+      },
+    }) as never;
+    render(
+      <Harness
+        pendingPrompt={sendPrompt()}
+        role="operator"
+        permissions={["campaign.create"]}
+        actorId={ACTOR}
+        opportunity={OPPORTUNITY}
+      />,
+    );
+    await pickRecommendedIdea();
+
+    // The worker linked the campaign: the inline action lands directly on
+    // the version-pinned review carrying the fingerprint, distinct from
+    // the plain Studio link.
+    const approve = await screen.findByRole("link", {
+      name: /review and approve this version/i,
     });
+    expect(approve.getAttribute("href")).toBe(
+      `/organizations/${ORGANIZATION}/campaigns/${campaignId}?adviceFingerprint=${FINGERPRINT}`,
+    );
+    expect(screen.getByRole("link", { name: /open in studio/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/campaigns/${campaignId}`,
+    );
   });
 
   it("renders the retained brief fallback when the pick resolves ineligible", async () => {

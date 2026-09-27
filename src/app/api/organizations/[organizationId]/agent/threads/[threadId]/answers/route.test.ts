@@ -354,6 +354,14 @@ describe("agent thread answers route", () => {
       latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
     });
     mocks.propose.mockResolvedValue({ intent: "answer_memory", confidence: "high", missing: [] });
+    // No eligible proposals: the pick resolves to the brief fallback.
+    mocks.getOrganizationContext.mockResolvedValue({
+      ...operatorContext(),
+      supabase: {
+        rpc: vi.fn(async () => ({ data: null, error: null })),
+        from: () => ({ select: () => ({ eq: async () => ({ data: [], error: null }) }) }),
+      },
+    });
     const accepted = await POST(
       request(
         `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
@@ -451,6 +459,26 @@ describe("agent thread answers route", () => {
       },
       error: null,
     }));
+    // One eligible proposal: the route binds it server-side (no
+    // client-carried opportunity — no caller steers the binding).
+    const from = vi.fn(async () => ({
+      data: [
+        {
+          id: "33333333-3333-4333-8333-333333333333",
+          organization_id: ORGANIZATION,
+          version: 2,
+          status: "proposed",
+          action_key: "campaign.governed_draft_v1",
+          expires_at: "2026-12-31T00:00:00.000Z",
+          assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
+        },
+      ],
+      error: null,
+    }));
+    const supabase = {
+      rpc,
+      from: () => ({ select: () => ({ eq: from }) }),
+    };
     const setThreadLinks = vi.fn(async (input: { draftRequestId?: string }) => ({
       threadId: THREAD,
       projectId: null,
@@ -458,7 +486,7 @@ describe("agent thread answers route", () => {
       draftRequestId: input.draftRequestId ?? null,
       campaignId: null,
     }));
-    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase: { rpc } });
+    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase });
     mocks.createRepo.mockReturnValue({
       getThread: vi.fn(async () => THREAD_ROW),
       appendMessageKeyed: vi.fn(async () => ({
@@ -482,7 +510,6 @@ describe("agent thread answers route", () => {
             resumeKey: ideasSpec.resumeKey,
             spec: ideasSpec,
             answers: { idea: "idea-b" },
-            opportunity: { id: "33333333-3333-4333-8333-333333333333", version: 2 },
           }),
         },
       ),
@@ -496,19 +523,23 @@ describe("agent thread answers route", () => {
     expect(body.ideaDraft.outcome).toBe("draft_requested");
     expect(body.ideaDraft.draftRequestId).toBe("44444444-4444-4444-8444-444444444444");
     expect(body.ideaDraft.replayed).toBe(false);
+    expect(body.ideaDraft.opportunityId).toBe("33333333-3333-4333-8333-333333333333");
     expect(body.ideaDraft.idea).toMatchObject({ value: "idea-b", recommended: true });
     expect(body.ideaDraft.adviceFingerprint).toMatch(/^[0-9a-f]{16}$/);
     expect(body.ideaDraft.approveAction.kind).toBe("campaign_idea_approve");
-    expect(body.ideaDraft.approveAction.href).toContain(
-      `/organizations/${ORGANIZATION}/campaigns`,
-    );
+    // No reviewable version at pick time: the worker has not built it yet,
+    // so the action carries no href — the component keeps it pending until
+    // the thread links the campaign, never a dead link.
+    expect(body.ideaDraft.approveAction.href).toBeNull();
     expect(body.ideaDraft.studioLink.href).toContain(`/organizations/${ORGANIZATION}/campaigns`);
     expect(body.ideaDraft.markers.map((marker: { stage: string }) => marker.stage)).toEqual([
       "requested",
       "claimed",
       "draft-ready",
     ]);
-    // The draft seam ran immediately with the idea as objective/audience.
+    // The draft seam ran immediately: the idea as objective/audience, the
+    // opportunity's stored assertions echoed verbatim (the RPC admits only
+    // pre-asserted keys).
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith(
       "request_campaign_draft_from_opportunity",
@@ -518,6 +549,7 @@ describe("agent thread answers route", () => {
         p_opportunity_version: 2,
         p_objective: "Weekend family table",
         p_audience: "Saturday set menu for families.",
+        p_assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
       }),
     );
     // Thread → request link keeps the audit chain.
@@ -526,7 +558,7 @@ describe("agent thread answers route", () => {
     );
   });
 
-  it("briefs (no draft) when the pick carries no bound opportunity", async () => {
+  it("briefs (no draft) when no eligible proposal exists", async () => {
     const ideasSpec = {
       kind: "campaign_ideas",
       title: "Campaign ideas",
@@ -561,8 +593,13 @@ describe("agent thread answers route", () => {
       ],
     };
     const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const from = vi.fn(async () => ({ data: [], error: null }));
+    const supabase = {
+      rpc,
+      from: () => ({ select: () => ({ eq: from }) }),
+    };
     const setThreadLinks = vi.fn(async () => ({}));
-    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase: { rpc } });
+    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase });
     mocks.createRepo.mockReturnValue({
       getThread: vi.fn(async () => THREAD_ROW),
       appendMessageKeyed: vi.fn(async () => ({
@@ -599,6 +636,102 @@ describe("agent thread answers route", () => {
     expect(body.ideaDraft.reasonCodes).toContain("ADVICE_NO_OPPORTUNITY");
     expect(body.ideaDraft.briefUrl).toContain("/campaigns/new");
     expect(body.ideaDraft.draftRequestId).toBeUndefined();
+    expect(rpc).not.toHaveBeenCalled();
+    expect(setThreadLinks).not.toHaveBeenCalled();
+  });
+
+  it("briefs naming ambiguity when several proposals are eligible", async () => {
+    const ideasSpec = {
+      kind: "campaign_ideas",
+      title: "Campaign ideas",
+      resumeKey: "router:campaign_advice:overview:abcdef1234567890",
+      items: [
+        {
+          key: "idea",
+          label: "Which idea should become a draft?",
+          kind: "single_select",
+          required: true,
+          options: [
+            {
+              value: "idea-a",
+              label: "Lunch rush bundle",
+              description: "Noon combo for nearby offices.",
+              recommended: false,
+            },
+            {
+              value: "idea-b",
+              label: "Weekend family table",
+              description: "Saturday set menu for families.",
+              recommended: true,
+            },
+            {
+              value: "idea-c",
+              label: "Late-night dessert",
+              description: "After-9pm dessert counter.",
+              recommended: false,
+            },
+          ],
+        },
+      ],
+    };
+    const eligible = (id: string) => ({
+      id,
+      organization_id: ORGANIZATION,
+      version: 2,
+      status: "proposed",
+      action_key: "campaign.governed_draft_v1",
+      expires_at: "2026-12-31T00:00:00.000Z",
+      assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
+    });
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const from = vi.fn(async () => ({
+      data: [
+        eligible("33333333-3333-4333-8333-333333333333"),
+        eligible("55555555-5555-4555-8555-555555555555"),
+      ],
+      error: null,
+    }));
+    const supabase = {
+      rpc,
+      from: () => ({ select: () => ({ eq: from }) }),
+    };
+    const setThreadLinks = vi.fn(async () => ({}));
+    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase });
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      setThreadLinks,
+    });
+    mocks.propose.mockResolvedValue({ intent: "answer_memory", confidence: "high", missing: [] });
+
+    const response = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "i-1234567890123460",
+            resumeKey: ideasSpec.resumeKey,
+            spec: ideasSpec,
+            answers: { idea: "idea-b" },
+          }),
+        },
+      ),
+      params,
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    // Choice needs a human: the brief names the ambiguity, nothing executes.
+    expect(body.ideaDraft.outcome).toBe("brief_prefilled");
+    expect(body.ideaDraft.reasonCodes).toContain("ADVICE_OPPORTUNITY_AMBIGUOUS");
+    expect(body.ideaDraft.briefUrl).toContain("/campaigns/new");
     expect(rpc).not.toHaveBeenCalled();
     expect(setThreadLinks).not.toHaveBeenCalled();
   });
@@ -652,7 +785,6 @@ describe("agent thread answers route", () => {
             resumeKey: ideasSpec.resumeKey,
             spec: ideasSpec,
             answers: { idea: "idea-b" },
-            opportunity: { id: "33333333-3333-4333-8333-333333333333", version: 2 },
           }),
         },
       ),

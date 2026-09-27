@@ -11,6 +11,8 @@ const ORGANIZATION = "00000000-0000-4000-8000-000000000000";
 const THREAD_ID = "22222222-2222-4222-8222-222222222222";
 const DRAFT_REQUEST = "44444444-4444-4444-8444-444444444444";
 const FINGERPRINT = "0123456789abcdef";
+const OPPORTUNITY_ID = "33333333-3333-4333-8333-333333333333";
+const CAMPAIGN_ID = "55555555-5555-4555-8555-555555555555";
 
 const THREAD: ThreadSummary = {
   id: THREAD_ID,
@@ -39,13 +41,16 @@ function draftResult(replayed = false): IdeaDraftOutcome {
     draftRequestId: DRAFT_REQUEST,
     replayed,
     idempotencyKey: `agent_thread:${THREAD_ID}:abc123abc123abc1`,
+    opportunityId: OPPORTUNITY_ID,
     idea: { ...IDEA },
     adviceFingerprint: FINGERPRINT,
     approveAction: {
       kind: "campaign_idea_approve",
       draftRequestId: DRAFT_REQUEST,
       adviceFingerprint: FINGERPRINT,
-      href: `/organizations/${ORGANIZATION}/campaigns`,
+      // No reviewable version at pick time: the component keeps the
+      // action pending until the thread links the campaign.
+      href: null,
     },
     studioLink: {
       href: `/organizations/${ORGANIZATION}/campaigns`,
@@ -79,7 +84,6 @@ describe("campaign advice card (ideas-first)", () => {
     render(
       <AgentCampaignAdvice
         organizationId={ORGANIZATION}
-        threadId={THREAD_ID}
         thread={THREAD}
         canDraft
         isViewer={false}
@@ -95,7 +99,6 @@ describe("campaign advice card (ideas-first)", () => {
     render(
       <AgentCampaignAdvice
         organizationId={ORGANIZATION}
-        threadId={THREAD_ID}
         thread={THREAD}
         canDraft={false}
         isViewer
@@ -112,8 +115,7 @@ describe("campaign advice card (ideas-first)", () => {
     render(
       <AgentCampaignAdvice
         organizationId={ORGANIZATION}
-        threadId={THREAD_ID}
-        thread={THREAD}
+        thread={{ ...THREAD, linkedDraftRequestId: DRAFT_REQUEST, linkedCampaignId: CAMPAIGN_ID }}
         canDraft
         isViewer={false}
         ideaDraft={draftResult()}
@@ -126,16 +128,48 @@ describe("campaign advice card (ideas-first)", () => {
     expect(screen.getAllByText("Recommended")).toHaveLength(1);
     // Exact-version binding is named on the surface.
     expect(screen.getByText(/approval binds this exact version/i)).toBeInTheDocument();
-    // Inline approve action plus the Studio hyperlink, one payload.
+    // Version-pinned review carries the fingerprint; the Studio link stays
+    // the plain campaign page. Two distinct hrefs, never a duplicate link.
     const approve = screen.getByRole("link", { name: /review and approve this version/i });
-    expect(approve.getAttribute("href")).toBe(`/organizations/${ORGANIZATION}/campaigns`);
+    expect(approve.getAttribute("href")).toBe(
+      `/organizations/${ORGANIZATION}/campaigns/${CAMPAIGN_ID}?adviceFingerprint=${FINGERPRINT}`,
+    );
     const studio = screen.getByRole("link", { name: /open in studio/i });
-    expect(studio.getAttribute("href")).toBe(`/organizations/${ORGANIZATION}/campaigns`);
+    expect(studio.getAttribute("href")).toBe(
+      `/organizations/${ORGANIZATION}/campaigns/${CAMPAIGN_ID}`,
+    );
+    expect(approve.getAttribute("href")).not.toBe(studio.getAttribute("href"));
     // Markers track requested → claimed → draft-ready with the Bundle link.
     expect(screen.getByText("Requested")).toBeInTheDocument();
     expect(screen.getByText("Claimed")).toBeInTheDocument();
     expect(screen.getByText("Draft ready")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /campaign bundle review/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/campaigns/${CAMPAIGN_ID}`,
+    );
+  });
+
+  it("keeps the approve action pending until the version exists — never a dead link", () => {
+    render(
+      <AgentCampaignAdvice
+        organizationId={ORGANIZATION}
+        thread={THREAD}
+        canDraft
+        isViewer={false}
+        ideaDraft={draftResult()}
+      />,
+    );
+
+    // The worker has not linked the campaign yet: no reviewable version,
+    // so the action is disabled with honest pending copy.
+    const approve = screen.getByRole("button", { name: /review and approve this version/i });
+    expect(approve).toBeDisabled();
+    expect(screen.getByText(/draft in progress/i)).toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /review and approve this version/i }),
+    ).toBeNull();
+    // The Studio tracking link stays available from pick time.
+    expect(screen.getByRole("link", { name: /open in studio/i })).toHaveAttribute(
       "href",
       `/organizations/${ORGANIZATION}/campaigns`,
     );
@@ -145,7 +179,6 @@ describe("campaign advice card (ideas-first)", () => {
     render(
       <AgentCampaignAdvice
         organizationId={ORGANIZATION}
-        threadId={THREAD_ID}
         thread={THREAD}
         canDraft
         isViewer={false}
@@ -159,7 +192,6 @@ describe("campaign advice card (ideas-first)", () => {
     render(
       <AgentCampaignAdvice
         organizationId={ORGANIZATION}
-        threadId={THREAD_ID}
         thread={THREAD}
         canDraft
         isViewer={false}
@@ -180,7 +212,6 @@ describe("campaign advice card (ideas-first)", () => {
     render(
       <AgentCampaignAdvice
         organizationId={ORGANIZATION}
-        threadId={THREAD_ID}
         thread={{ ...THREAD, linkedDraftRequestId: DRAFT_REQUEST }}
         canDraft
         isViewer={false}
@@ -196,7 +227,6 @@ describe("campaign advice card (ideas-first)", () => {
     render(
       <AgentCampaignAdvice
         organizationId={ORGANIZATION}
-        threadId={THREAD_ID}
         thread={THREAD}
         canDraft
         isViewer={false}

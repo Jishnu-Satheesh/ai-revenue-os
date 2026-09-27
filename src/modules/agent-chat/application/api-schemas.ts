@@ -50,10 +50,9 @@ export type RouteThreadBody = z.infer<typeof routeThreadBodySchema>;
  * The spec is echoed so the server validates against what the drawer
  * rendered; unknown answer keys are ignored by the validator.
  *
- * Streaming-synthesis Task 6: a `campaign_ideas` pick may carry the bound
- * opportunity (id plus exact version) so the answers route can call the
- * draft seam immediately. Absent means no draft path — the pick resolves
- * to the pre-filled brief, never an invented opportunity.
+ * Streaming-synthesis Task 6: a `campaign_ideas` pick carries no
+ * opportunity — the answers route resolves the one eligible proposal
+ * server-side, so no caller can steer execution toward an unchosen one.
  */
 export const submitAnswersBodySchema = z
   .object({
@@ -64,13 +63,6 @@ export const submitAnswersBodySchema = z
       .regex(/^[a-z0-9:_\-.]{1,160}$/),
     spec: z.unknown(),
     answers: z.record(z.string(), z.unknown()),
-    opportunity: z
-      .object({
-        id: z.string().uuid(),
-        version: z.number().int().positive(),
-      })
-      .strict()
-      .optional(),
   })
   .strict();
 export type SubmitAnswersBody = z.infer<typeof submitAnswersBodySchema>;

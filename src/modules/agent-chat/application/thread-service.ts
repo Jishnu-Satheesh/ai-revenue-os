@@ -472,6 +472,10 @@ async function rehydrateKeptAnswer(
  * other turn keeps the router's questionnaire untouched. Returns null
  * (keeping the direct route) when no pack is bound or the card is
  * unavailable — advice stays free, execution stays fenced at the pick.
+ *
+ * Fix round: when the latest message IS the just-answered ideas card, the
+ * pick's draft receipt (not a fresh card) is the UI — regeneration is
+ * skipped so one pick costs one strong-tier call, not two.
  */
 async function questionnaireForRoute(
   args: {
@@ -482,9 +486,13 @@ async function questionnaireForRoute(
     routingNote: string;
     page: string;
     contextDigest: string;
+    latestBody: string;
   },
 ): Promise<QuestionnaireSpec | null> {
   if (args.intent !== "campaign_advice" || args.questionnaire !== null || !args.pack) {
+    return args.questionnaire;
+  }
+  if (args.latestBody.startsWith("[answers campaign_ideas]")) {
     return args.questionnaire;
   }
   const ideas = await generateCampaignIdeas(
@@ -774,6 +782,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
           routingNote: output.routingNote,
           page,
           contextDigest,
+          latestBody: message.body ?? "",
         }),
         routingNote: output.routingNote,
         thread,

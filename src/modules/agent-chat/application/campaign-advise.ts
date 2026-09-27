@@ -152,6 +152,7 @@ export type AdviseCampaignInput = z.infer<typeof adviseCampaignInputSchema>;
 export const CAMPAIGN_ADVICE_REASON_CODES = [
   "CAMPAIGN_REQUIRES_CREATE",
   "ADVICE_NO_OPPORTUNITY",
+  "ADVICE_OPPORTUNITY_AMBIGUOUS",
   "EVIDENCE_NOT_FREEZABLE",
   "PROFILE_UNBOUND",
   "POLICY_BLOCKED",
@@ -833,6 +834,78 @@ export const campaignIdeaPickSchema = z
 
 export type CampaignIdeaPick = z.infer<typeof campaignIdeaPickSchema>;
 
+// ---------------------------------------------------------------------------
+// Draft-eligible opportunity resolution (fix round: production happy path)
+// ---------------------------------------------------------------------------
+
+/**
+ * A stored opportunity row as the pick path needs it: exact id + version
+ * for the draft admission, plus its stored assertions. The draft RPC
+ * admits only requested assertion keys the opportunity already asserts
+ * ("a new assertion at request time is a different proposal"), so the
+ * pick echoes these verbatim — the pick itself is recorded in the
+ * objective/audience columns, never as a new assertion key.
+ */
+const draftOpportunityRowSchema = z.object({
+  id: z.string().uuid(),
+  version: z.number().int().positive(),
+  status: z.string(),
+  action_key: z.string(),
+  expires_at: z.string(),
+  assertions: z.array(assertionSchema).min(1).max(50),
+});
+
+export type DraftOpportunityBinding = {
+  id: string;
+  version: number;
+  assertions: Array<{ key: string; expectedOutcome: string }>;
+};
+
+export type SelectDraftOpportunityResult =
+  | { outcome: "bound"; opportunity: DraftOpportunityBinding }
+  | { outcome: "none" }
+  | { outcome: "ambiguous"; count: number };
+
+/**
+ * Deterministic server-side binding for the pick path. Eligible means the
+ * draft RPC would admit it: the governed-draft action key, `proposed`
+ * status, unexpired, with usable stored assertions. Exactly one eligible
+ * row binds (no choice is invented); zero resolves to the brief fallback;
+ * more than one resolves to the ambiguous brief — executing against an
+ * unchosen proposal is exactly what the fence prevents. Malformed rows
+ * are skipped, never papered over: they are the Decision Engine's to fix.
+ */
+export function selectDraftOpportunity(
+  rows: unknown,
+  now: Date = new Date(),
+): SelectDraftOpportunityResult {
+  const candidates: DraftOpportunityBinding[] = [];
+  if (Array.isArray(rows)) {
+    for (const row of rows) {
+      const parsed = draftOpportunityRowSchema.safeParse(row);
+      if (!parsed.success) continue;
+      if (parsed.data.action_key !== CAMPAIGN_DRAFT_ACTION_KEY) continue;
+      if (parsed.data.status !== "proposed") continue;
+      const expiresAt = Date.parse(parsed.data.expires_at);
+      if (Number.isNaN(expiresAt) || expiresAt <= now.getTime()) continue;
+      candidates.push({
+        id: parsed.data.id,
+        version: parsed.data.version,
+        assertions: parsed.data.assertions.map((assertion) => ({
+          key: assertion.key,
+          expectedOutcome: assertion.expectedOutcome,
+        })),
+      });
+    }
+  }
+  if (candidates.length === 0) return { outcome: "none" };
+  const bound = candidates[0];
+  if (!bound || candidates.length > 1) {
+    return { outcome: "ambiguous", count: candidates.length };
+  }
+  return { outcome: "bound", opportunity: bound };
+}
+
 const requestDraftFromIdeaPickInputSchema = z
   .object({
     organizationId: z.string().trim().min(1).max(200),
@@ -844,22 +917,32 @@ const requestDraftFromIdeaPickInputSchema = z
       .regex(/^[a-z0-9:_\-.]{1,160}$/),
     /** Caller-derived grants, never client claims — the route recomputes these from the role. */
     permissions: z.array(z.string().trim().min(1).max(120)).default([]),
-    /** Opportunity binding the draft request admits. Null picks have no draft path. */
+    /**
+     * Server-resolved binding (the answers route resolves it through
+     * `selectDraftOpportunity` — never client-carried, so no caller can
+     * steer execution toward an unchosen proposal). Null picks have no
+     * draft path.
+     */
     opportunity: z
       .object({
         id: z.string().trim().min(1).max(200),
         version: z.number().int().positive(),
+        assertions: z.array(assertionSchema).min(1).max(50),
       })
       .strict()
       .nullable()
       .default(null),
+    /** Set when more than one eligible opportunity exists: choice needs a human. */
+    opportunityAmbiguous: z.boolean().default(false),
     idea: campaignIdeaPickSchema,
     correlationId: z.string().trim().min(1).max(200).optional(),
     existingLinks: threadLinkPointerSchema.optional(),
   })
   .strict();
 
-export type RequestDraftFromIdeaPickInput = z.infer<typeof requestDraftFromIdeaPickInputSchema>;
+export type RequestDraftFromIdeaPickInput = z.input<
+  typeof requestDraftFromIdeaPickInputSchema
+>;
 
 export type IdeaDraftSeams = {
   drafts?: AdviseCampaignSeams["drafts"];
@@ -871,8 +954,14 @@ export type IdeaDraftApproveAction = {
   draftRequestId: string;
   /** Exact version the review binds: material edits need a new request. */
   adviceFingerprint: string;
-  /** Existing review surface — no deep-link params are invented. */
-  href: string;
+  /**
+   * Null until a reviewable version exists: at pick time the worker has
+   * not built the Bundle version yet, so there is nothing to approve.
+   * The component resolves the version-pinned review URL (campaign page
+   * plus the fingerprint) once the thread links the campaign, and keeps
+   * the action disabled with pending copy until then.
+   */
+  href: string | null;
 };
 
 export type IdeaDraftOutcome =
@@ -881,6 +970,8 @@ export type IdeaDraftOutcome =
       draftRequestId: string;
       replayed: boolean;
       idempotencyKey: string;
+      /** The opportunity the draft was admitted against. */
+      opportunityId: string;
       /** The picked idea, echoed for result rendering. */
       idea: CampaignIdeaPick;
       /** Exact-version binding over the picked idea (approval stays in review). */
@@ -907,12 +998,15 @@ export type IdeaDraftOutcome =
  * no form round-trip, no dispatch indirection — under a deterministic
  * thread-linked idempotency key, so retries replay instead of double-posting.
  * The idea title becomes the objective and its short description the
- * audience; the pick itself travels as the single assertion. Approval binds
- * the exact fingerprinted version in Studio/Telegram review (there is no
- * approve seam in this lane); material edits invalidate via
- * `isMaterialAdviceChange`. Ineligible picks (no `campaign.create` grant, no
- * bound opportunity) resolve to the pre-filled brief with named reason codes
- * and never touch the seams — the retained fallback.
+ * audience; the opportunity's stored assertions echo verbatim (the draft RPC
+ * admits only pre-asserted keys — a new key at request time is a different
+ * proposal, so the pick is recorded in objective/audience, never as a new
+ * assertion). Approval binds the exact fingerprinted version in
+ * Studio/Telegram review (there is no approve seam in this lane); material
+ * edits invalidate via `isMaterialAdviceChange`. Ineligible picks (no
+ * `campaign.create` grant, no eligible opportunity, or several to choose
+ * between) resolve to the pre-filled brief with named reason codes and never
+ * touch the seams — the retained fallback.
  */
 export async function requestDraftFromIdeaPick(
   input: RequestDraftFromIdeaPickInput,
@@ -925,6 +1019,8 @@ export async function requestDraftFromIdeaPick(
   const reasonCodes: CampaignAdviceReasonCode[] = [];
   if (!parsed.permissions.includes("campaign.create")) {
     reasonCodes.push("CAMPAIGN_REQUIRES_CREATE");
+  } else if (parsed.opportunityAmbiguous) {
+    reasonCodes.push("ADVICE_OPPORTUNITY_AMBIGUOUS");
   } else if (!parsed.opportunity) {
     reasonCodes.push("ADVICE_NO_OPPORTUNITY");
   }
@@ -951,18 +1047,25 @@ export async function requestDraftFromIdeaPick(
     throw new DomainError("VALIDATION_ERROR", "Please check the submitted fields.");
   }
 
-  // Exact-version binding: the fingerprint covers the picked idea plus the
-  // card it came from (resumeKey binds page + digest), so the same pick on
-  // the same card replays while any material change mints a new request.
+  // Exact-version binding: the fingerprint covers the picked idea
+  // (title, description, AND value — two options could share words but
+  // never the same value), the card it came from (resumeKey binds page +
+  // digest), and the admitted opportunity — so the same pick on the same
+  // card against the same proposal replays, while any material change
+  // mints a new request.
   const adviceFingerprint = fingerprintAdviceDraft({
     objective: idea.title,
     audience: idea.description,
-    assertions: [{ key: "idea", expectedOutcome: idea.value }],
-    evidenceDigest: parsed.resumeKey,
+    assertions: opportunity.assertions,
+    evidenceDigest: `${parsed.resumeKey}:${opportunity.id}:${idea.value}`,
   });
   const idempotencyKey = buildThreadIdempotencyKey(parsed.threadId, adviceFingerprint);
   const correlationId =
     parsed.correlationId ?? `${parsed.organizationId}:${parsed.threadId}:${adviceFingerprint}`;
+  const echoedAssertions = opportunity.assertions.map((assertion) => ({
+    key: assertion.key,
+    expectedOutcome: assertion.expectedOutcome,
+  }));
 
   if (!seams.drafts || !seams.links) {
     // No durable seams wired (unit scope): report the admitted plan
@@ -973,13 +1076,14 @@ export async function requestDraftFromIdeaPick(
       draftRequestId: "pending",
       replayed: false,
       idempotencyKey,
+      opportunityId: opportunity.id,
       idea,
       adviceFingerprint,
       approveAction: {
         kind: "campaign_idea_approve",
         draftRequestId: "pending",
         adviceFingerprint,
-        href: bundleLink.href,
+        href: null,
       },
       studioLink: bundleLink,
       markers: buildCampaignMarkerReceipts("requested"),
@@ -995,7 +1099,7 @@ export async function requestDraftFromIdeaPick(
     actionKey: CAMPAIGN_DRAFT_ACTION_KEY,
     objective: idea.title,
     audience: idea.description,
-    assertions: [{ key: "idea", expectedOutcome: idea.value }],
+    assertions: echoedAssertions,
     idempotencyKey,
     correlationId,
   });
@@ -1021,13 +1125,14 @@ export async function requestDraftFromIdeaPick(
     draftRequestId: admitted.requestId,
     replayed,
     idempotencyKey,
+    opportunityId: opportunity.id,
     idea,
     adviceFingerprint,
     approveAction: {
       kind: "campaign_idea_approve",
       draftRequestId: admitted.requestId,
       adviceFingerprint,
-      href: studioLink.href,
+      href: null,
     },
     studioLink,
     markers: buildCampaignMarkerReceipts(replayed ? "claimed" : "requested"),

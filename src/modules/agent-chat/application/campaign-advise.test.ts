@@ -15,6 +15,7 @@ import {
   isMaterialAdviceChange,
   labelCampaignEstimate,
   requestDraftFromIdeaPick,
+  selectDraftOpportunity,
 } from "@/modules/agent-chat/application/campaign-advise";
 import { buildAgentContextPack } from "@/modules/agent-chat/application/context-pack";
 
@@ -378,10 +379,24 @@ function ideaPickInput() {
     threadId: THREAD,
     resumeKey: "router:campaign_advice:overview:abcdef1234567890",
     permissions: ["campaign.create"],
-    opportunity: { id: OPPORTUNITY, version: 2 },
+    opportunity: {
+      id: OPPORTUNITY,
+      version: 2,
+      assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
+    },
     idea: { ...IDEA_PICK },
   };
 }
+
+const OPPORTUNITY_ROW = {
+  id: OPPORTUNITY,
+  organization_id: ORGANIZATION,
+  version: 2,
+  status: "proposed",
+  action_key: "campaign.governed_draft_v1",
+  expires_at: "2026-12-31T00:00:00.000Z",
+  assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
+};
 
 describe("campaign ideas producer (Task 6 binding)", () => {
   it("emits exactly one idea item with exactly three options, one recommended", () => {
@@ -562,7 +577,11 @@ describe("pick to instant draft (Task 6 inversion)", () => {
     expect(out.reasonCodes).toEqual([]);
     // The picked idea travels echoed for result rendering.
     expect(out.idea).toEqual(IDEA_PICK);
-    // The draft admission carries the idea as objective/audience plus the pick.
+    expect(out.opportunityId).toBe(OPPORTUNITY);
+    // The draft admission carries the idea as objective/audience and echoes
+    // the opportunity's stored assertions verbatim — the RPC admits only
+    // pre-asserted keys, so the pick is recorded in objective/audience,
+    // never as a new assertion.
     expect(seam.drafts.requestDraft).toHaveBeenCalledTimes(1);
     expect(seam.drafts.requestDraft).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -573,7 +592,7 @@ describe("pick to instant draft (Task 6 inversion)", () => {
         actionKey: "campaign.governed_draft_v1",
         objective: "Weekend family table",
         audience: "Saturday set menu for families.",
-        assertions: [{ key: "idea", expectedOutcome: "idea-b" }],
+        assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
         idempotencyKey: out.idempotencyKey,
       }),
     );
@@ -585,8 +604,11 @@ describe("pick to instant draft (Task 6 inversion)", () => {
       kind: "campaign_idea_approve",
       draftRequestId: DRAFT_REQUEST,
       adviceFingerprint: out.adviceFingerprint,
+      // No reviewable version at pick time: the worker has not built it
+      // yet, so the component keeps the action pending until the thread
+      // links the campaign — never a dead link.
+      href: null,
     });
-    expect(out.approveAction.href).toContain("/campaigns");
     expect(out.studioLink.href).toContain("/campaigns");
     expect(out.studioLink.ref.draftRequestId).toBe(DRAFT_REQUEST);
     expect(out.markers.map((marker) => marker.stage)).toEqual([
@@ -604,7 +626,7 @@ describe("pick to instant draft (Task 6 inversion)", () => {
     });
   });
 
-  it("keys idempotency on the picked idea, so retries replay and new picks mint", async () => {
+  it("keys idempotency on the picked idea and opportunity, so retries replay and changes mint", async () => {
     const seam = seams();
     const first = await requestDraftFromIdeaPick(ideaPickInput(), seam);
     const retry = await requestDraftFromIdeaPick(ideaPickInput(), seam);
@@ -613,12 +635,28 @@ describe("pick to instant draft (Task 6 inversion)", () => {
     }
     expect(retry.idempotencyKey).toBe(first.idempotencyKey);
     expect(retry.adviceFingerprint).toBe(first.adviceFingerprint);
-    const other = await requestDraftFromIdeaPick(
+    const otherPick = await requestDraftFromIdeaPick(
       { ...ideaPickInput(), idea: { ...IDEA_PICK, value: "idea-a" } },
       seam,
     );
-    if (other.outcome !== "draft_requested") throw new Error("expected draft_requested");
-    expect(other.idempotencyKey).not.toBe(first.idempotencyKey);
+    if (otherPick.outcome !== "draft_requested") throw new Error("expected draft_requested");
+    expect(otherPick.idempotencyKey).not.toBe(first.idempotencyKey);
+    const otherOpportunity = await requestDraftFromIdeaPick(
+      {
+        ...ideaPickInput(),
+        opportunity: {
+          id: "55555555-5555-4555-8555-555555555555",
+          version: 2,
+          assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
+        },
+      },
+      seam,
+    );
+    if (otherOpportunity.outcome !== "draft_requested") {
+      throw new Error("expected draft_requested");
+    }
+    expect(otherOpportunity.idempotencyKey).not.toBe(first.idempotencyKey);
+    expect(otherOpportunity.opportunityId).toBe("55555555-5555-4555-8555-555555555555");
   });
 
   it("replays the kept request without admitting twice", async () => {
@@ -692,6 +730,21 @@ describe("pick to instant draft (Task 6 inversion)", () => {
     expect(seam.drafts.requestDraft).not.toHaveBeenCalled();
   });
 
+  it("resolves to the brief naming ambiguity when several proposals are eligible", async () => {
+    const seam = seams();
+    const out = await requestDraftFromIdeaPick(
+      { ...ideaPickInput(), opportunity: null, opportunityAmbiguous: true },
+      seam,
+    );
+
+    expect(out.outcome).toBe("brief_prefilled");
+    if (out.outcome !== "brief_prefilled") throw new Error("expected brief_prefilled");
+    expect(out.reasonCodes).toContain("ADVICE_OPPORTUNITY_AMBIGUOUS");
+    expect(out.briefUrl).toContain("/campaigns/new");
+    expect(seam.drafts.requestDraft).not.toHaveBeenCalled();
+    expect(seam.links.setThreadLinks).not.toHaveBeenCalled();
+  });
+
   it("reports the admitted plan with no seams wired, creating nothing", async () => {
     const out = await requestDraftFromIdeaPick(ideaPickInput());
 
@@ -699,6 +752,60 @@ describe("pick to instant draft (Task 6 inversion)", () => {
     if (out.outcome !== "draft_requested") throw new Error("expected draft_requested");
     expect(out.draftRequestId).toBe("pending");
     expect(out.idempotencyKey).toMatch(new RegExp(`^agent_thread:${THREAD}:`));
+    expect(out.opportunityId).toBe(OPPORTUNITY);
     expect(out.approveAction.draftRequestId).toBe("pending");
+    expect(out.approveAction.href).toBeNull();
+  });
+});
+
+describe("draft-opportunity resolution (fix round: production binding)", () => {
+  const NOW = new Date("2026-09-27T00:00:00.000Z");
+
+  it("binds exactly one eligible proposal", () => {
+    const out = selectDraftOpportunity([OPPORTUNITY_ROW], NOW);
+
+    expect(out.outcome).toBe("bound");
+    if (out.outcome !== "bound") throw new Error("expected bound");
+    expect(out.opportunity).toEqual({
+      id: OPPORTUNITY,
+      version: 2,
+      assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
+    });
+  });
+
+  it("resolves none when nothing is eligible", () => {
+    expect(selectDraftOpportunity([], NOW)).toEqual({ outcome: "none" });
+    // Wrong action, resolved status, expired, and malformed rows never bind.
+    expect(
+      selectDraftOpportunity(
+        [
+          { ...OPPORTUNITY_ROW, action_key: "watch.something_else" },
+          { ...OPPORTUNITY_ROW, status: "draft_requested" },
+          { ...OPPORTUNITY_ROW, expires_at: "2026-09-01T00:00:00.000Z" },
+          { ...OPPORTUNITY_ROW, assertions: [] },
+          { ...OPPORTUNITY_ROW, assertions: [{ key: "demand_window" }] },
+          "not-a-row",
+          null,
+        ],
+        NOW,
+      ),
+    ).toEqual({ outcome: "none" });
+  });
+
+  it("resolves ambiguous when several proposals are eligible — choice needs a human", () => {
+    const second = {
+      ...OPPORTUNITY_ROW,
+      id: "55555555-5555-4555-8555-555555555555",
+    };
+    const out = selectDraftOpportunity([OPPORTUNITY_ROW, second], NOW);
+
+    expect(out).toEqual({ outcome: "ambiguous", count: 2 });
+    // Ineligible rows do not inflate the count: one usable proposal still binds.
+    expect(
+      selectDraftOpportunity(
+        [OPPORTUNITY_ROW, { ...second, status: "approved" }, { ...second, action_key: "other" }],
+        NOW,
+      ).outcome,
+    ).toBe("bound");
   });
 });

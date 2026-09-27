@@ -14,6 +14,7 @@ import {
 } from "@/modules/agent-chat/application/thread-service";
 import {
   requestDraftFromIdeaPick,
+  selectDraftOpportunity,
   type IdeaDraftOutcome,
 } from "@/modules/agent-chat/application/campaign-advise";
 import { createCampaignDraftService } from "@/modules/decisions/application/campaign-draft-service";
@@ -50,6 +51,44 @@ import {
  * already persisted and replay-safe, so a retry with the same keys
  * replays the answers and resumes the draft — nothing half-created).
  */
+
+/**
+ * Server-side draft-opportunity resolution for the ideas pick (fix round:
+ * production happy path). Reads the org's opportunities through the
+ * caller's session (RLS owns isolation — the same narrow structural port
+ * the dispatch route's opportunity resolver uses, not the typed client)
+ * and binds through `selectDraftOpportunity`: exactly one eligible
+ * proposal, or the brief fallback. A read failure propagates like a draft
+ * failure: the answers row is already persisted and replay-safe, so a
+ * same-key retry replays the answers and re-resolves.
+ */
+async function resolveDraftOpportunity(input: {
+  supabase: unknown;
+  organizationId: string;
+  now: Date;
+}): Promise<ReturnType<typeof selectDraftOpportunity>> {
+  const reader = input.supabase as unknown as {
+    from(table: "opportunities"): {
+      select(columns: string): {
+        eq(column: string, value: string): Promise<{
+          data: Array<Record<string, unknown>> | null;
+          error: unknown;
+        }>;
+      };
+    };
+  };
+  const { data, error } = await reader
+    .from("opportunities")
+    .select("id,organization_id,version,status,action_key,expires_at,assertions")
+    .eq("organization_id", input.organizationId);
+  if (error) {
+    throw new DomainError(
+      "INTEGRATION_ERROR",
+      "Your draft request could not be recorded. Try again in a moment.",
+    );
+  }
+  return selectDraftOpportunity(data ?? [], input.now);
+}
 
 export async function POST(
   request: Request,
@@ -118,8 +157,9 @@ export async function POST(
 
     // Pick to instant draft: the ideas pick drafts in this same POST.
     // Grants come from the server-owned role (never client claims); the
-    // opportunity rides the optional body block (absent means the brief
-    // fallback, never an invented binding).
+    // opportunity resolves server-side through `selectDraftOpportunity`
+    // (exactly one eligible proposal binds — no caller can steer execution
+    // toward an unchosen proposal, and zero/several resolve to the brief).
     let ideaDraft: IdeaDraftOutcome | null = null;
     if (spec.kind === "campaign_ideas") {
       const pickedValue = answers["idea"];
@@ -136,6 +176,11 @@ export async function POST(
         organizationId,
         threadId: rawParams.threadId,
       });
+      const resolution = await resolveDraftOpportunity({
+        supabase: context.supabase,
+        organizationId,
+        now: new Date(),
+      });
       ideaDraft = await requestDraftFromIdeaPick(
         {
           organizationId,
@@ -143,7 +188,15 @@ export async function POST(
           threadId: rawParams.threadId,
           resumeKey: body.resumeKey,
           permissions: permissionsForRole(context.membership.role),
-          opportunity: body.opportunity ?? null,
+          opportunity:
+            resolution.outcome === "bound"
+              ? {
+                  id: resolution.opportunity.id,
+                  version: resolution.opportunity.version,
+                  assertions: resolution.opportunity.assertions,
+                }
+              : null,
+          opportunityAmbiguous: resolution.outcome === "ambiguous",
           idea: {
             value: pickedOption.value,
             title: pickedOption.label,

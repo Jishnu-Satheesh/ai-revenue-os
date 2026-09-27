@@ -96,13 +96,13 @@ export type AgentDrawerProps = {
   mode: ThreadMode;
   role: RouterRole;
   permissions: string[];
-  /** Actor id for the eligible campaign-draft path. Absent → brief path. */
+  /** Retained for the shell contract; the pick path resolves the opportunity server-side. */
   actorId?: string;
-  /** Opportunity binding the draft request. Absent → brief path. */
+  /** Retained for the shell contract; the pick path resolves the opportunity server-side. */
   opportunity?: CampaignAdviceOpportunity | null;
-  /** Full advice context. Absent → brief path, nothing invented. */
+  /** Retained for the shell contract; the form-first flow is removed. */
   advice?: CampaignAdviceContext | null;
-  /** Injected campaign seams for tests; defaults post to the live routes. */
+  /** Retained for the shell contract; drafts are requested server-side on pick. */
   campaignSeams?: AdviseCampaignSeams;
   /**
    * Whether the watch schedule-update path is available. True: the
@@ -601,10 +601,6 @@ export function AgentDrawer({
   mode,
   role,
   permissions,
-  actorId,
-  opportunity = null,
-  advice = null,
-  campaignSeams,
   watchUpdateAvailable = true,
   view,
   onViewChange,
@@ -929,12 +925,6 @@ export function AgentDrawer({
           resumeKey: vars.spec.resumeKey,
           spec: vars.spec,
           answers: vars.answers,
-          // Ideas-first binding (Task 6): the bound opportunity rides the
-          // pick so the answers route can draft immediately. Absent means
-          // the brief fallback — never an invented binding.
-          ...(vars.spec.kind === "campaign_ideas" && opportunity
-            ? { opportunity: { id: opportunity.id, version: opportunity.version } }
-            : {}),
         },
         correlationId,
       )) as {
@@ -1500,24 +1490,20 @@ export function AgentDrawer({
                   {/*
                     Direct-path asymmetry (Slice C decision: DOCUMENTED, not
                     aligned). This inline block renders the ideas-first
-                    advice card from the pick-to-draft envelope, while the
-                    dispatch route's campaign lane admits through
-                    `adviseCampaign` from its seam — and only the dispatch
-                    seam emits `agent_thread.draft_requested`. Both paths
-                    stay governed; only the audit event differs. The card
-                    stays mounted while the envelope is set so the draft
-                    receipt survives the answers re-route.
+                    advice card from the pick-to-draft envelope (the answers
+                    route drafts server-side on pick), while the dispatch
+                    route's campaign lane admits through `adviseCampaign`
+                    from its seam — and only the dispatch seam emits
+                    `agent_thread.draft_requested`. Both paths stay governed;
+                    only the audit event differs. The card stays mounted
+                    while the envelope is set so the draft receipt survives
+                    the answers re-route.
                   */}
                   <AgentCampaignAdvice
                     organizationId={organizationId}
-                    actorId={actorId}
-                    threadId={threadId}
                     thread={liveThread}
                     canDraft={canDraft}
                     isViewer={isViewer}
-                    opportunity={opportunity}
-                    advice={advice}
-                    seams={campaignSeams}
                     ideaDraft={ideaDraft}
                   />
                 </>

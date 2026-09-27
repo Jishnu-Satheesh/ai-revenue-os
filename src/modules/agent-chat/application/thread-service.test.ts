@@ -521,4 +521,32 @@ describe("campaign ideas-first routing (Task 6)", () => {
     expect(out.questionnaire).toBeNull();
     expect(synthesizeIdeas).not.toHaveBeenCalled();
   });
+
+  it("skips regeneration when the latest message is the just-answered ideas card", async () => {
+    const synthesizeIdeas = ideasSynthesizer();
+    const service = createThreadService({
+      threads: mockThreads({
+        latestUserMessage: vi.fn(async () => ({
+          ...MESSAGE,
+          body: "[answers campaign_ideas]\nidea: idea-b",
+        })),
+      }),
+      proposeRouter: async () => ({ intent: "campaign_advice", confidence: "high", missing: [] }),
+      contextReaders: readers,
+      synthesizeIdeas,
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+
+    // The pick's draft receipt (not a fresh card) is the UI now: one pick
+    // costs one strong-tier call, not two.
+    expect(out.intent).toBe("campaign_advice");
+    expect(out.questionnaire).toBeNull();
+    expect(synthesizeIdeas).not.toHaveBeenCalled();
+  });
 });
