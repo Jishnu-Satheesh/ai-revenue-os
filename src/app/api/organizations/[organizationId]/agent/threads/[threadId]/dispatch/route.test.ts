@@ -426,6 +426,20 @@ describe("agent dispatch endpoint gates", () => {
     );
     expect(response.status).toBe(400);
   });
+
+  it("rejects a client-claimed attestation: only the server mints confirmations (B3)", async () => {
+    const response = await POST(
+      request({
+        idempotencyKey: "dispatch-token-00000000000013",
+        action: "research_once",
+        confirmation: { confirmed: true },
+        attestation: { scope: "research_once", fingerprint: "agent_thread:fake:digest" },
+      }),
+      params,
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.trigger).not.toHaveBeenCalled();
+  });
 });
 
 describe("dispatch payload builder", () => {

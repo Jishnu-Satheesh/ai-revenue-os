@@ -135,6 +135,8 @@ export type RouteDedupHit = {
   thread: ThreadSummary;
   /** Kept synthesis: message id rehydrates on replay; null when viewer-only. */
   answer: { messageId: string | null; draft: AnswerDraft } | null;
+  /** Kept auto-run receipt (Task B3); null when the turn never qualified. */
+  research: ResearchAutoOutcome | null;
 };
 
 /**
@@ -238,7 +240,199 @@ export type ThreadDispatchInput = {
   watchCreate?: DispatchWatchCreate;
   watchUpdate?: DispatchWatchUpdate;
   campaignAdvice?: DispatchCampaignAdvice;
+  /**
+   * Server-minted attestation (Task B3 auto path). Never accepted from
+   * clients — the dispatch body schema stays strict — and always verified
+   * against server-recomputed truth for the thread's latest message.
+   */
+  attestation?: ResearchAutoAttestation;
 };
+
+/**
+ * Server-minted research attestation (Task B3 zero-click auto-run, ADR 0074
+ * L2).
+ *
+ * The server attests its own confirmation at send time under the turn's
+ * fingerprint idempotency key — a client-claimed confirmation is never
+ * trusted for the auto path. The fingerprint binds thread + latest message
+ * + body, so an attestation minted for one turn cannot authorize another.
+ */
+export type ResearchAutoAttestation = {
+  scope: "research_once";
+  fingerprint: string;
+};
+
+/**
+ * Mints the server attestation for one turn. Pure: the same thread +
+ * message + body always yields the same fingerprint, so retries replay
+ * instead of double-running.
+ */
+export function mintResearchAutoAttestation(input: {
+  threadId: string;
+  messageId: string;
+  body: string;
+}): ResearchAutoAttestation {
+  return {
+    scope: "research_once",
+    fingerprint: buildThreadIdempotencyKey(
+      input.threadId,
+      messageDigestFor({
+        threadId: input.threadId,
+        messageId: input.messageId,
+        body: input.body,
+      }),
+    ),
+  };
+}
+
+/**
+ * One auto-run receipt for an escalated turn. `dispatched` (enqueued now),
+ * `replayed` (same turn, kept run), or `blocked` (closed gate — the route
+ * still answers, and `reasonCode` names the gate honestly). Identifier-only,
+ * safe to return on the route response.
+ */
+export type ResearchAutoOutcome = {
+  status: "dispatched" | "replayed" | "blocked";
+  runId: string | null;
+  idempotencyKey: string;
+  reasonCode: "PROFILE_UNBOUND" | null;
+};
+
+const profilePointerSchema = z
+  .object({
+    status: z.literal("current"),
+    versionId: z.string().trim().min(1).max(200),
+    digest: z.string().trim().min(1).max(256),
+  })
+  .passthrough();
+
+/**
+ * Research seams for the send-time auto path (Task B3). The route and
+ * answers handlers build these from Trigger transport plus the
+ * authenticated context readers — the same pieces the dispatch route wires
+ * inline for the manual path. A throwing reader resolves to an unbound
+ * pointer (the pack's settle-to-gap philosophy): a broken lane becomes an
+ * honest block, never a crashed route.
+ */
+export function createResearchAutoSeams(input: {
+  triggerResearchRun: (payload: {
+    organizationId: string;
+    actorId: string;
+    threadId: string;
+    messageDigest: string;
+    profileVersionId: string;
+    profileDigest: string;
+    correlationId: string;
+    idempotencyKey: string;
+  }) => Promise<{ runId: string }>;
+  readers: { getMarketProfile?: (input: { organizationId: string }) => Promise<unknown> };
+}): Pick<AgentDispatchSeams, "triggerResearchOnce" | "resolveProfilePointer"> {
+  return {
+    triggerResearchOnce: async (payload) =>
+      input.triggerResearchRun({
+        organizationId: payload.organizationId,
+        actorId: payload.actorId as string,
+        threadId: payload.threadId as string,
+        messageDigest: payload.messageDigest as string,
+        profileVersionId: payload.profileVersionId as string,
+        profileDigest: payload.profileDigest as string,
+        correlationId: payload.correlationId,
+        idempotencyKey: payload.idempotencyKey,
+      }),
+    resolveProfilePointer: async ({ organizationId }) => {
+      let pointer: unknown = null;
+      try {
+        pointer = await input.readers.getMarketProfile?.({ organizationId });
+      } catch {
+        pointer = null;
+      }
+      const parsed = profilePointerSchema.safeParse(pointer);
+      return parsed.success
+        ? { versionId: parsed.data.versionId, digest: parsed.data.digest }
+        : null;
+    },
+  };
+}
+
+/**
+ * Inline assumption for medium auto turns beyond the escalate path (B2
+ * minor 4). Verbatim copy of the router's `MEDIUM_ESCALATION_ASSUMPTION`
+ * (router-service.ts owns the original; this module must not drift from
+ * it — the proposal carries no free text, so both are deterministic
+ * platform copy).
+ */
+const AUTO_MEDIUM_ASSUMPTION =
+  "medium-confidence research read; acting as one bounded DeepThink task";
+
+/**
+ * Auto-run predicate (Task B3): B2 escalated turns plus already-DeepThink
+ * holder direct research turns (the removed Run button would strand those
+ * otherwise). Viewers and grant-less callers never qualify; questionnaire
+ * turns wait for answers first (never blind); low confidence never acts.
+ */
+function shouldAutoResearch(input: {
+  intent: AgentIntent;
+  confidence: "high" | "medium" | "low";
+  questionnaireNull: boolean;
+  role: OrganizationRole;
+}): boolean {
+  if (input.role === "viewer") return false;
+  if (!hasOrganizationPermission(input.role, "growth_intelligence.manage")) return false;
+  if (input.intent !== "research_once") return false;
+  if (input.confidence === "low") return false;
+  if (!input.questionnaireNull) return false;
+  return true;
+}
+
+async function attemptResearchAutoRun(args: {
+  run: (input: ThreadDispatchInput) => Promise<ThreadDispatchOutcome>;
+  organizationId: string;
+  actorId: string;
+  role: OrganizationRole;
+  threadId: string;
+  messageId: string;
+  fingerprint: string;
+  correlationId?: string;
+}): Promise<ResearchAutoOutcome> {
+  try {
+    const outcome = await args.run({
+      organizationId: args.organizationId,
+      actorId: args.actorId,
+      role: args.role,
+      threadId: args.threadId,
+      action: "research_once",
+      idempotencyKey: args.fingerprint,
+      confirmation: { confirmed: false },
+      attestation: { scope: "research_once", fingerprint: args.fingerprint },
+    });
+    return {
+      status: outcome.replayed ? "replayed" : "dispatched",
+      runId: outcome.runId,
+      idempotencyKey: outcome.idempotencyKey,
+      reasonCode: null,
+    };
+  } catch (error) {
+    // Expected gates degrade: the route still answers. Transport and
+    // unexpected failures propagate like manual dispatch — loud, never
+    // mistaken for a queued run. The unbound-pointer message is matched
+    // verbatim from the research lane below; any other expected gate (an
+    // unwired lane, a concurrent send moving the latest message under the
+    // minted attestation) degrades without a user-facing code.
+    if (!(error instanceof DomainError)) throw error;
+    const reasonCode = /No current Market Profile version is bound/.test(error.message)
+      ? ("PROFILE_UNBOUND" as const)
+      : null;
+    logger.warn("agent_thread.research_auto_blocked", {
+      organizationId: args.organizationId,
+      threadId: args.threadId,
+      messageId: args.messageId,
+      ...(args.correlationId ? { correlationId: args.correlationId } : {}),
+      ...(reasonCode ? { reasonCodes: [reasonCode] } : {}),
+      errorCode: error.code,
+    });
+    return { status: "blocked", runId: null, idempotencyKey: args.fingerprint, reasonCode };
+  }
+}
 
 /**
  * Verbatim wire shape Slice C and operators depend on. Every key is
@@ -660,6 +854,11 @@ export function createThreadService(deps: ThreadServiceDeps) {
      * Task B2: applies the server-owned Quick → DeepThink mode flip
      * in-memory when the router signals `DEEPTHINK_AUTO_ESCALATED` for a
      * grant-holding caller; the returned thread carries the escalated mode.
+     *
+     * Task B3: qualifying turns (escalated plus already-DeepThink holder
+     * direct research turns) auto-enqueue one bounded run under the turn's
+     * fingerprint key with a server-minted attestation; the returned
+     * `research` receipt is null for every other turn.
      */
     async routeLatest(input: {
       organizationId: string;
@@ -683,6 +882,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
       routingNote: string;
       thread: ThreadSummary;
       answer: RouteAnswer | null;
+      research: ResearchAutoOutcome | null;
       replayed: boolean;
     }> {
       const thread = await deps.threads.getThread({
@@ -770,6 +970,45 @@ export function createThreadService(deps: ThreadServiceDeps) {
         output.reasonCodes.includes("DEEPTHINK_AUTO_ESCALATED") &&
         thread.mode === "quick";
       const routedThread: ThreadSummary = escalated ? { ...thread, mode: "deepthink" } : thread;
+      // Zero-click auto-run (Task B3, ADR 0074 L2): qualifying turns
+      // enqueue one bounded run under the turn's fingerprint key before the
+      // routed event publishes, so the event, the response, and the drawer
+      // steps all carry the same honest codes. Retries replay the kept run
+      // through the fingerprint Trigger key — never a second run.
+      const autoTurn = shouldAutoResearch({
+        intent: output.intent,
+        confidence: output.confidence,
+        questionnaireNull: output.questionnaire === null,
+        role: input.role,
+      });
+      let routingNote = output.routingNote;
+      const reasonCodes = [...output.reasonCodes];
+      let research: ResearchAutoOutcome | null = null;
+      if (autoTurn) {
+        // Medium auto turns beyond the escalate path state the same inline
+        // assumption the router states on escalate-medium (B2 minor 4).
+        if (!escalated && output.confidence === "medium") {
+          routingNote = `${routingNote}\nassumption=${AUTO_MEDIUM_ASSUMPTION}`;
+        }
+        const fingerprint = mintResearchAutoAttestation({
+          threadId: thread.id,
+          messageId: message.id,
+          body: message.body ?? "",
+        }).fingerprint;
+        research = await attemptResearchAutoRun({
+          run: (dispatchInput) => this.dispatch(dispatchInput),
+          organizationId: input.organizationId,
+          actorId: input.actorId,
+          role: input.role,
+          threadId: thread.id,
+          messageId: message.id,
+          fingerprint,
+          ...(deps.correlationId ? { correlationId: deps.correlationId } : {}),
+        });
+        if (research.status === "blocked" && research.reasonCode) {
+          reasonCodes.push(research.reasonCode);
+        }
+      }
       await publishAgentEvent(deps, {
         organizationId: input.organizationId,
         actorId: input.actorId,
@@ -779,7 +1018,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
           messageId: message.id,
           intent: output.intent,
           confidence: output.confidence,
-          reasonCodes: output.reasonCodes,
+          reasonCodes,
           questionnaireKind: output.questionnaire?.kind ?? null,
           ...(input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : {}),
         },
@@ -787,7 +1026,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
       const routed = {
         intent: output.intent,
         confidence: output.confidence,
-        reasonCodes: output.reasonCodes,
+        reasonCodes,
         // Ideas-first campaigns (streaming-synthesis Task 6): a direct
         // campaign_advice route carries the 3-option ideas card generated
         // on the strong tier over the pack. Missing-fields cards keep
@@ -799,13 +1038,14 @@ export function createThreadService(deps: ThreadServiceDeps) {
           intent: output.intent,
           questionnaire: output.questionnaire,
           pack,
-          routingNote: output.routingNote,
+          routingNote,
           page,
           contextDigest,
           latestBody: message.body ?? "",
         }),
-        routingNote: output.routingNote,
+        routingNote,
         thread: routedThread,
+        research,
         answer: await synthesizeAssistantAnswer(deps, {
           organizationId: input.organizationId,
           actorId: input.actorId,
@@ -813,7 +1053,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
           thread: routedThread,
           message,
           pack,
-          routingNote: output.routingNote,
+          routingNote,
         }),
       };
       if (dedupKey) {
@@ -853,6 +1093,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
       reasonCodes: string[];
       questionnaire: QuestionnaireSpec | null;
       answer: RouteAnswer | null;
+      research: ResearchAutoOutcome | null;
     }> {
       requireOperatorPlus(input.role);
       const normalized = validateQuestionnaireAnswers(input.spec, input.answers);
@@ -909,15 +1150,18 @@ export function createThreadService(deps: ThreadServiceDeps) {
         reasonCodes: routed.reasonCodes,
         questionnaire: routed.questionnaire,
         answer: routed.answer,
+        research: routed.research,
       };
     },
 
     /**
-     * Governed dispatch (Slice B). Enqueues the research/watch Trigger
-     * tasks or admits one campaign draft through `adviseCampaign`.
-     * Viewers are refused before persistence; grants are rechecked from
-     * the role (never client claims); confirmation must be explicit; the
-     * same token replays the kept outcome. Research/watch lanes emit
+     * Governed dispatch (Slice B, Task B3 auto path). Enqueues the
+     * research/watch Trigger tasks or admits one campaign draft through
+     * `adviseCampaign`. Viewers are refused before persistence; grants are
+     * rechecked from the role (never client claims); the manual path needs
+     * explicit confirmation while the zero-click research path carries a
+     * server-minted attestation verified against the turn's fingerprint;
+     * the same token replays the kept outcome. Research/watch lanes emit
      * their audit events from the worker (which knows the outcome); the
      * draft lane emits `agent_thread.draft_requested` here, its
      * `adviseCampaign` caller — identifier-only payload plus
@@ -935,7 +1179,11 @@ export function createThreadService(deps: ThreadServiceDeps) {
             : "Research and watch changes need the growth_intelligence.manage grant.",
         );
       }
-      if (input.confirmation?.confirmed !== true) {
+      // Task B3: the zero-click auto path carries a server-minted
+      // attestation instead of a client click; the manual path still needs
+      // the operator's explicit confirmation, validated exactly as before.
+      const attestation = input.attestation ?? null;
+      if (attestation === null && input.confirmation?.confirmed !== true) {
         throw new DomainError(
           "VALIDATION_ERROR",
           "Confirm this action before dispatch. Nothing was enqueued.",
@@ -958,6 +1206,27 @@ export function createThreadService(deps: ThreadServiceDeps) {
       });
       if (!message || !message.body) {
         throw new DomainError("DOMAIN_ERROR", "This chat has no readable message to dispatch from.");
+      }
+      // A presented attestation is verified against server-recomputed truth
+      // for THIS turn — scope, action, and fingerprint must all match. A
+      // forged or mis-scoped attestation is rejected even beside an
+      // explicit confirmation: never trusted, nothing enqueued.
+      if (attestation !== null) {
+        const expected = mintResearchAutoAttestation({
+          threadId: thread.id,
+          messageId: message.id,
+          body: message.body ?? "",
+        }).fingerprint;
+        if (
+          attestation.scope !== "research_once" ||
+          input.action !== "research_once" ||
+          attestation.fingerprint !== expected
+        ) {
+          throw new DomainError(
+            "VALIDATION_ERROR",
+            "That confirmation was not issued for this turn. Nothing was enqueued.",
+          );
+        }
       }
       const dedup = deps.dispatchDedup ?? sharedDispatchDedup;
       const dedupKey = `${input.organizationId}:${thread.id}:${message.id}:${clientToken}`;

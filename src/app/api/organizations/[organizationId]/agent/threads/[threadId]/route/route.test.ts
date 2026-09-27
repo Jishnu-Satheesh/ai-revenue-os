@@ -5,9 +5,11 @@ vi.mock("server-only", () => ({}));
 const mocks = vi.hoisted(() => ({
   getOrganizationContext: vi.fn(),
   createRepo: vi.fn(),
+  createReaders: vi.fn(),
   propose: vi.fn(),
   publish: vi.fn(),
   info: vi.fn(),
+  trigger: vi.fn(),
 }));
 
 vi.mock("@/lib/api/organization-context", () => ({
@@ -20,6 +22,12 @@ vi.mock("@/modules/agent-chat/infrastructure/thread-repository", async (importOr
 });
 vi.mock("@/modules/agent-router/infrastructure/light-model-provider", () => ({
   createLightModelProvider: () => ({ propose: mocks.propose }),
+}));
+vi.mock("@/modules/agent-chat/application/api", () => ({
+  createAgentContextReaders: mocks.createReaders,
+}));
+vi.mock("@trigger.dev/sdk", () => ({
+  tasks: { trigger: mocks.trigger },
 }));
 vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: mocks.publish }),
@@ -93,6 +101,7 @@ beforeEach(() => {
     getThread: vi.fn(async () => THREAD_ROW),
     latestUserMessage: vi.fn(async () => MESSAGE_ROW),
   });
+  mocks.createReaders.mockReturnValue({});
   mocks.propose.mockResolvedValue({ intent: "research_once", confidence: "high", missing: [] });
 });
 
@@ -201,5 +210,68 @@ describe("agent thread route endpoint", () => {
       params,
     );
     expect(response.status).toBe(400);
+  });
+});
+
+describe("agent thread route auto-run (B3)", () => {
+  function send(idempotencyKey: string) {
+    return POST(
+      request(`http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/route`, {
+        method: "POST",
+        body: JSON.stringify({ idempotencyKey }),
+      }),
+      params,
+    );
+  }
+
+  it("auto-enqueues research on an escalated send and carries the receipt", async () => {
+    mocks.createReaders.mockReturnValue({
+      getMarketProfile: vi.fn(async () => ({
+        status: "current",
+        versionId: "55555555-5555-4555-8555-555555555555",
+        digest: "fedcba9876543210",
+      })),
+    });
+    mocks.trigger.mockResolvedValue({ id: "run_route_auto_1" });
+    const response = await send("k-b3-route-0000000001");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.thread.mode).toBe("deepthink");
+    expect(body.research).toMatchObject({ status: "dispatched", runId: "run_route_auto_1" });
+    expect(body.research.idempotencyKey).toMatch(/^agent_thread:/);
+    expect(mocks.trigger).toHaveBeenCalledTimes(1);
+    const [taskId, payload, options] = mocks.trigger.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
+    expect(taskId).toBe("agent-chat.research-once");
+    expect(payload).toMatchObject({
+      organizationId: ORGANIZATION,
+      threadId: THREAD,
+      profileVersionId: "55555555-5555-4555-8555-555555555555",
+      correlationId: CORRELATION,
+    });
+    expect(options).toMatchObject({ idempotencyKey: payload["idempotencyKey"] });
+  });
+
+  it("degrades a closed gate on the send path with PROFILE_UNBOUND", async () => {
+    mocks.createReaders.mockReturnValue({});
+    // A distinct turn from the dispatched test above, so the shared
+    // dispatch-dedup store cannot replay the kept run here.
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      latestUserMessage: vi.fn(async () => ({
+        ...MESSAGE_ROW,
+        body: "research the uptown dinner crowd",
+      })),
+    });
+    const response = await send("k-b3-route-0000000002");
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.research).toMatchObject({ status: "blocked", runId: null });
+    expect(body.research.reasonCode).toBe("PROFILE_UNBOUND");
+    expect(body.reasonCodes).toContain("PROFILE_UNBOUND");
+    expect(mocks.trigger).not.toHaveBeenCalled();
   });
 });

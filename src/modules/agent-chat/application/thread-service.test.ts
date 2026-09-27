@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createResearchAutoSeams,
   createThreadService,
+  mintResearchAutoAttestation,
   permissionsForRole,
   routingContextDigest,
+  type AgentDispatchSeams,
 } from "@/modules/agent-chat/application/thread-service";
 import type { ThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
 import { DomainError } from "@/lib/errors";
@@ -627,5 +630,383 @@ describe("zero-click auto-escalation (B2)", () => {
     });
     expect(out.thread.mode).toBe("deepthink");
     expect(out.reasonCodes).not.toContain("DEEPTHINK_AUTO_ESCALATED");
+  });
+});
+
+describe("zero-click auto-run research (B3)", () => {
+  function researchSeams(overrides: Partial<AgentDispatchSeams> = {}): AgentDispatchSeams {
+    return {
+      triggerResearchOnce: vi.fn(async () => ({ runId: "run_auto_0001" })),
+      resolveProfilePointer: vi.fn(async () => ({
+        versionId: "mp-v1",
+        digest: "0123456789abcdef",
+      })),
+      ...overrides,
+    };
+  }
+
+  function autoService(seams: ReturnType<typeof researchSeams>, org = "o-b3-auto") {
+    return {
+      org,
+      seams,
+      service: createThreadService({
+        threads: mockThreads(),
+        proposeRouter: async () => ({ intent: "research_once", confidence: "high", missing: [] }),
+        dispatchSeams: seams,
+        correlationId: "c-b3",
+      }),
+    };
+  }
+
+  it("auto-enqueues one bounded run on an escalated turn under the fingerprint key", async () => {
+    const seams = researchSeams();
+    const { service, org } = autoService(seams);
+    const out = await service.routeLatest({
+      organizationId: org,
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-auto-00000001",
+    });
+    expect(out.thread.mode).toBe("deepthink");
+    expect(out.research).toMatchObject({ status: "dispatched", runId: "run_auto_0001" });
+    expect(out.research?.idempotencyKey).toMatch(/^agent_thread:t1:[0-9a-f]{16}$/);
+    expect(out.research?.reasonCode).toBeNull();
+    expect(out.reasonCodes).not.toContain("PROFILE_UNBOUND");
+    expect(seams.triggerResearchOnce).toHaveBeenCalledTimes(1);
+    expect(seams.triggerResearchOnce).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: org,
+        actorId: "u",
+        threadId: "t1",
+        profileVersionId: "mp-v1",
+        idempotencyKey: out.research?.idempotencyKey,
+      }),
+    );
+  });
+
+  it("replays retries without a duplicate enqueue", async () => {
+    const seams = researchSeams();
+    const { service, org } = autoService(seams, "o-b3-replay");
+    const first = await service.routeLatest({
+      organizationId: org,
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-replay-00000001",
+    });
+    // A retry under a fresh route token re-runs routing but replays the
+    // kept auto-run: same run, no second enqueue.
+    const second = await service.routeLatest({
+      organizationId: org,
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-replay-00000002",
+    });
+    expect(first.research?.status).toBe("dispatched");
+    expect(second.research).toMatchObject({
+      status: "replayed",
+      runId: first.research?.runId,
+      idempotencyKey: first.research?.idempotencyKey,
+    });
+    expect(seams.triggerResearchOnce).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the kept research receipt on same-token route replays", async () => {
+    const seams = researchSeams();
+    const { service, org } = autoService(seams, "o-b3-kept");
+    const first = await service.routeLatest({
+      organizationId: org,
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-kept-00000001",
+    });
+    const second = await service.routeLatest({
+      organizationId: org,
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-kept-00000001",
+    });
+    expect(second.replayed).toBe(true);
+    expect(second.research).toEqual(first.research);
+    expect(seams.triggerResearchOnce).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves viewers read-only: no attempt, no receipt", async () => {
+    const seams = researchSeams();
+    const service = createThreadService({
+      threads: mockThreads(),
+      proposeRouter: async () => ({ intent: "research_once", confidence: "high", missing: [] }),
+      dispatchSeams: seams,
+    });
+    const out = await service.routeLatest({
+      organizationId: "o-b3-viewer",
+      actorId: "u",
+      role: "viewer",
+      threadId: "t1",
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.research).toBeNull();
+    expect(seams.triggerResearchOnce).not.toHaveBeenCalled();
+    expect(seams.resolveProfilePointer).not.toHaveBeenCalled();
+  });
+
+  it("degrades a closed gate honestly: blocked receipt, PROFILE_UNBOUND, route still answers", async () => {
+    const seams = researchSeams({ resolveProfilePointer: vi.fn(async () => null) });
+    const { service, org } = autoService(seams, "o-b3-blocked");
+    const out = await service.routeLatest({
+      organizationId: org,
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-blocked-00000001",
+    });
+    expect(out.intent).toBe("research_once");
+    expect(out.thread.mode).toBe("deepthink");
+    expect(out.research).toMatchObject({ status: "blocked", runId: null });
+    expect(out.research?.reasonCode).toBe("PROFILE_UNBOUND");
+    expect(out.reasonCodes).toContain("PROFILE_UNBOUND");
+    expect(out.answer?.draft.body.length).toBeGreaterThan(0);
+    expect(seams.triggerResearchOnce).not.toHaveBeenCalled();
+  });
+
+  it("auto-runs already-DeepThink holder turns and states the medium assumption inline", async () => {
+    const seams = researchSeams();
+    const service = createThreadService({
+      threads: mockThreads({ getThread: vi.fn(async () => ({ ...THREAD, mode: "deepthink" })) }),
+      proposeRouter: async () => ({ intent: "research_once", confidence: "medium", missing: [] }),
+      dispatchSeams: seams,
+      correlationId: "c-b3",
+    });
+    const out = await service.routeLatest({
+      organizationId: "o-b3-deep",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-deep-00000001",
+    });
+    // No flip signal on an already-DeepThink row, but the bounded run
+    // still fires zero-click — the removed button strands these turns
+    // otherwise — with the B2 medium assumption stated inline.
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_AUTO_ESCALATED");
+    expect(out.research?.status).toBe("dispatched");
+    expect(seams.triggerResearchOnce).toHaveBeenCalledTimes(1);
+    expect(out.routingNote).toContain(
+      "assumption=medium-confidence research read; acting as one bounded DeepThink task",
+    );
+  });
+
+  it("never auto-runs blind: missing-fields card turns carry no receipt", async () => {
+    const seams = researchSeams();
+    const service = createThreadService({
+      threads: mockThreads(),
+      proposeRouter: async () => ({
+        intent: "research_once",
+        confidence: "high",
+        missing: ["evidence_window"],
+      }),
+      dispatchSeams: seams,
+    });
+    const out = await service.routeLatest({
+      organizationId: "o-b3-blind",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-blind-00000001",
+    });
+    expect(out.questionnaire?.kind).toBe("missing_fields");
+    expect(out.research).toBeNull();
+    expect(seams.triggerResearchOnce).not.toHaveBeenCalled();
+  });
+
+  it("leaves unwired lanes honestly blocked without failing the route", async () => {
+    const service = createThreadService({
+      threads: mockThreads(),
+      proposeRouter: async () => ({ intent: "research_once", confidence: "high", missing: [] }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o-b3-unwired",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-b3-unwired-00000001",
+    });
+    expect(out.intent).toBe("research_once");
+    expect(out.research).toMatchObject({ status: "blocked", runId: null, reasonCode: null });
+    expect(out.reasonCodes).not.toContain("PROFILE_UNBOUND");
+  });
+
+  it("dispatch accepts a server-minted attestation without client confirmation", async () => {
+    const seams = researchSeams();
+    const service = createThreadService({
+      threads: mockThreads(),
+      dispatchSeams: seams,
+      correlationId: "c-b3",
+    });
+    const attestation = mintResearchAutoAttestation({
+      threadId: "t1",
+      messageId: "m1",
+      body: "research the downtown lunch crowd",
+    });
+    const out = await service.dispatch({
+      organizationId: "o-b3-attest",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      action: "research_once",
+      idempotencyKey: "k-b3-attest-00000001",
+      confirmation: { confirmed: false },
+      attestation,
+    });
+    expect(out.outcome).toBe("dispatched");
+    expect(out.replayed).toBe(false);
+    expect(seams.triggerResearchOnce).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatch rejects a forged attestation without enqueueing", async () => {
+    const seams = researchSeams();
+    const service = createThreadService({
+      threads: mockThreads(),
+      dispatchSeams: seams,
+      correlationId: "c-b3",
+    });
+    await expect(
+      service.dispatch({
+        organizationId: "o-b3-forged",
+        actorId: "u",
+        role: "operator",
+        threadId: "t1",
+        action: "research_once",
+        idempotencyKey: "k-b3-forged-00000001",
+        confirmation: { confirmed: false },
+        attestation: { scope: "research_once", fingerprint: "agent_thread:t1:0000000000000000" },
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR", message: expect.stringMatching(/issued/) });
+    // Forgery wins even beside an explicit confirmation: a claimed
+    // attestation the server never minted is rejected, never trusted.
+    await expect(
+      service.dispatch({
+        organizationId: "o-b3-forged",
+        actorId: "u",
+        role: "operator",
+        threadId: "t1",
+        action: "research_once",
+        idempotencyKey: "k-b3-forged-00000002",
+        confirmation: { confirmed: true },
+        attestation: { scope: "research_once", fingerprint: "agent_thread:t1:0000000000000000" },
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(seams.triggerResearchOnce).not.toHaveBeenCalled();
+  });
+
+  it("dispatch rejects attestation on non-research actions", async () => {
+    const seams = researchSeams({ triggerWatchCreate: vi.fn(async () => ({ runId: "run_w" })) });
+    const service = createThreadService({ threads: mockThreads(), dispatchSeams: seams });
+    await expect(
+      service.dispatch({
+        organizationId: "o-b3-scope",
+        actorId: "u",
+        role: "operator",
+        threadId: "t1",
+        action: "watch_create",
+        idempotencyKey: "k-b3-scope-000000001",
+        confirmation: { confirmed: false },
+        watchCreate: {
+          branchId: "b0000000-0000-4000-8000-000000000000",
+          question: "lunch crowd?",
+          mode: "one-time",
+          researchArea: "demand",
+          competitors: [],
+          investigationAreas: ["demand"],
+        },
+        attestation: mintResearchAutoAttestation({
+          threadId: "t1",
+          messageId: "m1",
+          body: "research the downtown lunch crowd",
+        }),
+      }),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+    expect(seams.triggerWatchCreate).not.toHaveBeenCalled();
+  });
+
+  it("manual research dispatch with explicit confirmation still enqueues", async () => {
+    const seams = researchSeams();
+    const service = createThreadService({
+      threads: mockThreads(),
+      dispatchSeams: seams,
+      correlationId: "c-b3",
+    });
+    const out = await service.dispatch({
+      organizationId: "o-b3-manual",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      action: "research_once",
+      idempotencyKey: "k-b3-manual-00000001",
+      confirmation: { confirmed: true },
+    });
+    expect(out.outcome).toBe("dispatched");
+    expect(seams.triggerResearchOnce).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("research auto seams (B3)", () => {
+  it("maps the trigger payload and resolves the bound pointer", async () => {
+    const triggerResearchRun = vi.fn(async () => ({ runId: "run_seam_1" }));
+    const seams = createResearchAutoSeams({
+      triggerResearchRun,
+      readers: {
+        getMarketProfile: vi.fn(async () => ({
+          status: "current",
+          versionId: "mp-v9",
+          digest: "digest-9",
+        })),
+      },
+    });
+    const pointer = await seams.resolveProfilePointer?.({ organizationId: "o" });
+    expect(pointer).toEqual({ versionId: "mp-v9", digest: "digest-9" });
+    const out = await seams.triggerResearchOnce?.({
+      organizationId: "o",
+      actorId: "u",
+      threadId: "t1",
+      messageDigest: "0123456789abcdef",
+      profileVersionId: "mp-v9",
+      profileDigest: "digest-9",
+      correlationId: "c",
+      idempotencyKey: "agent_thread:t1:0123456789abcdef",
+    });
+    expect(out).toEqual({ runId: "run_seam_1" });
+    expect(triggerResearchRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: "o",
+        threadId: "t1",
+        messageDigest: "0123456789abcdef",
+        profileVersionId: "mp-v9",
+      }),
+    );
+  });
+
+  it("maps a throwing reader to an unbound pointer, never a crash", async () => {
+    const seams = createResearchAutoSeams({
+      triggerResearchRun: vi.fn(async () => ({ runId: "run_never" })),
+      readers: {
+        getMarketProfile: vi.fn(async () => {
+          throw new Error("reader down");
+        }),
+      },
+    });
+    await expect(seams.resolveProfilePointer?.({ organizationId: "o" })).resolves.toBeNull();
   });
 });

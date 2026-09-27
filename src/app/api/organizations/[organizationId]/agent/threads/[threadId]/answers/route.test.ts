@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   createReaders: vi.fn(),
   propose: vi.fn(),
   publish: vi.fn(),
+  trigger: vi.fn(),
 }));
 
 vi.mock("@/lib/api/organization-context", () => ({
@@ -26,6 +27,9 @@ vi.mock("@/modules/agent-chat/application/api", () => ({
 }));
 vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: mocks.publish }),
+}));
+vi.mock("@trigger.dev/sdk", () => ({
+  tasks: { trigger: mocks.trigger },
 }));
 vi.mock("@/lib/logger", () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
@@ -792,5 +796,93 @@ describe("agent thread answers route", () => {
     );
     expect(refused.status).toBe(403);
     expect(mocks.createRepo).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent thread answers auto-run (B3)", () => {
+  function submitAnswers(idempotencyKey: string) {
+    return POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey,
+            resumeKey: SPEC.resumeKey,
+            spec: SPEC,
+            answers: { frequency: "weekly" },
+          }),
+        },
+      ),
+      params,
+    );
+  }
+
+  beforeEach(() => {
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+    });
+    mocks.propose.mockResolvedValue({ intent: "research_once", confidence: "high", missing: [] });
+  });
+
+  it("auto-enqueues research on an escalated answers re-route and carries the receipt", async () => {
+    mocks.createReaders.mockReturnValue({
+      getMarketProfile: vi.fn(async () => ({
+        status: "current",
+        versionId: "55555555-5555-4555-8555-555555555555",
+        digest: "fedcba9876543210",
+      })),
+    });
+    mocks.trigger.mockResolvedValue({ id: "run_answers_auto_1" });
+    const response = await submitAnswers("b3-answers-000000000001");
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.reasonCodes).toEqual(expect.arrayContaining(["DEEPTHINK_AUTO_ESCALATED"]));
+    expect(body.research).toMatchObject({ status: "dispatched", runId: "run_answers_auto_1" });
+    expect(body.research.idempotencyKey).toMatch(/^agent_thread:/);
+    expect(mocks.trigger).toHaveBeenCalledTimes(1);
+    const [taskId, payload, options] = mocks.trigger.mock.calls[0] as [
+      string,
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
+    expect(taskId).toBe("agent-chat.research-once");
+    expect(payload).toMatchObject({
+      organizationId: ORGANIZATION,
+      threadId: THREAD,
+      profileVersionId: "55555555-5555-4555-8555-555555555555",
+    });
+    expect(options).toMatchObject({ idempotencyKey: payload["idempotencyKey"] });
+  });
+
+  it("degrades a closed gate on the answers path with PROFILE_UNBOUND", async () => {
+    mocks.createReaders.mockReturnValue({});
+    // A distinct turn from the dispatched test above, so the shared
+    // dispatch-dedup store cannot replay the kept run here.
+    const blockedMessage = { ...ANSWERS_MESSAGE, body: "[answers missing_fields]\nmenu: dinner" };
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => blockedMessage),
+      latestUserMessage: vi.fn(async () => blockedMessage),
+    });
+    const response = await submitAnswers("b3-answers-000000000002");
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.research).toMatchObject({ status: "blocked", runId: null });
+    expect(body.research.reasonCode).toBe("PROFILE_UNBOUND");
+    expect(body.reasonCodes).toContain("PROFILE_UNBOUND");
+    expect(mocks.trigger).not.toHaveBeenCalled();
   });
 });

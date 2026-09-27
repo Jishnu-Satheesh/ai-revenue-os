@@ -1,3 +1,5 @@
+import { tasks } from "@trigger.dev/sdk";
+
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { toPublicError } from "@/lib/errors";
 import { logger, toAgentReasonCodes } from "@/lib/logger";
@@ -6,7 +8,11 @@ import { assertAgentChatEnabled } from "@/modules/integrations/application/featu
 import { createLightModelProvider } from "@/modules/agent-router/infrastructure/light-model-provider";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
 import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
-import { createThreadService } from "@/modules/agent-chat/application/thread-service";
+import {
+  createResearchAutoSeams,
+  createThreadService,
+} from "@/modules/agent-chat/application/thread-service";
+import type { agentResearchOnceTask } from "@/trigger/agent-chat";
 import {
   routeThreadBodySchema,
   threadRouteParamsSchema,
@@ -27,8 +33,11 @@ import {
  * member may route — classification is read-only and viewers receive
  * read-only answers. The body carries the idempotency key only; the
  * page key travels as an optional `page` query parameter (default
- * `overview`). Nothing executes here: research, watch, and campaign
- * lanes arrive in later slices behind their own fences.
+ * `overview`). Task B3: qualifying research turns (escalated plus
+ * already-DeepThink holder direct turns) auto-enqueue one bounded run
+ * in this same call under a server-minted attestation — the response
+ * carries the `research` receipt, null for every other turn. Watch and
+ * campaign lanes stay behind their own fences.
  */
 
 export async function POST(
@@ -58,16 +67,40 @@ export async function POST(
       // Task 6 swap: route digests the real HEAVY pack. Digest shape is
       // unchanged; values shift because the digest now means something.
       contextReaders: createAgentContextReaders(context.supabase),
+      // Task B3: the send-time auto path needs the research seams —
+      // Trigger transport plus the authenticated readers — so escalated
+      // turns enqueue their one bounded run in this same call.
+      dispatchSeams: createResearchAutoSeams({
+        triggerResearchRun: async (payload) => {
+          const handle = await tasks.trigger<typeof agentResearchOnceTask>(
+            "agent-chat.research-once",
+            {
+              organizationId: payload.organizationId,
+              actorId: payload.actorId,
+              threadId: payload.threadId,
+              messageDigest: payload.messageDigest,
+              profileVersionId: payload.profileVersionId,
+              profileDigest: payload.profileDigest,
+              correlationId: payload.correlationId,
+              idempotencyKey: payload.idempotencyKey,
+            },
+            { idempotencyKey: payload.idempotencyKey },
+          );
+          return { runId: handle.id };
+        },
+        readers: createAgentContextReaders(context.supabase),
+      }),
       correlationId,
     });
-    const { intent, confidence, reasonCodes, questionnaire, thread } = await service.routeLatest({
-      organizationId,
-      actorId: context.user.id,
-      role: context.membership.role,
-      threadId: rawParams.threadId,
-      ...(page ? { page } : {}),
-      idempotencyKey: body.idempotencyKey,
-    });
+    const { intent, confidence, reasonCodes, questionnaire, thread, research } =
+      await service.routeLatest({
+        organizationId,
+        actorId: context.user.id,
+        role: context.membership.role,
+        threadId: rawParams.threadId,
+        ...(page ? { page } : {}),
+        idempotencyKey: body.idempotencyKey,
+      });
     // Intent, confidence, and reason codes travel in the event payload
     // (identifier-only, bodies never logged); the log line stays inside
     // the closed LogContext allowlist (Slice C F4: codes narrowed to the
@@ -81,7 +114,7 @@ export async function POST(
       correlationId,
     });
     return agentJsonResponse(
-      { intent, confidence, reasonCodes, questionnaire, thread },
+      { intent, confidence, reasonCodes, questionnaire, thread, research },
       correlationId,
     );
   } catch (error) {

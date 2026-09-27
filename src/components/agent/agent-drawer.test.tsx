@@ -1886,3 +1886,28 @@ describe("resolveLiveThread (B2 escalation hold)", () => {
     expect(resolveLiveThread(null, null)).toBeNull();
   });
 });
+
+describe("research auto-run (B3)", () => {
+  it("offers no Run button on research turns: the run fires server-side, zero-click", async () => {
+    const escalated: ThreadSummary = { ...THREAD, mode: "deepthink" };
+    const fetchMock = mockAgentFetch({
+      route: {
+        intent: "research_once",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED", "DEEPTHINK_AUTO_ESCALATED"],
+        questionnaire: null,
+        thread: escalated,
+        correlationId: "c3",
+      },
+      thread: THREAD,
+    });
+    globalThis.fetch = fetchMock as never;
+    render(<Harness pendingPrompt={sendPrompt("research the downtown lunch crowd")} />);
+    // The escalated turn renders (marker proves the route landed)…
+    expect(await screen.findByText(/switched to deepthink/i)).toBeInTheDocument();
+    // …with no manual Run control and no client dispatch POST: research
+    // auto-enqueues from the route response on the server.
+    expect(screen.queryByRole("button", { name: /run research once/i })).toBeNull();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dispatch"))).toBe(false);
+  });
+});

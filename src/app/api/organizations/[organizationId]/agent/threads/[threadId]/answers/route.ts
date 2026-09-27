@@ -1,3 +1,5 @@
+import { tasks } from "@trigger.dev/sdk";
+
 import { questionnaireSpecSchema } from "@/domain/agent-router/contracts";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { getOrganizationContext } from "@/lib/api/organization-context";
@@ -9,9 +11,11 @@ import { createLightModelProvider } from "@/modules/agent-router/infrastructure/
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
 import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
 import {
+  createResearchAutoSeams,
   createThreadService,
   permissionsForRole,
 } from "@/modules/agent-chat/application/thread-service";
+import type { agentResearchOnceTask } from "@/trigger/agent-chat";
 import {
   requestDraftFromIdeaPick,
   selectDraftOpportunity,
@@ -136,9 +140,32 @@ export async function POST(
       // like the classify-only route does — no more placeholder digest
       // with its context-unavailable limitation on this path.
       contextReaders: createAgentContextReaders(context.supabase),
+      // Task B3: the answers re-route auto-enqueues like a send, so it
+      // carries the same research seams (Trigger transport plus the
+      // authenticated readers).
+      dispatchSeams: createResearchAutoSeams({
+        triggerResearchRun: async (payload) => {
+          const handle = await tasks.trigger<typeof agentResearchOnceTask>(
+            "agent-chat.research-once",
+            {
+              organizationId: payload.organizationId,
+              actorId: payload.actorId,
+              threadId: payload.threadId,
+              messageDigest: payload.messageDigest,
+              profileVersionId: payload.profileVersionId,
+              profileDigest: payload.profileDigest,
+              correlationId: payload.correlationId,
+              idempotencyKey: payload.idempotencyKey,
+            },
+            { idempotencyKey: payload.idempotencyKey },
+          );
+          return { runId: handle.id };
+        },
+        readers: createAgentContextReaders(context.supabase),
+      }),
       correlationId,
     });
-    const { message, replayed, answers, intent, confidence, reasonCodes, questionnaire } =
+    const { message, replayed, answers, intent, confidence, reasonCodes, questionnaire, research } =
       await service.submitAnswers({
         organizationId,
         actorId: context.user.id,
@@ -264,6 +291,7 @@ export async function POST(
         confidence,
         reasonCodes,
         questionnaire,
+        research,
         ...(ideaDraft ? { ideaDraft } : {}),
       },
       correlationId,

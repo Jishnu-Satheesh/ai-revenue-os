@@ -376,9 +376,9 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 /**
  * Watch lane forms (Slice C, task-2 report s9.2).
  *
- * The dispatch route serves `watch_create` and `watch_update`, but the
- * drawer only offered the research confirm button — these forms close
- * that gap. Every submit IS the explicit confirmation the route
+ * Task B3 removed the research confirm button (research auto-runs
+ * zero-click from the route response); these forms remain the manual
+ * dispatch surface. Every submit IS the explicit confirmation the route
  * requires; the route rechecks the grant and Zod-disposes every field,
  * so client checks stay courtesy-only. The update form prefills the
  * project from the polled thread links; scope-widening edits (new
@@ -999,14 +999,12 @@ export function AgentDrawer({
       setAnnouncement("Saving answers failed.");
     },
   });
-  // Governed dispatch (Slice B): the research lane needs no parameters —
-  // the route resolves the Market Profile pointer server-side — so the
-  // Steps tab can offer the confirm click directly. The click IS the
-  // explicit confirmation the route requires. Watch lanes take their
-  // parameters from the Slice C forms below; the dispatch route already
-  // serves them. The idempotency key is minted at click time (one per
-  // user confirm) and travels in the mutation vars, so a transport retry
-  // replays the same dispatch.
+  // Governed dispatch (Slice B): the watch lanes take their parameters
+  // from the forms below; the dispatch route already serves them. (Task
+  // B3 removed the research confirm click — research auto-runs zero-click
+  // from the route response.) The idempotency key is minted at click time
+  // (one per user confirm) and travels in the mutation vars, so a
+  // transport retry replays the same dispatch.
   const dispatchLane = useMutation({
     mutationFn: async (vars: {
       action: DispatchAction;
@@ -1444,53 +1442,6 @@ export function AgentDrawer({
                 <p className="text-sm text-muted-foreground">
                   Answers saved: {formatAnswers(lastSaved.answers)}
                 </p>
-              ) : null}
-              {routeResult?.intent === "research_once" && threadId ? (
-                <div className="flex flex-col gap-2 pt-2">
-                  <Button
-                    type="button"
-                    disabled={!canManageWatch || dispatchLane.isPending}
-                    onClick={() =>
-                      dispatchLane.mutate({
-                        action: "research_once",
-                        idempotencyKey: crypto.randomUUID(),
-                      })
-                    }
-                    title={
-                      canManageWatch
-                        ? "Queue one TinyFish research run for this chat. This click is the confirmation — the worker spends only inside its reserve-before-call budget."
-                        : "Needs the growth_intelligence.manage grant — enforcement stays server-side."
-                    }
-                  >
-                    {dispatchLane.isPending ? <Spinner aria-hidden="true" /> : null}
-                    Run research once
-                  </Button>
-                  {!canManageWatch ? (
-                    <p className="text-xs text-muted-foreground">
-                      Needs the growth_intelligence.manage grant — enforcement stays server-side.
-                    </p>
-                  ) : null}
-                  {dispatchError ? (
-                    <p role="alert" className="text-sm text-destructive">
-                      {dispatchError}
-                    </p>
-                  ) : null}
-                  {dispatchOutcome ? (
-                    <p className="text-sm text-muted-foreground">
-                      {dispatchOutcome.replayed
-                        ? "Already queued — showing the kept run."
-                        : "Research queued."}{" "}
-                      {dispatchOutcome.link ? (
-                        <a
-                          className="font-medium text-primary underline-offset-4 hover:underline"
-                          href={dispatchOutcome.link.href}
-                        >
-                          Open Market Intelligence
-                        </a>
-                      ) : null}
-                    </p>
-                  ) : null}
-                </div>
               ) : null}
               {routeResult?.intent === "watch" && threadId ? (
                 canManageWatch ? (

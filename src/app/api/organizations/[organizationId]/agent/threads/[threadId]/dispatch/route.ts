@@ -42,8 +42,12 @@ import type {
  * Fences: any member may not dispatch — viewers are refused before
  * persistence, research/watch recheck `growth_intelligence.manage`
  * and drafts recheck `campaign.create` from the server-owned role, and
- * nothing enqueues without the operator's explicit confirmation. The
- * same client token replays the kept outcome without a duplicate
+ * the manual path enqueues nothing without the operator's explicit
+ * confirmation, validated exactly as before. Task B3: the zero-click
+ * research path instead carries a server-minted attestation verified
+ * against the turn's fingerprint — the body schema stays strict, so a
+ * client-claimed attestation is refused with 400 and never trusted.
+ * The same client token replays the kept outcome without a duplicate
  * enqueue. No service role in this path: trigger transport plus the
  * caller's session client only.
  */
