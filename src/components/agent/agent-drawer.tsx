@@ -2,13 +2,25 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDownIcon, HistoryIcon, PlusIcon, XIcon } from "lucide-react";
+import { z } from "zod";
+import {
+  ChevronDownIcon,
+  ChevronRightIcon,
+  HistoryIcon,
+  PlusIcon,
+  SparklesIcon,
+  XIcon,
+} from "lucide-react";
 
 import {
   AgentQuestionnaireCard,
   type QuestionnaireAnswers,
 } from "@/components/agent/agent-questionnaire-card";
 import { AgentResponseMessage } from "@/components/agent/agent-response-message";
+import {
+  answerDraftSchema,
+  encodeAnswerBody,
+} from "@/modules/agent-chat/application/answer-writer";
 import {
   AgentCampaignAdvice,
   type CampaignAdviceContext,
@@ -19,6 +31,7 @@ import { AgentThreadSteps, type AgentStepPhase } from "@/components/agent/agent-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,9 +45,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useAgentSidebarOffset } from "@/components/agent/agent-placement";
 import type { AgentIntent } from "@/domain/agent-router/intents";
 import type { RouterRole, QuestionnaireSpec } from "@/domain/agent-router/contracts";
 import {
@@ -47,7 +60,7 @@ import type {
   ThreadSummary,
 } from "@/modules/agent-chat/infrastructure/thread-repository";
 
-export type AgentDrawerTab = "response" | "steps" | "draft" | "history";
+export type AgentDrawerView = "history" | "thread";
 
 export type PendingPrompt = { text: string; nonce: number };
 
@@ -95,17 +108,45 @@ export type AgentDrawerProps = {
    * Pass false explicitly to force the honest unavailable copy.
    */
   watchUpdateAvailable?: boolean;
-  activeTab: AgentDrawerTab;
-  onTabChange: (tab: AgentDrawerTab) => void;
+  view: AgentDrawerView;
+  onViewChange: (view: AgentDrawerView) => void;
   collapsed: boolean;
   onToggleCollapsed: () => void;
   onClose: () => void;
   onThreadChange: (threadId: string | null) => void;
   onPromptConsumed: () => void;
+  /**
+   * Distance above the viewport bottom. The shell picks it from the bar
+   * state: short single-line bar → closer offset, expanded bar → taller
+   * offset, so the drawer stays close but never overlaps. Defaults to the
+   * closer offset (the common post-send state).
+   */
+  bottomOffset?: "bottom-22" | "bottom-32";
 };
 
 type ThreadsResponse = { threads: ThreadSummary[]; nextCursor: string | null };
 type MessagesResponse = { messages: ThreadMessageView[]; nextCursor: string | null };
+
+/**
+ * Client-side thread title until lightweight-model titles land (deferred
+ * follow-up): the in-flight prompt first, else the first user message,
+ * truncated to eight words. Falls back to a real server title when one
+ * exists, else "New chat".
+ */
+export function threadTitleFor(
+  messages: ThreadMessageView[],
+  serverTitle: string | null | undefined,
+  pendingBody?: string | null,
+): string {
+  const first =
+    pendingBody?.trim() || messages.find((message) => message.role === "user")?.body?.trim();
+  if (first) {
+    const words = first.split(/\s+/);
+    return words.length > 8 ? `${words.slice(0, 8).join(" ")}…` : first;
+  }
+  if (serverTitle && serverTitle !== "New chat") return serverTitle;
+  return "New chat";
+}
 
 /** Durable-checkpoint poll cadence (performance-build-watcher pattern). */
 export const AGENT_THREAD_POLL_MS = 3000;
@@ -131,6 +172,124 @@ export function buildDrawerRequestKeys(
     messageKey: `${stem}:message`,
     routeKey: `${stem}:route`,
   };
+}
+
+/**
+ * Task 3 frame protocol, consumed verbatim (task-3 report, wire unchanged
+ * after the fix round: token/done/end in order, then the server closes).
+ *
+ * - `event: token` / `data: {"text":"<body chunk>"}` — chunks join with
+ *   `""` into the streamed body preview. Malformed frames are skipped,
+ *   never fatal.
+ * - `event: done` / `data: [DONE]` — literal, never JSON. Tokens complete.
+ * - `event: end` / `data: {messageId, replayed, fallback, reason, draft,
+ *   correlationId}` — `messageId` is the durable assistant row id (null
+ *   for viewers and conflicting/failed appends: draft-only). `draft` is
+ *   the content persisted when `messageId` is non-null.
+ *
+ * Client rules honored here: a transport drop before a valid `end` keeps
+ * the partial text with a note and reads the durable row — the drawer
+ * never resumes a dead stream, and reconnects/reopens only ever read the
+ * durable GET rows. Errors before the first frame fall back to the same
+ * durable read, so the routed turn's row still renders.
+ */
+const AGENT_STREAM_EVENT_TOKEN = "token";
+const AGENT_STREAM_EVENT_DONE = "done";
+const AGENT_STREAM_EVENT_END = "end";
+const AGENT_STREAM_DONE_DATA = "[DONE]";
+
+const agentStreamEndSchema = z.object({
+  messageId: z.string().uuid().nullable(),
+  replayed: z.boolean(),
+  fallback: z.boolean(),
+  reason: z
+    .enum(["not_configured", "timeout", "invalid_candidate", "synthesis_failed", "append_conflict"])
+    .nullable(),
+  draft: z.unknown(),
+  correlationId: z.string().uuid(),
+});
+
+/** Honest note kept beside a dropped stream's partial text. */
+export const AGENT_STREAM_DROP_NOTE =
+  "The live answer stopped here — showing what arrived so far.";
+
+type AgentStreamPhase = "connecting" | "live" | "dropped";
+type AgentLiveStream = { key: number; phase: AgentStreamPhase; text: string };
+
+type AgentStreamEvents = {
+  onToken: (text: string) => void;
+  onEnd: (payload: z.infer<typeof agentStreamEndSchema>) => void;
+  /** Transport closed before a valid `end` (never fires after `onEnd`). */
+  onDrop: () => void;
+};
+
+/**
+ * Incremental SSE reader for one answer stream. Frames split on blank
+ * lines; `token` data parses as `{"text": <non-empty string>}` (anything
+ * else is skipped); `done` needs no handling (`end` follows immediately);
+ * `end` validates through `agentStreamEndSchema` (an invalid `end` degrades
+ * to a drop, never a render). Resolves quietly on abort — the opener owns
+ * the UI in that case.
+ */
+async function readAgentStream(
+  body: ReadableStream<Uint8Array>,
+  signal: AbortSignal,
+  events: AgentStreamEvents,
+): Promise<void> {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let ended = false;
+  const dispatch = (rawEvent: string, data: string): void => {
+    if (rawEvent === AGENT_STREAM_EVENT_TOKEN) {
+      try {
+        const text = (JSON.parse(data) as { text?: unknown }).text;
+        if (typeof text === "string" && text.length > 0) events.onToken(text);
+      } catch {
+        // Malformed token frame: skip it, keep the stream honest.
+      }
+    } else if (rawEvent === AGENT_STREAM_EVENT_DONE) {
+      if (data !== AGENT_STREAM_DONE_DATA) return;
+      // Token stream complete; `end` follows immediately. No UI change.
+    } else if (rawEvent === AGENT_STREAM_EVENT_END) {
+      try {
+        const end = agentStreamEndSchema.safeParse(JSON.parse(data) as unknown);
+        if (end.success) {
+          ended = true;
+          events.onEnd(end.data);
+        }
+      } catch {
+        // Invalid `end` payload: treated as a drop below, never rendered.
+      }
+    }
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let boundary = buffer.indexOf("\n\n");
+      while (boundary !== -1) {
+        const block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        let rawEvent = "";
+        const dataLines: string[] = [];
+        for (const line of block.split("\n")) {
+          const clean = line.endsWith("\r") ? line.slice(0, -1) : line;
+          if (clean.startsWith(":")) continue;
+          if (clean.startsWith("event:")) rawEvent = clean.slice(6).trim();
+          else if (clean.startsWith("data:")) dataLines.push(clean.slice(5).replace(/^ /, ""));
+        }
+        dispatch(rawEvent, dataLines.join("\n"));
+        if (ended) break;
+        boundary = buffer.indexOf("\n\n");
+      }
+      if (ended) break;
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (!ended && !signal.aborted) events.onDrop();
 }
 
 /**
@@ -364,7 +523,7 @@ function WatchDispatchForms({
               <SelectTrigger aria-label="Watch frequency">
                 <SelectValue placeholder="No change" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="dark border-white/10 bg-zinc-900 text-zinc-100">
                 <SelectItem value="none">No change</SelectItem>
                 <SelectItem value="daily">Daily</SelectItem>
                 <SelectItem value="weekly">Weekly</SelectItem>
@@ -388,8 +547,7 @@ function WatchDispatchForms({
         </FieldGroup>
       ) : (
         <p className="text-xs text-muted-foreground">
-          Watch field updates are unavailable for this chat — viewing the existing watch stays
-          free.
+          Watch field updates are unavailable for this chat — viewing the existing watch stays free.
         </p>
       )}
 
@@ -425,8 +583,11 @@ function WatchDispatchForms({
  * persists across the 5 pages within the session (thread state lives in the
  * shell above page switches; background progress resumes via the
  * thread-checkpoint poll), and collapses to a single-line status strip
- * docked on top of the shell. Tabs: Response / Steps / Draft advice /
- * History. History reopens through the Task 3 GET messages route, restoring
+ * docked on top of the shell. Two views, no tabs: the history view lists
+ * threads with a New chat entry point, and the thread view reads one
+ * conversation top to bottom — user messages, inline steps, answers with
+ * citations, Questionnaire cards, executor confirmations, and draft advice.
+ * History reopens through the Task 3 GET messages route, restoring
  * messages plus saved answers.
  */
 export function AgentDrawer({
@@ -442,15 +603,17 @@ export function AgentDrawer({
   advice = null,
   campaignSeams,
   watchUpdateAvailable = true,
-  activeTab,
-  onTabChange,
+  view,
+  onViewChange,
   collapsed,
   onToggleCollapsed,
   onClose,
   onThreadChange,
   onPromptConsumed,
+  bottomOffset = "bottom-22",
 }: AgentDrawerProps) {
   const queryClient = useQueryClient();
+  const sidebarOffset = useAgentSidebarOffset();
   const base = `/api/organizations/${organizationId}/agent/threads`;
 
   // One correlation id per drawer session: every send, poll, reopen, and
@@ -531,6 +694,126 @@ export function AgentDrawer({
     headingRef.current?.focus();
   }, []);
 
+  // Live answer stream (Task 4): one stream per send, opened after the
+  // route POST succeeds. Reconnect-never: drops, reconnects, and reopens
+  // read the durable row — a dead stream is never resumed. Only the
+  // current key may touch state, so an aborted stream's late frames land
+  // nowhere. Unmount, reopen, new chat, and a newer send all abort.
+  const streamKeyRef = useRef(0);
+  const streamAbortRef = useRef<AbortController | null>(null);
+  const [liveStream, setLiveStream] = useState<AgentLiveStream | null>(null);
+
+  function abortLiveStream(): void {
+    streamAbortRef.current?.abort();
+    streamAbortRef.current = null;
+  }
+
+  useEffect(() => {
+    return () => {
+      streamAbortRef.current?.abort();
+      streamAbortRef.current = null;
+    };
+  }, []);
+
+  async function openAnswerStream(args: { threadId: string; userMessageId: string }): Promise<void> {
+    abortLiveStream();
+    const key = streamKeyRef.current + 1;
+    streamKeyRef.current = key;
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
+    const alive = (): boolean => streamKeyRef.current === key && !controller.signal.aborted;
+    setLiveStream({ key, phase: "connecting", text: "" });
+    try {
+      const response = await fetch(
+        `${base}/${args.threadId}/stream?messageId=${args.userMessageId}&page=${page}`,
+        {
+          method: "GET",
+          headers: { accept: "text/event-stream", "x-correlation-id": correlationId },
+          cache: "no-store",
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok || !response.body) {
+        throw new Error(`Stream failed (${response.status}).`);
+      }
+      await readAgentStream(response.body, controller.signal, {
+        onToken: (text) => {
+          if (!alive()) return;
+          setLiveStream((previous) =>
+            previous && previous.key === key
+              ? { key, phase: "live", text: `${previous.text}${text}` }
+              : previous,
+          );
+        },
+        onEnd: (end) => {
+          if (!alive()) return;
+          streamAbortRef.current = null;
+          if (end.messageId) {
+            // Durable swap: the routed turn's row is source of truth — the
+            // preview is discarded (even intact) and the durable read
+            // renders, so reconnects always agree with history.
+            setLiveStream(null);
+            void refreshMessages(args.threadId);
+          } else {
+            // Draft-only (viewers, conflicting/failed appends): no durable
+            // row exists, so the validated `end` draft renders with its
+            // full sections under a stable per-turn id. An `end` draft
+            // that fails writer validation keeps nothing (drop path).
+            try {
+              const parsed = answerDraftSchema.safeParse(end.draft);
+              if (!parsed.success) throw new Error("Invalid end draft.");
+              const draftMessage: ThreadMessageView = {
+                id: `stream-draft:${args.userMessageId}`,
+                threadId: args.threadId,
+                role: "assistant",
+                body: encodeAnswerBody(parsed.data),
+                questionnaireAnswers: null,
+                markerReceipts: null,
+                citations: null,
+                createdAt: new Date().toISOString(),
+              };
+              setLiveStream(null);
+              setMessages((previous) =>
+                previous.some((message) => message.id === draftMessage.id)
+                  ? previous
+                  : [...previous, draftMessage],
+              );
+            } catch {
+              // The `end` draft itself is unencodable: keep nothing, read
+              // the durable row like any other drop.
+              setLiveStream(null);
+              void refreshMessages(args.threadId);
+            }
+          }
+        },
+        onDrop: () => {
+          if (!alive()) return;
+          setLiveStream((previous) => {
+            if (!previous || previous.key !== key) return previous;
+            // Nothing arrived: fall back to the durable read silently —
+            // the routed turn's row renders when it lands.
+            if (previous.text === "") return null;
+            return { ...previous, phase: "dropped" };
+          });
+          setAnnouncement("The live answer stopped. Showing what arrived so far.");
+          void refreshMessages(args.threadId);
+        },
+      });
+    } catch {
+      if (controller.signal.aborted || streamKeyRef.current !== key) return;
+      // The stream never opened (auth, tenancy, validation, transport):
+      // partial text keeps its honest note, otherwise fall back to the
+      // durable read — the routed turn's row still renders.
+      streamAbortRef.current = null;
+      setLiveStream((previous) => {
+        if (!previous || previous.key !== key) return previous;
+        if (previous.text === "") return null;
+        return { ...previous, phase: "dropped" };
+      });
+      void refreshMessages(args.threadId);
+    }
+  }
+
   const send = useMutation({
     mutationFn: async (vars: {
       text: string;
@@ -594,16 +877,17 @@ export function AgentDrawer({
       setSendError(null);
       setDispatchOutcome(null);
       setDispatchError(null);
-      onTabChange("response");
+      onViewChange("thread");
       setAnnouncement(`Routed to ${result.intent}.`);
-      // The assistant row lands server-side during routing; re-read the
-      // durable rows so the answer renders with citations + limitations.
-      void refreshMessages(row.id);
+      // The answer streams live from here: tokens render into the thread
+      // bubble and the `end` marker swaps to the durable row. The stream
+      // opens once per send — never on reconnect or reopen.
+      void openAnswerStream({ threadId: row.id, userMessageId: userMessage.id });
       void queryClient.invalidateQueries({ queryKey: ["agent-threads", organizationId] });
     },
     onError: (error) => {
       setSendError(error instanceof Error ? error.message : "Sending failed. Nothing was stored.");
-      onTabChange("response");
+      onViewChange("thread");
       setAnnouncement("Sending failed.");
     },
   });
@@ -733,7 +1017,7 @@ export function AgentDrawer({
       consumedNonceRef.current = pendingPrompt.nonce;
       onPromptConsumed();
       queueRef.current.push(pendingPrompt);
-      onTabChange("steps");
+      onViewChange("thread");
     }
     if (!sendPending) {
       const next = queueRef.current.shift();
@@ -748,7 +1032,7 @@ export function AgentDrawer({
   const historyQuery = useQuery({
     queryKey: ["agent-threads", organizationId],
     queryFn: () => agentGetJson(`${base}?limit=20`, correlationId) as Promise<ThreadsResponse>,
-    enabled: activeTab === "history",
+    enabled: view === "history",
   });
 
   /**
@@ -765,10 +1049,9 @@ export function AgentDrawer({
   const threadPoll = useQuery({
     queryKey: ["agent-thread", organizationId, threadId],
     queryFn: async () => {
-      const body = (await agentGetJson(
-        `${base}/${threadId}`,
-        correlationId,
-      )) as { thread: ThreadSummary | null };
+      const body = (await agentGetJson(`${base}/${threadId}`, correlationId)) as {
+        thread: ThreadSummary | null;
+      };
       return body.thread ?? null;
     },
     enabled: threadId !== null,
@@ -793,6 +1076,18 @@ export function AgentDrawer({
       )) as MessagesResponse;
       return { target, messages: body.messages };
     },
+    onMutate: () => {
+      // Navigate first, load second: the thread view opens immediately with
+      // chat-mimicking skeleton bubbles while the durable read lands.
+      // Reopens never resume a stream — any live one dies here.
+      abortLiveStream();
+      setLiveStream(null);
+      onViewChange("thread");
+      setMessages([]);
+      setThread(null);
+      setRouteResult(null);
+      setSendError(null);
+    },
     onSuccess: ({ target, messages: reopened }) => {
       onThreadChange(target.id);
       setThread(target);
@@ -802,17 +1097,19 @@ export function AgentDrawer({
       setSubmittedAnswers({});
       setDismissedCards([]);
       setLastSaved(null);
-      onTabChange("response");
+      onViewChange("thread");
       setAnnouncement(`Reopened ${target.title}.`);
     },
     onError: (error) => {
       setSendError(error instanceof Error ? error.message : "Reopen failed.");
-      onTabChange("response");
+      onViewChange("thread");
     },
   });
 
   function startNewThread() {
     onThreadChange(null);
+    abortLiveStream();
+    setLiveStream(null);
     setMessages([]);
     setThread(null);
     setRouteResult(null);
@@ -822,17 +1119,21 @@ export function AgentDrawer({
     setSubmittedAnswers({});
     setDismissedCards([]);
     setLastSaved(null);
-    onTabChange("response");
+    onViewChange("thread");
     setAnnouncement("Started a new conversation.");
   }
 
-  const phase: AgentStepPhase = send.isPending
-    ? "routing"
-    : sendError
-      ? "error"
-      : routeResult || liveThread
-        ? "done"
-        : "idle";
+  // A connecting or live stream keeps the run in-flight: steps stay
+  // in-progress until the `end` swap or the drop note settles the turn.
+  const streamActive = liveStream !== null && liveStream.phase !== "dropped";
+  const phase: AgentStepPhase =
+    send.isPending || streamActive
+      ? "routing"
+      : sendError
+        ? "error"
+        : routeResult || liveThread
+          ? "done"
+          : "idle";
 
   const questionnaire = routeResult?.questionnaire ?? null;
   const cardKey = questionnaire?.resumeKey ?? null;
@@ -858,12 +1159,15 @@ export function AgentDrawer({
         : undefined;
 
   if (collapsed) {
+    // Attached strip: the shell mounts the drawer in-flow directly above
+    // the bar, so this is a bare button with no fixed positioning — one
+    // attached unit, never a floating overlap.
     return (
-      <div className="fixed inset-x-0 bottom-24 flex justify-center px-4">
+      <div className="dark">
         <Button
           type="button"
           variant="secondary"
-          className="w-[min(44rem,100%)] justify-between"
+          className="mb-2 w-full justify-between"
           onClick={onToggleCollapsed}
           aria-label={`Expand conversation${liveThread ? `: ${liveThread.title}` : ""}`}
         >
@@ -882,7 +1186,7 @@ export function AgentDrawer({
             <span className="truncate text-sm">{liveThread?.title ?? "New conversation"}</span>
           </span>
           <span className="flex items-center gap-2">
-            {send.isPending ? <Spinner aria-hidden="true" /> : null}
+            {send.isPending || streamActive ? <Spinner aria-hidden="true" /> : null}
             <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
           </span>
         </Button>
@@ -897,9 +1201,9 @@ export function AgentDrawer({
         onKeyDown={(event) => {
           if (event.key === "Escape") onToggleCollapsed();
         }}
-        className="fixed inset-x-0 bottom-24 flex justify-center px-4"
+        className={cn("dark fixed right-0 flex justify-center px-4", bottomOffset, sidebarOffset)}
       >
-        <div className="flex max-h-[60vh] w-[min(44rem,100%)] flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-lg">
+        <div className="flex h-[34rem] max-h-[calc(100dvh-12rem)] w-[min(44rem,100%)] flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-lg">
           <h2 ref={headingRef} tabIndex={-1} className="sr-only">
             AI agent conversation
           </h2>
@@ -907,9 +1211,24 @@ export function AgentDrawer({
             {announcement}
           </p>
 
-          <div className="flex items-center justify-between gap-2">
-            <p className="truncate text-sm font-medium">
-              {liveThread?.title ?? "New conversation"}
+          <div className="flex items-center gap-2">
+            {view === "thread" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => onViewChange("history")}
+                aria-label="Back to thread history"
+                title="Thread history"
+                className="shrink-0 text-zinc-400 hover:text-zinc-100"
+              >
+                <HistoryIcon aria-hidden="true" />
+              </Button>
+            ) : null}
+            <p className="min-w-0 flex-1 truncate text-sm font-medium">
+              {view === "history"
+                ? "Thread history"
+                : threadTitleFor(messages, liveThread?.title, pendingPrompt?.text)}
             </p>
             <div className="flex shrink-0 items-center gap-1">
               <Button
@@ -933,29 +1252,43 @@ export function AgentDrawer({
             </div>
           </div>
 
-          <Tabs value={activeTab} onValueChange={(value) => onTabChange(value as AgentDrawerTab)}>
-            <TabsList aria-label="Conversation sections">
-              <TabsTrigger value="response">Response</TabsTrigger>
-              <TabsTrigger value="steps">Steps</TabsTrigger>
-              <TabsTrigger value="draft">Draft advice</TabsTrigger>
-              <TabsTrigger value="history">History</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="response" className="flex flex-col gap-3 overflow-y-auto">
+          {view === "thread" ? (
+            <div
+              role="log"
+              aria-label="Conversation thread"
+              className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto"
+            >
               {sendError ? (
                 <p role="alert" className="text-sm text-destructive">
                   {sendError}
                 </p>
               ) : null}
-              {messages.length === 0 && !send.isPending ? (
-                <p className="text-sm text-muted-foreground">
-                  Ask anything. Answers render here with their sources and limitations.
-                </p>
+              {reopen.isPending ? (
+                <div
+                  role="status"
+                  aria-label="Loading conversation"
+                  className="flex flex-col gap-3"
+                >
+                  <div className="flex justify-end">
+                    <Skeleton className="h-10 w-2/5 rounded-xl" />
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <Skeleton className="h-4 w-full" />
+                    <Skeleton className="h-4 w-11/12" />
+                    <Skeleton className="h-4 w-3/5" />
+                    <div className="flex gap-2">
+                      <Skeleton className="h-6 w-24 rounded-full" />
+                      <Skeleton className="h-6 w-20 rounded-full" />
+                    </div>
+                  </div>
+                </div>
               ) : null}
-              {send.isPending ? (
-                <div className="flex items-center gap-2" role="status">
-                  <Spinner aria-hidden="true" />
-                  <Skeleton className="h-4 w-2/3" />
+              {!reopen.isPending && messages.length === 0 && !send.isPending ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-3 py-10 text-center">
+                  <SparklesIcon className="size-8 text-zinc-400" aria-hidden="true" />
+                  <p className="text-sm text-zinc-300">
+                    Ask anything to initiate the conversation.
+                  </p>
                 </div>
               ) : null}
               {messages.map((message) =>
@@ -964,25 +1297,71 @@ export function AgentDrawer({
                 ) : (
                   <div
                     key={message.id}
-                    className={cn("flex", message.role === "user" ? "justify-end" : "justify-start")}
+                    className={cn(
+                      "flex",
+                      message.role === "user" ? "justify-end" : "justify-start",
+                    )}
                   >
                     <Card
                       className={cn(
                         "max-w-[90%]",
-                        message.role === "user" ? "bg-primary text-primary-foreground" : "",
+                        message.role === "user" ? "border-white/10 bg-white/10 text-zinc-100" : "",
                       )}
                     >
-                      <CardContent className="text-sm whitespace-pre-wrap">
+                      <CardContent className="text-sm break-words whitespace-pre-wrap">
                         {message.body ?? "(empty message)"}
                       </CardContent>
                     </Card>
                   </div>
                 ),
               )}
-              {routeResult ? (
-                <p className="text-sm text-muted-foreground">
-                  Routed to <Badge variant="secondary">{routeResult.intent}</Badge>
-                </p>
+              {liveStream?.phase === "connecting" ? (
+                <div
+                  role="status"
+                  aria-label="Loading live answer"
+                  className="flex flex-col gap-2"
+                >
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-11/12" />
+                  <Skeleton className="h-4 w-3/5" />
+                </div>
+              ) : null}
+              {liveStream && liveStream.phase !== "connecting" && liveStream.text !== "" ? (
+                <AgentResponseMessage
+                  key={`live-${liveStream.key}`}
+                  message={null}
+                  liveBody={liveStream.text}
+                  liveNote={liveStream.phase === "dropped" ? AGENT_STREAM_DROP_NOTE : null}
+                />
+              ) : null}
+              {send.isPending || streamActive ? (
+                <AgentThreadSteps
+                  phase={phase}
+                  intent={routeResult?.intent ?? null}
+                  reasonCodes={routeResult?.reasonCodes ?? []}
+                  thread={liveThread}
+                  error={sendError}
+                  growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
+                />
+              ) : null}
+              {!send.isPending && !streamActive && (routeResult || liveThread) ? (
+                <Collapsible>
+                  <CollapsibleTrigger asChild>
+                    <Button type="button" variant="ghost" size="sm" className="self-start">
+                      Steps
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <AgentThreadSteps
+                      phase={phase}
+                      intent={routeResult?.intent ?? null}
+                      reasonCodes={routeResult?.reasonCodes ?? []}
+                      thread={liveThread}
+                      error={sendError}
+                      growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
+                    />
+                  </CollapsibleContent>
+                </Collapsible>
               ) : null}
               {messages
                 .filter((message) => message.questionnaireAnswers)
@@ -1026,17 +1405,6 @@ export function AgentDrawer({
                   Answers saved: {formatAnswers(lastSaved.answers)}
                 </p>
               ) : null}
-            </TabsContent>
-
-            <TabsContent value="steps" className="overflow-y-auto">
-              <AgentThreadSteps
-                phase={phase}
-                intent={routeResult?.intent ?? null}
-                reasonCodes={routeResult?.reasonCodes ?? []}
-                thread={liveThread}
-                error={sendError}
-                growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
-              />
               {routeResult?.intent === "research_once" && threadId ? (
                 <div className="flex flex-col gap-2 pt-2">
                   <Button
@@ -1100,48 +1468,38 @@ export function AgentDrawer({
                   </p>
                 )
               ) : null}
-            </TabsContent>
-
-            {/*
-              Direct-path asymmetry (Slice C decision: DOCUMENTED, not
-              aligned). This tab drives `adviseCampaign` straight at the
-              campaign-draft + links routes, while the dispatch route's
-              campaign lane admits through the same function from its
-              seam — and only the dispatch seam emits
-              `agent_thread.draft_requested`. Both paths stay governed
-              (same fences, same frozen snapshot, same idempotency keys);
-              only the audit event differs. Aligning means rewiring this
-              tab to the dispatch route once page context binds an
-              opportunity + advice (both null in practice today) — a
-              component + test change owned by a future slice, not this
-              polish roll-up.
-            */}
-            <TabsContent value="draft" className="flex flex-col gap-3 overflow-y-auto">
               {routeResult?.intent === "campaign_advice" ? (
-                <AgentCampaignAdvice
-                  organizationId={organizationId}
-                  actorId={actorId}
-                  threadId={threadId}
-                  thread={liveThread}
-                  canDraft={canDraft}
-                  isViewer={isViewer}
-                  opportunity={opportunity}
-                  advice={advice}
-                  seams={campaignSeams}
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  No draft advice yet. Ask for campaign advice and the review card appears here.
-                </p>
-              )}
-            </TabsContent>
-
-            <TabsContent value="history" className="flex flex-col gap-2 overflow-y-auto">
-              <div className="flex items-center justify-between gap-2">
-                <p className="flex items-center gap-2 text-sm font-medium">
-                  <HistoryIcon data-icon="inline-start" aria-hidden="true" />
-                  Thread history
-                </p>
+                <>
+                  {/*
+                    Direct-path asymmetry (Slice C decision: DOCUMENTED, not
+                    aligned). This inline block drives `adviseCampaign`
+                    straight at the campaign-draft + links routes, while the
+                    dispatch route's campaign lane admits through the same
+                    function from its seam — and only the dispatch seam emits
+                    `agent_thread.draft_requested`. Both paths stay governed;
+                    only the audit event differs.
+                  */}
+                  <AgentCampaignAdvice
+                    organizationId={organizationId}
+                    actorId={actorId}
+                    threadId={threadId}
+                    thread={liveThread}
+                    canDraft={canDraft}
+                    isViewer={isViewer}
+                    opportunity={opportunity}
+                    advice={advice}
+                    seams={campaignSeams}
+                  />
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              role="list"
+              aria-label="Thread history"
+              className="flex min-h-0 flex-1 flex-col gap-2 overflow-x-hidden overflow-y-auto"
+            >
+              <div className="flex items-center justify-end gap-2">
                 <Button type="button" variant="outline" size="sm" onClick={startNewThread}>
                   <PlusIcon data-icon="inline-start" aria-hidden="true" />
                   New chat
@@ -1161,6 +1519,7 @@ export function AgentDrawer({
               {(historyQuery.data?.threads ?? []).map((item) => (
                 <div
                   key={item.id}
+                  role="listitem"
                   className="flex items-center justify-between gap-2 rounded-lg border border-border p-2"
                 >
                   <div className="flex min-w-0 flex-col gap-1">
@@ -1175,12 +1534,12 @@ export function AgentDrawer({
                   <Button
                     type="button"
                     variant="ghost"
-                    size="sm"
-                    disabled={reopen.isPending}
+                    size="icon-sm"
                     onClick={() => reopen.mutate(item)}
-                    aria-label={`Reopen ${item.title}`}
+                    aria-label={`Open ${item.title}`}
+                    title={`Open ${item.title}`}
                   >
-                    {reopen.isPending ? <Spinner aria-hidden="true" /> : "Reopen"}
+                    <ChevronRightIcon aria-hidden="true" />
                   </Button>
                 </div>
               ))}
@@ -1189,8 +1548,8 @@ export function AgentDrawer({
                   No threads yet. Each conversation is kept per organization.
                 </p>
               ) : null}
-            </TabsContent>
-          </Tabs>
+            </div>
+          )}
         </div>
       </section>
     </TooltipProvider>

@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
@@ -9,7 +10,7 @@ import {
   AgentDrawer,
   buildDrawerRequestKeys,
   type AgentDrawerProps,
-  type AgentDrawerTab,
+  type AgentDrawerView,
   type PendingPrompt,
 } from "@/components/agent/agent-drawer";
 import { AgentQuestionnaireCard } from "@/components/agent/agent-questionnaire-card";
@@ -64,6 +65,19 @@ type FetchPlan = {
   /** Single-thread GET row (Slice C M9 poll endpoint). */
   thread?: ThreadSummary | null;
   messages?: ThreadMessageView[];
+  /** Echo body for the POSTed user message (defaults to the fixed fixture). */
+  userMessageBody?: string;
+  /** Leave the GET messages read hanging (reopen skeleton coverage). */
+  messagesHang?: boolean;
+  /**
+   * Task 3 SSE frames for the GET stream endpoint, delivered one chunk at
+   * a time with a macrotask between chunks so token joins are exercised
+   * incrementally; the stream closes after the last frame. `"fetch-hang"`
+   * leaves the stream fetch pending (connecting-skeleton coverage).
+   * Absent → the stream URL is unmocked and the drawer falls back to the
+   * durable read, like the pre-streaming pipeline.
+   */
+  stream?: string[] | "fetch-hang";
 };
 
 function asRouteFailure(value: unknown): { status: number; message: string } | null {
@@ -81,7 +95,11 @@ function mockAgentFetch(plan: FetchPlan = {}) {
       return Response.json({ thread: THREAD, replayed: false, correlationId: "c1" });
     }
     if (target.includes("/messages") && method === "POST") {
-      return Response.json({ message: USER_MESSAGE, replayed: false, correlationId: "c2" });
+      const message =
+        plan.userMessageBody !== undefined
+          ? { ...USER_MESSAGE, body: plan.userMessageBody }
+          : USER_MESSAGE;
+      return Response.json({ message, replayed: false, correlationId: "c2" });
     }
     if (target.includes("/answers") && method === "POST") {
       const failure = asRouteFailure(plan.answers);
@@ -126,10 +144,31 @@ function mockAgentFetch(plan: FetchPlan = {}) {
       );
     }
     if (target.includes("/messages") && method === "GET") {
+      if (plan.messagesHang) return new Promise(() => {});
       return Response.json({
         messages: plan.messages ?? [USER_MESSAGE],
         nextCursor: null,
         correlationId: "c5",
+      });
+    }
+    // Streaming synthesis (Task 4): the drawer opens one GET stream per
+    // send and reads token/done/end frames incrementally.
+    if (target.includes("/stream") && method === "GET") {
+      if (plan.stream === "fetch-hang") return new Promise<Response>(() => {});
+      if (!plan.stream) throw new Error(`unmocked fetch ${method} ${target}`);
+      const frames = plan.stream;
+      const body = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const encoder = new TextEncoder();
+          for (const frame of frames) {
+            controller.enqueue(encoder.encode(frame));
+            await new Promise((resolve) => setTimeout(resolve, 0));
+          }
+          controller.close();
+        },
+      });
+      return new Response(body, {
+        headers: { "Content-Type": "text/event-stream", "x-correlation-id": "cs" },
       });
     }
     // Slice C M9: the checkpoint poll reads the single thread row, never
@@ -152,39 +191,44 @@ function mockAgentFetch(plan: FetchPlan = {}) {
 }
 
 function Harness({
-  tab = "response",
+  view: initialView = "thread",
   pendingPrompt = null,
   ...props
-}: Partial<AgentDrawerProps> & { tab?: AgentDrawerTab }) {
+}: Partial<AgentDrawerProps> & { view?: AgentDrawerView }) {
   const [client] = useState(
     () =>
       new QueryClient({
         defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
       }),
   );
-  const [activeTab, setActiveTab] = useState<AgentDrawerTab>(tab);
+  const [view, setView] = useState<AgentDrawerView>(initialView);
   const [collapsed, setCollapsed] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
+  // Mirrors the shell: a consumed prompt clears so it never re-fires and
+  // never leaks into the next thread title.
+  const [prompt, setPrompt] = useState(pendingPrompt);
   return (
-    <QueryClientProvider client={client}>
-      <AgentDrawer
-        organizationId={ORGANIZATION}
-        page="overview"
-        mode="quick"
-        role="operator"
-        permissions={[]}
-        pendingPrompt={pendingPrompt}
-        threadId={threadId}
-        activeTab={activeTab}
-        onTabChange={setActiveTab}
-        collapsed={collapsed}
-        onToggleCollapsed={() => setCollapsed((previous) => !previous)}
-        onClose={() => {}}
-        onThreadChange={setThreadId}
-        onPromptConsumed={() => {}}
-        {...props}
-      />
-    </QueryClientProvider>
+    <SidebarProvider>
+      <QueryClientProvider client={client}>
+        <AgentDrawer
+          organizationId={ORGANIZATION}
+          page="overview"
+          mode="quick"
+          role="operator"
+          permissions={[]}
+          pendingPrompt={prompt}
+          threadId={threadId}
+          view={view}
+          onViewChange={setView}
+          collapsed={collapsed}
+          onToggleCollapsed={() => setCollapsed((previous) => !previous)}
+          onClose={() => {}}
+          onThreadChange={setThreadId}
+          onPromptConsumed={() => setPrompt(null)}
+          {...props}
+        />
+      </QueryClientProvider>
+    </SidebarProvider>
   );
 }
 
@@ -206,14 +250,35 @@ afterEach(() => {
 });
 
 describe("drawer chrome", () => {
-  it("renders the four tabs with Response first", () => {
+  it("renders the thread view with no tabs", () => {
     render(<Harness />);
-    expect(screen.getByRole("tab", { name: "Response" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Steps" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Draft advice" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "History" })).toBeInTheDocument();
+    expect(screen.getByRole("log", { name: "Conversation thread" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(screen.getByRole("button", { name: /back to thread history/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /collapse conversation/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /close conversation/i })).toBeInTheDocument();
+  });
+
+  it("shows the sparkle empty state for a blank thread", () => {
+    render(<Harness />);
+    expect(screen.getByText("New chat")).toBeInTheDocument();
+    expect(screen.getByText(/ask anything to initiate the conversation/i)).toBeInTheDocument();
+  });
+
+  it("floats the dark fixed-height panel detached above the shell with vertical-only scroll", () => {
+    render(<Harness />);
+    const section = screen.getByLabelText("AI agent conversation");
+    // Detached offset plus the dark scope that flips every token surface.
+    expect(section.className).toMatch(/bottom-22/);
+    expect(section.className).toMatch(/(^|\s)dark(\s|$)/);
+    // Sidebar-aware centering: full sidebar width while expanded.
+    expect(section.className).toMatch(/left-\(--sidebar-width\)/);
+    const panel = section.firstElementChild as HTMLElement;
+    expect(panel.className).toMatch(/h-\[34rem\]/);
+    const thread = section.querySelector('[role="log"]') as HTMLElement;
+    expect(thread.className).toMatch(/overflow-y-auto/);
+    expect(thread.className).toMatch(/overflow-x-hidden/);
+    expect(thread.className).not.toMatch(/overflow-x-auto/);
   });
 
   it("collapses to a status strip on Escape and expands on click", async () => {
@@ -231,6 +296,22 @@ describe("drawer chrome", () => {
 
     await user.click(strip);
     expect(await screen.findByText(/routing your message/i)).toBeInTheDocument();
+  });
+
+  it("attaches the collapsed strip in-flow with no fixed positioning", async () => {
+    globalThis.fetch = mockAgentFetch({ route: "hang" }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+
+    expect(await screen.findByText(/routing your message/i)).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByLabelText("AI agent conversation"), { key: "Escape" });
+
+    const strip = await screen.findByRole("button", { name: /expand conversation/i });
+    expect(strip.closest(".fixed")).toBeNull();
+  });
+
+  it("honors an explicit taller bottom offset", () => {
+    render(<Harness bottomOffset="bottom-32" />);
+    expect(screen.getByLabelText("AI agent conversation").className).toMatch(/bottom-32/);
   });
 });
 
@@ -254,11 +335,32 @@ describe("send pipeline", () => {
     });
   });
 
-  it("lands on Response with the user message and routed intent", async () => {
+  it("lands in the thread view with the user message and routed intent", async () => {
     render(<Harness pendingPrompt={sendPrompt()} />);
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    const panel = await screen.findByRole("tabpanel");
-    expect(within(panel).getByText(/answer_memory/)).toBeInTheDocument();
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    const userMessage = within(thread).getByText("What do we know?");
+    expect(userMessage).toBeInTheDocument();
+    expect(
+      within(thread).getByRole("button", { name: /^steps$/i }),
+    ).toBeInTheDocument();
+    // The routed intent shows only inside the icon-led Marker list — no
+    // separate Routed-to badge line beside the thread.
+    expect(within(thread).queryByText(/^routed to$/i)).toBeNull();
+    // The user bubble follows the dark-grey scheme, never the green primary.
+    const bubble = userMessage.closest("[data-slot='card']") as HTMLElement;
+    expect(bubble.className).toMatch(/bg-white\/10/);
+    expect(bubble.className).not.toMatch(/bg-primary/);
+  });
+
+  it("titles a long first message with truncation", async () => {
+    const long = "What does our business memory say about pricing decisions lately?";
+    globalThis.fetch = mockAgentFetch({ userMessageBody: long }) as never;
+    render(<Harness pendingPrompt={sendPrompt(long)} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText(long)).toBeInTheDocument();
+    expect(
+      screen.getByText("What does our business memory say about pricing…"),
+    ).toBeInTheDocument();
   });
 
   it("surfaces send failures honestly without closing", async () => {
@@ -272,7 +374,8 @@ describe("send pipeline", () => {
 
   it("sends no-store plus one session correlation id on every fetch", async () => {
     render(<Harness pendingPrompt={sendPrompt()} />);
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(3));
     const ids = new Set<string>();
@@ -289,7 +392,7 @@ describe("send pipeline", () => {
 });
 
 describe("history", () => {
-  it("lists threads and reopens messages with saved answers", async () => {
+  it("lists threads and opens the thread on arrow click", async () => {
     const savedMessage: ThreadMessageView = {
       ...USER_MESSAGE,
       id: "44444444-4444-4444-8444-444444444444",
@@ -299,19 +402,35 @@ describe("history", () => {
     };
     globalThis.fetch = mockAgentFetch({ messages: [USER_MESSAGE, savedMessage] }) as never;
     const user = userEvent.setup();
-    render(<Harness tab="history" />);
+    render(<Harness view="history" />);
+    expect(screen.getByText("Thread history")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "New chat" })).toBeInTheDocument();
 
-    await user.click(await screen.findByRole("button", { name: /reopen new chat/i }));
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    expect(await screen.findByText(/saved answers: evidence_window: 60d/i)).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /open new chat/i }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+    expect(within(thread).getByText(/saved answers: evidence_window: 60d/i)).toBeInTheDocument();
+  });
+
+  it("shows chat-mimicking skeleton bubbles while a thread loads", async () => {
+    globalThis.fetch = mockAgentFetch({ messagesHang: true }) as never;
+    const user = userEvent.setup();
+    render(<Harness view="history" />);
+
+    await user.click(await screen.findByRole("button", { name: /open new chat/i }));
+    const loading = await screen.findByRole("status", { name: "Loading conversation" });
+    expect(loading).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Thread history" })).toBeNull();
   });
 
   it("starts a new chat from history", async () => {
     const user = userEvent.setup();
     render(<Harness pendingPrompt={sendPrompt()} />);
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "History" }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /back to thread history/i }));
     await user.click(await screen.findByRole("button", { name: "New chat" }));
+    expect(screen.getByText(/ask anything to initiate the conversation/i)).toBeInTheDocument();
     expect(screen.queryByText("What do we know?")).not.toBeInTheDocument();
   });
 });
@@ -326,10 +445,9 @@ describe("draft advice gating", () => {
 
   it("keeps draft actions disabled for viewers with a permission tooltip", async () => {
     globalThis.fetch = mockAgentFetch({ route: campaignRoute }) as never;
-    const user = userEvent.setup();
     render(<Harness pendingPrompt={sendPrompt()} role="viewer" permissions={[]} />);
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Draft advice" }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /initiate campaign draft/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /initiate campaign draft/i })).toHaveAttribute(
       "title",
@@ -343,8 +461,8 @@ describe("draft advice gating", () => {
     render(
       <Harness pendingPrompt={sendPrompt()} role="operator" permissions={["campaign.create"]} />,
     );
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Draft advice" }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
     const initiate = screen.getByRole("button", { name: /initiate campaign draft/i });
     // The handoff slice landed: the button asks for intent instead of staying parked.
     expect(initiate).toBeDisabled();
@@ -694,15 +812,17 @@ describe("thread checkpoint polling", () => {
     };
     // Slice C M9: the poll reads the single thread row, not the list.
     globalThis.fetch = mockAgentFetch({ thread: linked }) as never;
-    render(<Harness tab="steps" threadId={THREAD.id} />);
-    // The polled thread row carries the research link: the Steps tab shows
-    // the Growth Intelligence receipt with no new message sent.
+    const user = userEvent.setup();
+    render(<Harness view="thread" threadId={THREAD.id} />);
+    // The polled thread row carries the research link: the inline Steps
+    // summary opens with no new message sent.
+    await user.click(await screen.findByRole("button", { name: /^steps$/i }));
     expect(await screen.findByText(/linked research/i)).toBeInTheDocument();
   });
 
   it("polls one row per tick, never the thread collection", async () => {
     globalThis.fetch = mockAgentFetch() as never;
-    render(<Harness tab="steps" threadId={THREAD.id} />);
+    render(<Harness view="thread" threadId={THREAD.id} />);
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => {
       expect(
@@ -742,7 +862,7 @@ describe("duplicate-watch gating", () => {
     // unavailable with honest copy, View existing stays enabled.
     expect(screen.getByRole("radio", { name: /update fields/i })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /view existing/i })).toBeEnabled();
-    expect(screen.getByText(/unavailable for this chat/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/unavailable for this chat/i).length).toBeGreaterThanOrEqual(1);
   });
 
   it("disables Update and Start-fresh without the manage grant", async () => {
@@ -759,7 +879,9 @@ describe("duplicate-watch gating", () => {
     expect(screen.getByRole("radio", { name: /update fields/i })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /start fresh anyway/i })).toBeDisabled();
     expect(screen.getByRole("radio", { name: /view existing/i })).toBeEnabled();
-    expect(screen.getByText(/growth_intelligence\.manage grant/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/growth_intelligence\.manage grant/i).length).toBeGreaterThanOrEqual(
+      1,
+    );
   });
 
   it("enables Update fields once granted and migrated", async () => {
@@ -829,8 +951,8 @@ describe("opportunity-bound handoff", () => {
         campaignSeams={{ drafts: { requestDraft }, links: { setThreadLinks } }}
       />,
     );
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Draft advice" }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
     await user.type(screen.getByLabelText("Objective"), "Lift weekday demand");
     await user.type(screen.getByLabelText("Audience"), "Nearby families");
     await user.click(screen.getByRole("button", { name: /initiate campaign draft/i }));
@@ -868,7 +990,8 @@ describe("nonce idempotency keys (M8)", () => {
 
   it("sends thread, message, and route under the nonce triple", async () => {
     render(<Harness pendingPrompt={sendPrompt()} />);
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const keys: Record<string, string> = {};
@@ -947,7 +1070,7 @@ describe("fresh routing codes (F2)", () => {
     await user.click(screen.getByRole("button", { name: /submit/i }));
     expect(await screen.findByText(/answers saved: confirm_upgrade: true/i)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Steps" }));
+    await user.click(screen.getByRole("button", { name: /^steps$/i }));
     expect(await screen.findByText(/LOW_CONFIDENCE_FALLBACK/)).toBeInTheDocument();
     expect(screen.queryByText(/MODEL_PROPOSAL_ACCEPTED/)).not.toBeInTheDocument();
   });
@@ -981,8 +1104,8 @@ describe("watch lane forms", () => {
         permissions={["growth_intelligence.manage"]}
       />,
     );
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Steps" }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Watch question"), "Track lunch prices");
     await user.type(screen.getByLabelText("Research area"), "downtown lunch");
@@ -1020,8 +1143,8 @@ describe("watch lane forms", () => {
         permissions={["growth_intelligence.manage"]}
       />,
     );
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Steps" }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /start watch/i }));
 
     expect(
@@ -1045,8 +1168,8 @@ describe("watch lane forms", () => {
         permissions={["growth_intelligence.manage"]}
       />,
     );
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Steps" }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
 
     // The project id falls back to the polled thread link.
     expect(screen.getByLabelText("Watch project id")).toHaveAttribute("placeholder", PROJECT);
@@ -1075,12 +1198,194 @@ describe("watch lane forms", () => {
 
   it("hides the forms without the manage grant", async () => {
     globalThis.fetch = mockAgentFetch({ route: watchRoute }) as never;
-    const user = userEvent.setup();
     render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={[]} />);
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: "Steps" }));
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
 
     expect(screen.queryByLabelText("Watch question")).not.toBeInTheDocument();
     expect(screen.getByText(/growth_intelligence\.manage grant/i)).toBeInTheDocument();
+  });
+});
+
+describe("live answer stream", () => {
+  const ASSISTANT: ThreadMessageView = {
+    id: "88888888-8888-4888-8888-888888888888",
+    threadId: THREAD.id,
+    role: "assistant",
+    body: "Durable answer with citations.",
+    questionnaireAnswers: null,
+    markerReceipts: null,
+    citations: null,
+    createdAt: "2026-09-25T10:00:03.000Z",
+  };
+  const END_CORRELATION = "99999999-9999-4999-8999-999999999999";
+
+  function tokenFrame(text: string): string {
+    return `event: token\ndata: ${JSON.stringify({ text })}\n\n`;
+  }
+  const DONE_FRAME = "event: done\ndata: [DONE]\n\n";
+  function endFrame(payload: Record<string, unknown>): string {
+    return `event: end\ndata: ${JSON.stringify(payload)}\n\n`;
+  }
+  function endPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      messageId: ASSISTANT.id,
+      replayed: true,
+      fallback: false,
+      reason: null,
+      draft: { body: "Hello, world.", citations: [], limitations: [], estimates: [] },
+      correlationId: END_CORRELATION,
+      ...overrides,
+    };
+  }
+  function streamCalls(): Array<{
+    url: string;
+    init: RequestInit & { headers: Record<string, string> };
+  }> {
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    return fetchMock.mock.calls
+      .filter(
+        ([url, init]) =>
+          String(url).includes("/stream") &&
+          ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+      )
+      .map(([url, init]) => ({
+        url: String(url),
+        init: init as RequestInit & { headers: Record<string, string> },
+      }));
+  }
+  function fullStream(): string[] {
+    return [tokenFrame("Hello, "), tokenFrame("world."), DONE_FRAME, endFrame(endPayload())];
+  }
+
+  it("opens one stream per send with messageId, page, and the session trail", async () => {
+    globalThis.fetch = mockAgentFetch({
+      stream: fullStream(),
+      messages: [USER_MESSAGE, ASSISTANT],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    // Live tokens join into the thread bubble before the swap.
+    expect(await within(thread).findByText("Hello, world.")).toBeInTheDocument();
+
+    const calls = streamCalls();
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toContain(
+      `/agent/threads/${THREAD.id}/stream?messageId=${USER_MESSAGE.id}&page=overview`,
+    );
+    expect(calls[0]?.init.headers["accept"]).toBe("text/event-stream");
+    expect(calls[0]?.init.cache).toBe("no-store");
+    expect(calls[0]?.init.headers["x-correlation-id"]).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it("swaps the live preview for the durable row on end", async () => {
+    globalThis.fetch = mockAgentFetch({
+      stream: fullStream(),
+      messages: [USER_MESSAGE, ASSISTANT],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Hello, world.")).toBeInTheDocument();
+
+    // The end marker discards the preview and renders the durable row.
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    await waitFor(() => expect(within(thread).queryByText("Hello, world.")).toBeNull());
+    expect(within(thread).queryByText(/stopped here/i)).toBeNull();
+  });
+
+  it("shows a skeleton while the stream connects", async () => {
+    globalThis.fetch = mockAgentFetch({ stream: "fetch-hang" }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByRole("status", { name: "Loading live answer" })).toBeInTheDocument();
+  });
+
+  it("keeps partial text with a note on drop and never resumes the stream", async () => {
+    globalThis.fetch = mockAgentFetch({ stream: [tokenFrame("Half.")] }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Half.")).toBeInTheDocument();
+    expect(await within(thread).findByText(/the live answer stopped here/i)).toBeInTheDocument();
+
+    // The drawer reads the durable row instead of reopening the stream.
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).includes("/messages") &&
+            ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+        ),
+      ).toBe(true);
+    });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(streamCalls()).toHaveLength(1);
+  });
+
+  it("treats an invalid end payload as a drop", async () => {
+    globalThis.fetch = mockAgentFetch({
+      stream: [tokenFrame("Almost."), DONE_FRAME, "event: end\ndata: {\"nope\":true}\n\n"],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Almost.")).toBeInTheDocument();
+    expect(await within(thread).findByText(/the live answer stopped here/i)).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(streamCalls()).toHaveLength(1);
+  });
+
+  it("renders the end draft with sections when messageId is null", async () => {
+    const draft = {
+      body: "Viewer answer.",
+      citations: [{ claim: "Confirmed trading name.", sourceId: "ledger", digest: "abc123" }],
+      limitations: ["Coverage is partial."],
+      estimates: [],
+    };
+    globalThis.fetch = mockAgentFetch({
+      stream: [tokenFrame("View"), DONE_FRAME, endFrame(endPayload({ messageId: null, draft }))],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} role="viewer" />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Viewer answer.")).toBeInTheDocument();
+    expect(within(thread).getByText(/confirmed trading name/i)).toBeInTheDocument();
+    expect(within(thread).getByText(/coverage is partial/i)).toBeInTheDocument();
+    expect(within(thread).queryByText(/stopped here/i)).toBeNull();
+  });
+
+  it("falls back to the durable read when the stream never opens", async () => {
+    globalThis.fetch = mockAgentFetch({ messages: [USER_MESSAGE, ASSISTANT] }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    expect(within(thread).queryByText(/stopped here/i)).toBeNull();
+    expect(screen.queryByRole("status", { name: "Loading live answer" })).toBeNull();
+  });
+
+  it("skips malformed token frames without failing the stream", async () => {
+    globalThis.fetch = mockAgentFetch({
+      stream: ["event: token\ndata: not-json\n\n", ...fullStream()],
+      messages: [USER_MESSAGE, ASSISTANT],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+  });
+
+  it("reopens read the durable row without resuming the stream", async () => {
+    globalThis.fetch = mockAgentFetch({
+      stream: fullStream(),
+      messages: [USER_MESSAGE, ASSISTANT],
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    expect(streamCalls()).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: /back to thread history/i }));
+    await user.click(await screen.findByRole("button", { name: /open new chat/i }));
+    const reopened = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(reopened).getByText("Durable answer with citations.")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(streamCalls()).toHaveLength(1);
   });
 });

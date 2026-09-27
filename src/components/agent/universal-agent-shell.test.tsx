@@ -2,6 +2,7 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SidebarProvider } from "@/components/ui/sidebar";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,6 +10,7 @@ import {
   isAgentShellPage,
   pageKeyForPathname,
 } from "@/components/agent/universal-agent-shell";
+import { useAgentSidebarOffset } from "@/components/agent/agent-placement";
 
 const ORGANIZATION = "00000000-0000-4000-8000-000000000000";
 
@@ -21,14 +23,16 @@ function renderShell(props?: {
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
-    <QueryClientProvider client={client}>
-      <UniversalAgentShell
-        organizationId={ORGANIZATION}
-        page={props?.page ?? "overview"}
-        role={props?.role}
-        permissions={props?.permissions}
-      />
-    </QueryClientProvider>,
+    <SidebarProvider>
+      <QueryClientProvider client={client}>
+        <UniversalAgentShell
+          organizationId={ORGANIZATION}
+          page={props?.page ?? "overview"}
+          role={props?.role}
+          permissions={props?.permissions}
+        />
+      </QueryClientProvider>
+    </SidebarProvider>,
   );
 }
 
@@ -102,40 +106,90 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+async function expandShell(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByPlaceholderText(/ask anything/i));
+  expect(await screen.findByRole("button", { name: /answer mode/i })).toBeInTheDocument();
+}
+
+async function openModeMenu(user: ReturnType<typeof userEvent.setup>) {
+  await expandShell(user);
+  await user.click(screen.getByRole("button", { name: /answer mode/i }));
+  expect(await screen.findByRole("menuitemradio", { name: /quick/i })).toBeInTheDocument();
+}
+
 describe("shell", () => {
   it("shows Quick default with inert voice and attach", () => {
-    render(
-      <UniversalAgentShell organizationId="00000000-0000-4000-8000-000000000000" page="overview" />,
-    );
+    renderShell();
     expect(screen.getByPlaceholderText(/ask anything/i)).toBeDefined();
   });
 
   it("renders nothing outside the 5 allowed pages", () => {
-    const { container } = render(
-      <UniversalAgentShell organizationId={ORGANIZATION} page="onboarding" />,
-    );
-    expect(container).toBeEmptyDOMElement();
+    renderShell({ page: "onboarding" });
+    expect(screen.queryByPlaceholderText(/ask anything/i)).toBeNull();
+    expect(screen.queryByLabelText("AI agent conversation")).toBeNull();
   });
 
-  it("defaults to Quick pressed with voice and attach inert", () => {
+  it("rests as a single input line with controls and chips hidden", () => {
     renderShell();
-    expect(screen.getByRole("radio", { name: /quick/i })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByPlaceholderText(/ask anything/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /answer mode/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /what do we know/i })).not.toBeInTheDocument();
+  });
+
+  it("expands the control row and reveals chips on input focus", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await expandShell(user);
+    expect(screen.getByRole("button", { name: /what do we know/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /voice.*coming soon/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /attachments.*coming soon/i })).toBeDisabled();
+  });
+
+  it("defaults to Quick answer with voice and attach inert", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await expandShell(user);
     expect(screen.getByRole("button", { name: /attachments.*coming soon/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /voice.*coming soon/i })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /answer mode/i }));
+    expect(await screen.findByRole("menuitemradio", { name: /quick/i })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 
-  it("keeps DeepThink disabled without the manage grant and enables it with the grant", () => {
+  it("lists exactly Quick answer and DeepThink in the mode menu", async () => {
+    const user = userEvent.setup();
+    renderShell({ role: "operator", permissions: ["growth_intelligence.manage"] });
+    await openModeMenu(user);
+    const items = screen.getAllByRole("menuitemradio");
+    expect(items).toHaveLength(2);
+  });
+
+  it("keeps DeepThink disabled without the manage grant and enables it with the grant", async () => {
+    const user = userEvent.setup();
     const { unmount } = renderShell({ role: "viewer", permissions: [] });
-    expect(screen.getByRole("radio", { name: /deepthink/i })).toBeDisabled();
+    await openModeMenu(user);
+    expect(screen.getByRole("menuitemradio", { name: /deepthink/i })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
     unmount();
     cleanup();
     renderShell({ role: "operator", permissions: ["growth_intelligence.manage"] });
-    expect(screen.getByRole("radio", { name: /deepthink/i })).toBeEnabled();
+    await openModeMenu(user);
+    expect(screen.getByRole("menuitemradio", { name: /deepthink/i })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+    await user.click(screen.getByRole("menuitemradio", { name: /deepthink/i }));
+    expect(screen.getByRole("button", { name: /answer mode: deepthink/i })).toBeInTheDocument();
   });
 
   it("fills the input from a suggestion chip without sending", async () => {
     const user = userEvent.setup();
     renderShell();
+    await expandShell(user);
     await user.click(screen.getByRole("button", { name: /what do we know/i }));
     expect(screen.getByPlaceholderText(/ask anything/i)).toHaveValue(
       "What do we know about this business?",
@@ -143,7 +197,7 @@ describe("shell", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("sends on Enter, opens the drawer, and routes through the three Task 3 calls", async () => {
+  it("sends on Enter, opens the drawer, routes through the three Task 3 calls, and collapses", async () => {
     const user = userEvent.setup();
     renderShell({ role: "operator", permissions: [] });
     await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
@@ -166,20 +220,60 @@ describe("shell", () => {
     expect(calls[0]).toMatch(/\/agent\/threads$/);
     expect(calls[1]).toMatch(/\/messages$/);
     expect(calls[2]).toMatch(/\/route\?page=overview$/);
-    expect(await screen.findByText("What do we know?")).toBeInTheDocument();
-    const panel = await screen.findByRole("tabpanel");
-    expect(within(panel).getByText(/answer_memory/)).toBeInTheDocument();
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+    expect(
+      within(thread).getByRole("button", { name: /^steps$/i }),
+    ).toBeInTheDocument();
+    // Send returns the bar to its resting single-line state with chips hidden.
+    await waitFor(() => {
+      expect(screen.queryByRole("button", { name: /answer mode/i })).not.toBeInTheDocument();
+    });
+    // With the short resting bar, the drawer docks close but detached.
+    expect(screen.getByLabelText("AI agent conversation").className).toMatch(/bottom-22/);
+    expect(screen.queryByRole("button", { name: /what do we know/i })).not.toBeInTheDocument();
   });
 
-  it("opens the History tab from the shell history button", async () => {
+  it("opens the history view from the shell history button", async () => {
     const user = userEvent.setup();
     renderShell({ role: "operator", permissions: [] });
+    await expandShell(user);
     await user.click(screen.getByRole("button", { name: /open conversation history/i }));
-    expect(await screen.findByRole("tab", { name: /history/i })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(await screen.findByText("Thread history")).toBeInTheDocument();
+    expect(screen.queryByRole("tab")).toBeNull();
+    expect(await screen.findByRole("button", { name: /open new chat/i })).toBeInTheDocument();
+  });
+});
+
+describe("sidebar-aware placement", () => {
+  function OffsetProbe() {
+    return <span data-testid="sidebar-offset">{useAgentSidebarOffset()}</span>;
+  }
+
+  it("clears the full sidebar width while expanded", () => {
+    render(
+      <SidebarProvider>
+        <OffsetProbe />
+      </SidebarProvider>,
     );
-    expect(await screen.findByRole("button", { name: /reopen new chat/i })).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-offset")).toHaveTextContent("left-(--sidebar-width)");
+  });
+
+  it("shrinks to the icon width while collapsed", () => {
+    render(
+      <SidebarProvider defaultOpen={false}>
+        <OffsetProbe />
+      </SidebarProvider>,
+    );
+    expect(screen.getByTestId("sidebar-offset")).toHaveTextContent(
+      "left-[calc(var(--sidebar-width-icon)+(--spacing(4)))]",
+    );
+  });
+
+  it("centers the floating bar in the content area", () => {
+    renderShell();
+    const bar = screen.getByPlaceholderText(/ask anything/i).closest("div.fixed") as HTMLElement;
+    expect(bar.className).toMatch(/left-\(--sidebar-width\)/);
   });
 });
 
