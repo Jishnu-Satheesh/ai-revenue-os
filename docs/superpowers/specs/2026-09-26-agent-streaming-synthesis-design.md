@@ -27,6 +27,7 @@ ideas instead of blank forms, and steps merged borderless into the conversation.
 - Spend: no cap; 15s timeouts, fail-closed fallback, per-tier usage logged by correlation id.
 - Delivery: full build in one go (phased approach considered and set aside).
 - ADR 0071 (poll-rendered, no token streaming) is deliberately reversed by this design; the reversal is recorded here and must be referenced from the Execution Plan.
+- Reversal recorded as ADR 0072 (`adrs/0072-answer-token-streaming.md`); later tasks cite the ADR.
 
 ## 4. Architecture
 
