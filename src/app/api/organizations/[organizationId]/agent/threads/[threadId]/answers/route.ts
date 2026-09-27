@@ -8,7 +8,15 @@ import { assertAgentChatEnabled } from "@/modules/integrations/application/featu
 import { createLightModelProvider } from "@/modules/agent-router/infrastructure/light-model-provider";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
 import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
-import { createThreadService } from "@/modules/agent-chat/application/thread-service";
+import {
+  createThreadService,
+  permissionsForRole,
+} from "@/modules/agent-chat/application/thread-service";
+import {
+  requestDraftFromIdeaPick,
+  type IdeaDraftOutcome,
+} from "@/modules/agent-chat/application/campaign-advise";
+import { createCampaignDraftService } from "@/modules/decisions/application/campaign-draft-service";
 import {
   submitAnswersBodySchema,
   threadRouteParamsSchema,
@@ -32,6 +40,15 @@ import {
  * The response carries the re-route's fresh intent, confidence, and
  * reason codes (Slice C F2/M6), digested over the real context pack
  * (Slice C M7) — never the previous turn's codes.
+ *
+ * Streaming-synthesis Task 6 (executor inversion): a `campaign_ideas`
+ * pick calls the draft seam immediately in the same POST, under a
+ * deterministic thread-linked key derived from the picked idea, and the
+ * response carries the one-payload `ideaDraft` envelope — draft id plus
+ * inline approve action plus Studio hyperlink, or the pre-filled brief
+ * when ineligible. A draft-seam failure propagates (the answers row is
+ * already persisted and replay-safe, so a retry with the same keys
+ * replays the answers and resumes the draft — nothing half-created).
  */
 
 export async function POST(
@@ -98,6 +115,89 @@ export async function POST(
       threadId: rawParams.threadId,
       correlationId,
     });
+
+    // Pick to instant draft: the ideas pick drafts in this same POST.
+    // Grants come from the server-owned role (never client claims); the
+    // opportunity rides the optional body block (absent means the brief
+    // fallback, never an invented binding).
+    let ideaDraft: IdeaDraftOutcome | null = null;
+    if (spec.kind === "campaign_ideas") {
+      const pickedValue = answers["idea"];
+      const pickedOption =
+        typeof pickedValue === "string"
+          ? spec.items.flatMap((item) => item.options ?? []).find(
+              (option) => option.value === pickedValue,
+            )
+          : undefined;
+      if (!pickedOption || !pickedOption.description) {
+        throw new DomainError("VALIDATION_ERROR", "Please check the submitted fields.");
+      }
+      const { thread } = await service.getThread({
+        organizationId,
+        threadId: rawParams.threadId,
+      });
+      ideaDraft = await requestDraftFromIdeaPick(
+        {
+          organizationId,
+          actorId: context.user.id,
+          threadId: rawParams.threadId,
+          resumeKey: body.resumeKey,
+          permissions: permissionsForRole(context.membership.role),
+          opportunity: body.opportunity ?? null,
+          idea: {
+            value: pickedOption.value,
+            title: pickedOption.label,
+            description: pickedOption.description,
+            recommended: pickedOption.recommended ?? false,
+          },
+          correlationId,
+          existingLinks: {
+            ...(thread.linkedResearchProjectId
+              ? { projectId: thread.linkedResearchProjectId }
+              : {}),
+            ...(thread.linkedRequestId ? { requestId: thread.linkedRequestId } : {}),
+            ...(thread.linkedCampaignId ? { campaignId: thread.linkedCampaignId } : {}),
+          },
+        },
+        {
+          drafts: {
+            requestDraft: (draftInput) =>
+              createCampaignDraftService({
+                rpc: async (name, args) => {
+                  const { data, error } = await context.supabase.rpc(name, args);
+                  return {
+                    data: data as {
+                      requestId: string;
+                      status: string;
+                      draftRequestStatus: string;
+                    } | null,
+                    error: error as { code: string | null; message: string } | null,
+                  };
+                },
+              }).requestDraft(draftInput),
+          },
+          links: {
+            setThreadLinks: (linkInput) =>
+              service.setThreadLinks({
+                organizationId: linkInput.organizationId,
+                actorId: linkInput.actorId,
+                role: context.membership.role,
+                threadId: linkInput.threadId,
+                ...(linkInput.projectId ? { projectId: linkInput.projectId } : {}),
+                ...(linkInput.requestId ? { requestId: linkInput.requestId } : {}),
+                ...(linkInput.draftRequestId ? { draftRequestId: linkInput.draftRequestId } : {}),
+                ...(linkInput.campaignId ? { campaignId: linkInput.campaignId } : {}),
+              }),
+          },
+        },
+      );
+      logger.info("agent_thread.idea_draft_resolved", {
+        organizationId,
+        threadId: rawParams.threadId,
+        correlationId,
+      });
+    }
+
     return agentJsonResponse(
       {
         message,
@@ -111,6 +211,7 @@ export async function POST(
         confidence,
         reasonCodes,
         questionnaire,
+        ...(ideaDraft ? { ideaDraft } : {}),
       },
       correlationId,
       replayed ? 200 : 201,

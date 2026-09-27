@@ -408,4 +408,257 @@ describe("agent thread answers route", () => {
     expect(refused.status).toBe(400);
     expect(mocks.createRepo).not.toHaveBeenCalled();
   });
+
+  it("drafts immediately on a campaign-ideas pick with opportunity, one payload", async () => {
+    const ideasSpec = {
+      kind: "campaign_ideas",
+      title: "Campaign ideas",
+      resumeKey: "router:campaign_advice:overview:abcdef1234567890",
+      items: [
+        {
+          key: "idea",
+          label: "Which idea should become a draft?",
+          kind: "single_select",
+          required: true,
+          options: [
+            {
+              value: "idea-a",
+              label: "Lunch rush bundle",
+              description: "Noon combo for nearby offices.",
+              recommended: false,
+            },
+            {
+              value: "idea-b",
+              label: "Weekend family table",
+              description: "Saturday set menu for families.",
+              recommended: true,
+            },
+            {
+              value: "idea-c",
+              label: "Late-night dessert",
+              description: "After-9pm dessert counter.",
+              recommended: false,
+            },
+          ],
+        },
+      ],
+    };
+    const rpc = vi.fn(async () => ({
+      data: {
+        requestId: "44444444-4444-4444-8444-444444444444",
+        status: "created",
+        draftRequestStatus: "pending",
+      },
+      error: null,
+    }));
+    const setThreadLinks = vi.fn(async (input: { draftRequestId?: string }) => ({
+      threadId: THREAD,
+      projectId: null,
+      requestId: null,
+      draftRequestId: input.draftRequestId ?? null,
+      campaignId: null,
+    }));
+    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase: { rpc } });
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      setThreadLinks,
+    });
+    mocks.propose.mockResolvedValue({ intent: "answer_memory", confidence: "high", missing: [] });
+
+    const response = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "i-1234567890123456",
+            resumeKey: ideasSpec.resumeKey,
+            spec: ideasSpec,
+            answers: { idea: "idea-b" },
+            opportunity: { id: "33333333-3333-4333-8333-333333333333", version: 2 },
+          }),
+        },
+      ),
+      params,
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.answers).toEqual({ idea: "idea-b" });
+    // One payload: draft id plus inline approve action plus Studio hyperlink.
+    expect(body.ideaDraft.outcome).toBe("draft_requested");
+    expect(body.ideaDraft.draftRequestId).toBe("44444444-4444-4444-8444-444444444444");
+    expect(body.ideaDraft.replayed).toBe(false);
+    expect(body.ideaDraft.idea).toMatchObject({ value: "idea-b", recommended: true });
+    expect(body.ideaDraft.adviceFingerprint).toMatch(/^[0-9a-f]{16}$/);
+    expect(body.ideaDraft.approveAction.kind).toBe("campaign_idea_approve");
+    expect(body.ideaDraft.approveAction.href).toContain(
+      `/organizations/${ORGANIZATION}/campaigns`,
+    );
+    expect(body.ideaDraft.studioLink.href).toContain(`/organizations/${ORGANIZATION}/campaigns`);
+    expect(body.ideaDraft.markers.map((marker: { stage: string }) => marker.stage)).toEqual([
+      "requested",
+      "claimed",
+      "draft-ready",
+    ]);
+    // The draft seam ran immediately with the idea as objective/audience.
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith(
+      "request_campaign_draft_from_opportunity",
+      expect.objectContaining({
+        p_organization_id: ORGANIZATION,
+        p_opportunity_id: "33333333-3333-4333-8333-333333333333",
+        p_opportunity_version: 2,
+        p_objective: "Weekend family table",
+        p_audience: "Saturday set menu for families.",
+      }),
+    );
+    // Thread → request link keeps the audit chain.
+    expect(setThreadLinks).toHaveBeenCalledWith(
+      expect.objectContaining({ draftRequestId: "44444444-4444-4444-8444-444444444444" }),
+    );
+  });
+
+  it("briefs (no draft) when the pick carries no bound opportunity", async () => {
+    const ideasSpec = {
+      kind: "campaign_ideas",
+      title: "Campaign ideas",
+      resumeKey: "router:campaign_advice:overview:abcdef1234567890",
+      items: [
+        {
+          key: "idea",
+          label: "Which idea should become a draft?",
+          kind: "single_select",
+          required: true,
+          options: [
+            {
+              value: "idea-a",
+              label: "Lunch rush bundle",
+              description: "Noon combo for nearby offices.",
+              recommended: false,
+            },
+            {
+              value: "idea-b",
+              label: "Weekend family table",
+              description: "Saturday set menu for families.",
+              recommended: true,
+            },
+            {
+              value: "idea-c",
+              label: "Late-night dessert",
+              description: "After-9pm dessert counter.",
+              recommended: false,
+            },
+          ],
+        },
+      ],
+    };
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const setThreadLinks = vi.fn(async () => ({}));
+    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase: { rpc } });
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      setThreadLinks,
+    });
+    mocks.propose.mockResolvedValue({ intent: "answer_memory", confidence: "high", missing: [] });
+
+    const response = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "i-1234567890123458",
+            resumeKey: ideasSpec.resumeKey,
+            spec: ideasSpec,
+            answers: { idea: "idea-a" },
+          }),
+        },
+      ),
+      params,
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    // Retained fallback: pre-filled brief with the reason named, seams untouched.
+    expect(body.ideaDraft.outcome).toBe("brief_prefilled");
+    expect(body.ideaDraft.reasonCodes).toContain("ADVICE_NO_OPPORTUNITY");
+    expect(body.ideaDraft.briefUrl).toContain("/campaigns/new");
+    expect(body.ideaDraft.draftRequestId).toBeUndefined();
+    expect(rpc).not.toHaveBeenCalled();
+    expect(setThreadLinks).not.toHaveBeenCalled();
+  });
+
+  it("refuses campaign-ideas picks for viewers before persistence", async () => {
+    const ideasSpec = {
+      kind: "campaign_ideas",
+      title: "Campaign ideas",
+      resumeKey: "router:campaign_advice:overview:abcdef1234567890",
+      items: [
+        {
+          key: "idea",
+          label: "Which idea should become a draft?",
+          kind: "single_select",
+          required: true,
+          options: [
+            {
+              value: "idea-a",
+              label: "Lunch rush bundle",
+              description: "Noon combo for nearby offices.",
+              recommended: false,
+            },
+            {
+              value: "idea-b",
+              label: "Weekend family table",
+              description: "Saturday set menu for families.",
+              recommended: true,
+            },
+            {
+              value: "idea-c",
+              label: "Late-night dessert",
+              description: "After-9pm dessert counter.",
+              recommended: false,
+            },
+          ],
+        },
+      ],
+    };
+    mocks.getOrganizationContext.mockResolvedValue({
+      ...operatorContext(),
+      membership: { role: "viewer" },
+    });
+    mocks.createRepo.mockClear();
+    const refused = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "i-1234567890123459",
+            resumeKey: ideasSpec.resumeKey,
+            spec: ideasSpec,
+            answers: { idea: "idea-b" },
+            opportunity: { id: "33333333-3333-4333-8333-333333333333", version: 2 },
+          }),
+        },
+      ),
+      params,
+    );
+    expect(refused.status).toBe(403);
+    expect(mocks.createRepo).not.toHaveBeenCalled();
+  });
 });

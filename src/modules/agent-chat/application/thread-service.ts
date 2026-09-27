@@ -21,6 +21,7 @@ import type {
 import {
   adviseCampaign,
   campaignBundleLink,
+  generateCampaignIdeas,
 } from "@/modules/agent-chat/application/campaign-advise";
 import {
   buildThreadIdempotencyKey,
@@ -87,6 +88,14 @@ export type ThreadServiceDeps = {
    * never reach persistence — they receive the draft without a stored row.
    */
   synthesizeAnswer?: AnswerSynthesizer;
+  /**
+   * Campaign-ideas synthesis seam (streaming-synthesis Task 6, ideas-first).
+   * Injected in tests; otherwise the ideas generator's env-gated
+   * strong-tier default applies (no card unless `AI_ANSWER_STRONG_MODEL`
+   * plus the Google credential is set). Generation never throws for model
+   * behavior — an unavailable card keeps the direct campaign route as-is.
+   */
+  synthesizeIdeas?: AnswerSynthesizer | null;
   /**
    * Route-redispatch dedup (ruling L4). Re-route with the same carried
    * idempotency token for the same thread + message returns the kept
@@ -456,6 +465,45 @@ async function rehydrateKeptAnswer(
   return { message, draft: kept.answer.draft, replayed: true };
 }
 
+/**
+ * Ideas-first questionnaire for a routed turn (streaming-synthesis Task 6).
+ * A direct `campaign_advice` route (no missing-fields card) carries the
+ * 3-option ideas card generated on the strong tier over the pack; every
+ * other turn keeps the router's questionnaire untouched. Returns null
+ * (keeping the direct route) when no pack is bound or the card is
+ * unavailable — advice stays free, execution stays fenced at the pick.
+ */
+async function questionnaireForRoute(
+  args: {
+    deps: ThreadServiceDeps;
+    intent: AgentIntent;
+    questionnaire: QuestionnaireSpec | null;
+    pack: ContextPack | null;
+    routingNote: string;
+    page: string;
+    contextDigest: string;
+  },
+): Promise<QuestionnaireSpec | null> {
+  if (args.intent !== "campaign_advice" || args.questionnaire !== null || !args.pack) {
+    return args.questionnaire;
+  }
+  const ideas = await generateCampaignIdeas(
+    {
+      pack: args.pack,
+      routingNote: args.routingNote,
+      page: args.page,
+      contextDigest: args.contextDigest,
+    },
+    {
+      ...(args.deps.synthesizeIdeas !== undefined
+        ? { synthesize: args.deps.synthesizeIdeas }
+        : {}),
+      ...(args.deps.correlationId ? { correlationId: args.deps.correlationId } : {}),
+    },
+  );
+  return ideas ?? args.questionnaire;
+}
+
 export function createThreadService(deps: ThreadServiceDeps) {
   return {
     async listThreads(input: {
@@ -712,7 +760,21 @@ export function createThreadService(deps: ThreadServiceDeps) {
         intent: output.intent,
         confidence: output.confidence,
         reasonCodes: output.reasonCodes,
-        questionnaire: output.questionnaire,
+        // Ideas-first campaigns (streaming-synthesis Task 6): a direct
+        // campaign_advice route carries the 3-option ideas card generated
+        // on the strong tier over the pack. Missing-fields cards keep
+        // priority (evidence first, ideas arrive after the answers
+        // re-route). Generation never throws for model behavior — null
+        // keeps the direct route without a card.
+        questionnaire: await questionnaireForRoute({
+          deps,
+          intent: output.intent,
+          questionnaire: output.questionnaire,
+          pack,
+          routingNote: output.routingNote,
+          page,
+          contextDigest,
+        }),
         routingNote: output.routingNote,
         thread,
         answer: await synthesizeAssistantAnswer(deps, {

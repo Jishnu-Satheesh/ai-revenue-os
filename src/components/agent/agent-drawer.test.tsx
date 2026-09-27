@@ -448,37 +448,24 @@ describe("draft advice gating", () => {
     render(<Harness pendingPrompt={sendPrompt()} role="viewer" permissions={[]} />);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /initiate campaign draft/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /initiate campaign draft/i })).toHaveAttribute(
-      "title",
-      expect.stringMatching(/campaign\.create/),
-    );
+    // Ideas-first: no form — the card names the pick flow and viewers stay read-only.
+    expect(screen.getByText(/pick an idea above/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Objective")).toBeNull();
+    expect(screen.queryByRole("button", { name: /initiate campaign draft/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /save to recommendations/i })).toBeDisabled();
   });
 
-  it("enables the handoff for permitted roles and resolves to a prefilled brief with no bound opportunity", async () => {
+  it("names the pick flow for permitted roles with no bound pick yet", async () => {
     globalThis.fetch = mockAgentFetch({ route: campaignRoute }) as never;
-    const user = userEvent.setup();
     render(
       <Harness pendingPrompt={sendPrompt()} role="operator" permissions={["campaign.create"]} />,
     );
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-    const initiate = screen.getByRole("button", { name: /initiate campaign draft/i });
-    // The handoff slice landed: the button asks for intent instead of staying parked.
-    expect(initiate).toBeDisabled();
-    expect(initiate).toHaveAttribute("title", expect.stringMatching(/objective and audience/));
-
-    await user.type(screen.getByLabelText("Objective"), "Lift weekday demand");
-    await user.type(screen.getByLabelText("Audience"), "Nearby families");
-    expect(screen.getByRole("button", { name: /initiate campaign draft/i })).toBeEnabled();
-    await user.click(screen.getByRole("button", { name: /initiate campaign draft/i }));
-    // No opportunity is bound to this chat, so the advice resolves to the
-    // pre-filled brief with the reason named — never a silent upgrade.
-    expect(await screen.findByText(/ADVICE_NO_OPPORTUNITY/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open prefilled brief/i })).toHaveAttribute(
-      "href",
-      expect.stringContaining("/campaigns/new"),
-    );
+    // The handoff slice landed: the card asks for a pick instead of staying parked.
+    expect(screen.getByText(/pick an idea above/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Objective")).toBeNull();
+    expect(screen.queryByLabelText("Audience")).toBeNull();
   });
 });
 
@@ -965,42 +952,90 @@ describe("opportunity-bound handoff", () => {
   const ACTOR = "11111111-1111-4111-8111-111111111111";
   const OPPORTUNITY = { id: "33333333-3333-4333-8333-333333333333", version: 2 };
   const DRAFT_REQUEST = "44444444-4444-4444-8444-444444444444";
-  const ADVICE = {
-    assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
-    evidenceSnapshot: {
-      windowDays: 30 as const,
-      observedAt: "2026-09-20T10:00:00.000Z",
-      digest: "0123456789abcdef",
-      citations: ["ledger:2026-09-01:2026-09-20"],
-    },
-    evidenceSnapshotFreezable: true,
-    marketProfile: { versionId: "mp-v3", digest: "fedcba9876543210" },
-    policyPass: true,
-    capabilityPass: true,
-    schedulePass: true,
-    audienceReady: true,
-    estimate: {
-      valueText: "+AED 4,000 gross profit / week",
-      inputs: ["weekday-evening covers, last 30 days"],
-      assumptions: ["no menu-price change during the window"],
-    },
+  const FINGERPRINT = "0123456789abcdef";
+  const IDEAS_MESSAGE: ThreadMessageView = {
+    id: "44444444-4444-4444-8444-444444444444",
+    threadId: THREAD.id,
+    role: "user",
+    body: "[answers campaign_ideas]\nidea: idea-b",
+    questionnaireAnswers: null,
+    markerReceipts: null,
+    citations: null,
+    createdAt: "2026-09-25T10:00:02.000Z",
   };
-  const campaignRoute = {
+  const ideasRoute = {
     intent: "campaign_advice",
-    questionnaire: null,
+    questionnaire: CAMPAIGN_IDEAS,
     thread: THREAD,
     correlationId: "c3",
   };
+  const ideaDraft = {
+    outcome: "draft_requested",
+    draftRequestId: DRAFT_REQUEST,
+    replayed: false,
+    idempotencyKey: `agent_thread:${THREAD.id}:abc123abc123abc1`,
+    idea: {
+      value: "idea-b",
+      title: "Weekend family table",
+      description: "Saturday set menu for families.",
+      recommended: true,
+    },
+    adviceFingerprint: FINGERPRINT,
+    approveAction: {
+      kind: "campaign_idea_approve",
+      draftRequestId: DRAFT_REQUEST,
+      adviceFingerprint: FINGERPRINT,
+      href: `/organizations/${ORGANIZATION}/campaigns`,
+    },
+    studioLink: {
+      href: `/organizations/${ORGANIZATION}/campaigns`,
+      ref: { draftRequestId: DRAFT_REQUEST, campaignId: null },
+    },
+    markers: [
+      { stage: "requested", state: "active", label: "Requested" },
+      { stage: "claimed", state: "pending", label: "Claimed" },
+      { stage: "draft-ready", state: "pending", label: "Draft ready" },
+    ],
+    reasonCodes: [],
+  };
 
-  it("runs the eligible draft path when drawer props bind an opportunity", async () => {
-    globalThis.fetch = mockAgentFetch({ route: campaignRoute }) as never;
-    const requestDraft = vi.fn(async () => ({
-      outcome: "created" as const,
-      requestId: DRAFT_REQUEST,
-      draftRequestStatus: "pending",
-    }));
-    const setThreadLinks = vi.fn(async () => ({ threadId: THREAD.id }));
+  async function pickRecommendedIdea() {
     const user = userEvent.setup();
+    // The ideas card renders above the advice card; picking the
+    // recommended idea posts its value, not the marker.
+    expect(await screen.findByText("Weekend family table")).toBeInTheDocument();
+    await user.click(screen.getByText("Weekend family table"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    return user;
+  }
+
+  function answersCall() {
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const found = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes("/answers") && (init as RequestInit | undefined)?.method === "POST",
+    );
+    expect(found).toBeDefined();
+    const [, init] = found as [unknown, RequestInit];
+    return JSON.parse(String(init.body)) as Record<string, unknown>;
+  }
+
+  it("sends the bound opportunity with the pick and renders both approval surfaces", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: ideasRoute,
+      answers: {
+        message: IDEAS_MESSAGE,
+        replayed: false,
+        answers: { idea: "idea-b" },
+        resumeKey: CAMPAIGN_IDEAS.resumeKey,
+        intent: "answer_memory",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: null,
+        ideaDraft,
+        correlationId: "c6",
+      },
+    }) as never;
     render(
       <Harness
         pendingPrompt={sendPrompt()}
@@ -1008,27 +1043,80 @@ describe("opportunity-bound handoff", () => {
         permissions={["campaign.create"]}
         actorId={ACTOR}
         opportunity={OPPORTUNITY}
-        advice={ADVICE}
-        campaignSeams={{ drafts: { requestDraft }, links: { setThreadLinks } }}
       />,
     );
-    const thread = await screen.findByRole("log", { name: "Conversation thread" });
-    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("Objective"), "Lift weekday demand");
-    await user.type(screen.getByLabelText("Audience"), "Nearby families");
-    await user.click(screen.getByRole("button", { name: /initiate campaign draft/i }));
+    await pickRecommendedIdea();
 
-    expect(await screen.findByText("Requested")).toBeInTheDocument();
-    expect(requestDraft).toHaveBeenCalledWith(
-      expect.objectContaining({ opportunityId: OPPORTUNITY.id, opportunityVersion: 2 }),
-    );
-    // No siblings on this thread yet: the link carries the draft id alone.
-    expect(setThreadLinks).toHaveBeenCalledWith({
-      organizationId: "00000000-0000-4000-8000-000000000000",
-      actorId: ACTOR,
-      threadId: THREAD.id,
-      draftRequestId: DRAFT_REQUEST,
+    // The re-route moves on, but the draft receipt stays mounted: inline
+    // approve action plus the Studio hyperlink, one payload.
+    const approve = await screen.findByRole("link", {
+      name: /review and approve this version/i,
     });
+    expect(approve.getAttribute("href")).toBe(`/organizations/${ORGANIZATION}/campaigns`);
+    expect(screen.getByRole("link", { name: /open in studio/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/campaigns`,
+    );
+    expect(screen.getByText(/approval binds this exact version/i)).toBeInTheDocument();
+    // The bound opportunity rode the pick so the route could draft immediately.
+    expect(answersCall()).toMatchObject({
+      answers: { idea: "idea-b" },
+      opportunity: OPPORTUNITY,
+    });
+  });
+
+  it("renders the retained brief fallback when the pick resolves ineligible", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: ideasRoute,
+      answers: {
+        message: IDEAS_MESSAGE,
+        replayed: false,
+        answers: { idea: "idea-b" },
+        resumeKey: CAMPAIGN_IDEAS.resumeKey,
+        intent: "answer_memory",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: null,
+        ideaDraft: {
+          outcome: "brief_prefilled",
+          idea: {
+            value: "idea-b",
+            title: "Weekend family table",
+            description: "Saturday set menu for families.",
+            recommended: true,
+          },
+          briefUrl: `/organizations/${ORGANIZATION}/campaigns/new?reason=ADVICE_NO_OPPORTUNITY`,
+          prefill: {
+            objective: "Weekend family table",
+            audience: "Saturday set menu for families.",
+          },
+          reasonCodes: ["ADVICE_NO_OPPORTUNITY"],
+        },
+        correlationId: "c6",
+      },
+    }) as never;
+    render(
+      <Harness
+        pendingPrompt={sendPrompt()}
+        role="operator"
+        permissions={["campaign.create"]}
+        actorId={ACTOR}
+      />,
+    );
+    await pickRecommendedIdea();
+
+    // No opportunity is bound to this chat, so the pick resolves to the
+    // pre-filled brief with the reason named — never a silent upgrade.
+    expect(await screen.findByText(/ADVICE_NO_OPPORTUNITY/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /open prefilled brief/i })).toHaveAttribute(
+      "href",
+      expect.stringContaining("/campaigns/new"),
+    );
+    expect(
+      screen.queryByRole("link", { name: /review and approve this version/i }),
+    ).toBeNull();
+    // No binding invented: the pick travels without an opportunity block.
+    expect(answersCall()).not.toHaveProperty("opportunity");
   });
 });
 describe("nonce idempotency keys (M8)", () => {

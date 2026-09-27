@@ -26,7 +26,10 @@ import {
   type CampaignAdviceContext,
   type CampaignAdviceOpportunity,
 } from "@/components/agent/agent-campaign-advice";
-import type { AdviseCampaignSeams } from "@/modules/agent-chat/application/campaign-advise";
+import type {
+  AdviseCampaignSeams,
+  IdeaDraftOutcome,
+} from "@/modules/agent-chat/application/campaign-advise";
 import { AgentThreadSteps, type AgentStepPhase } from "@/components/agent/agent-thread-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -642,6 +645,11 @@ export function AgentDrawer({
     answers: Record<string, unknown>;
   } | null>(null);
   const [dismissedCards, setDismissedCards] = useState<string[]>([]);
+  // Pick-to-draft envelope from the answers route (Task 6 inversion): draft
+  // id plus inline approve action plus Studio hyperlink in one payload — or
+  // the retained pre-filled brief. Set on answers submit, cleared whenever
+  // the conversation turns over.
+  const [ideaDraft, setIdeaDraft] = useState<IdeaDraftOutcome | null>(null);
   const [announcement, setAnnouncement] = useState("Conversation opened.");
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -883,6 +891,7 @@ export function AgentDrawer({
       setSendError(null);
       setDispatchOutcome(null);
       setDispatchError(null);
+      setIdeaDraft(null);
       onViewChange("thread");
       setAnnouncement(`Routed to ${result.intent}.`);
       // The answer streams live from here: tokens render into the thread
@@ -920,6 +929,12 @@ export function AgentDrawer({
           resumeKey: vars.spec.resumeKey,
           spec: vars.spec,
           answers: vars.answers,
+          // Ideas-first binding (Task 6): the bound opportunity rides the
+          // pick so the answers route can draft immediately. Absent means
+          // the brief fallback — never an invented binding.
+          ...(vars.spec.kind === "campaign_ideas" && opportunity
+            ? { opportunity: { id: opportunity.id, version: opportunity.version } }
+            : {}),
         },
         correlationId,
       )) as {
@@ -930,6 +945,7 @@ export function AgentDrawer({
         confidence: "high" | "medium" | "low";
         reasonCodes: string[];
         questionnaire: QuestionnaireSpec | null;
+        ideaDraft?: IdeaDraftOutcome | null;
       };
       return { ...submitted, resumeKey: vars.spec.resumeKey };
     },
@@ -947,6 +963,9 @@ export function AgentDrawer({
       });
       setSubmittedAnswers((previous) => ({ ...previous, [result.resumeKey]: result.answers }));
       setLastSaved({ resumeKey: result.resumeKey, answers: result.answers });
+      // The pick-to-draft envelope arrives here (or stays null for other
+      // cards); the advice card below renders it.
+      setIdeaDraft(result.ideaDraft ?? null);
       setSendError(null);
       setAnnouncement(`Answers saved and re-routed to ${result.intent}.`);
       // The re-route synthesizes again server-side; re-read the durable
@@ -1103,6 +1122,7 @@ export function AgentDrawer({
       setSubmittedAnswers({});
       setDismissedCards([]);
       setLastSaved(null);
+      setIdeaDraft(null);
       onViewChange("thread");
       setAnnouncement(`Reopened ${target.title}.`);
     },
@@ -1125,6 +1145,7 @@ export function AgentDrawer({
     setSubmittedAnswers({});
     setDismissedCards([]);
     setLastSaved(null);
+    setIdeaDraft(null);
     onViewChange("thread");
     setAnnouncement("Started a new conversation.");
   }
@@ -1474,16 +1495,18 @@ export function AgentDrawer({
                   </p>
                 )
               ) : null}
-              {routeResult?.intent === "campaign_advice" ? (
+              {routeResult?.intent === "campaign_advice" || ideaDraft ? (
                 <>
                   {/*
                     Direct-path asymmetry (Slice C decision: DOCUMENTED, not
-                    aligned). This inline block drives `adviseCampaign`
-                    straight at the campaign-draft + links routes, while the
-                    dispatch route's campaign lane admits through the same
-                    function from its seam — and only the dispatch seam emits
-                    `agent_thread.draft_requested`. Both paths stay governed;
-                    only the audit event differs.
+                    aligned). This inline block renders the ideas-first
+                    advice card from the pick-to-draft envelope, while the
+                    dispatch route's campaign lane admits through
+                    `adviseCampaign` from its seam — and only the dispatch
+                    seam emits `agent_thread.draft_requested`. Both paths
+                    stay governed; only the audit event differs. The card
+                    stays mounted while the envelope is set so the draft
+                    receipt survives the answers re-route.
                   */}
                   <AgentCampaignAdvice
                     organizationId={organizationId}
@@ -1495,6 +1518,7 @@ export function AgentDrawer({
                     opportunity={opportunity}
                     advice={advice}
                     seams={campaignSeams}
+                    ideaDraft={ideaDraft}
                   />
                 </>
               ) : null}

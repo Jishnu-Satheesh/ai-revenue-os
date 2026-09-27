@@ -413,3 +413,112 @@ describe("thread service", () => {
     expect(setThreadLinks).not.toHaveBeenCalled();
   });
 });
+
+describe("campaign ideas-first routing (Task 6)", () => {
+  const readers = {
+    getIdentityFacts: async () => [
+      { id: "f1", statement: "Confirmed trading name.", verified: true, source: "profile" },
+    ],
+  };
+
+  function ideasSynthesizer(recommendedIndex = 1) {
+    return vi.fn(async () => ({
+      ideas: [
+        { title: "Lunch rush bundle", description: "Noon combo.", sourceIds: ["f1"] },
+        { title: "Weekend family table", description: "Saturday set menu.", sourceIds: ["f1"] },
+        { title: "Late-night dessert", description: "Dessert counter.", sourceIds: ["f1"] },
+      ],
+      recommendedIndex,
+    }));
+  }
+
+  function campaignService(synthesizeIdeas: unknown) {
+    return createThreadService({
+      threads: mockThreads(),
+      proposeRouter: async () => ({ intent: "campaign_advice", confidence: "high", missing: [] }),
+      contextReaders: readers,
+      ...(synthesizeIdeas !== undefined ? { synthesizeIdeas: synthesizeIdeas as never } : {}),
+    });
+  }
+
+  it("attaches the 3-option ideas card on a direct campaign_advice route", async () => {
+    const synthesizeIdeas = ideasSynthesizer();
+    const out = await campaignService(synthesizeIdeas).routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+
+    expect(out.intent).toBe("campaign_advice");
+    expect(synthesizeIdeas).toHaveBeenCalledTimes(1);
+    expect(synthesizeIdeas).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "deepthink" }),
+    );
+    // Binding producer constraint: exactly ONE item, THREE options, one recommended.
+    expect(out.questionnaire?.kind).toBe("campaign_ideas");
+    expect(out.questionnaire?.items).toHaveLength(1);
+    const options = out.questionnaire?.items[0]?.options ?? [];
+    expect(options.map((option) => option.value)).toEqual(["idea-a", "idea-b", "idea-c"]);
+    expect(options.filter((option) => option.recommended)).toHaveLength(1);
+    expect(out.questionnaire?.resumeKey).toMatch(/^router:campaign_advice:overview:/);
+  });
+
+  it("keeps the direct route without a card when ideas are unavailable", async () => {
+    const out = await campaignService(null).routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+
+    expect(out.intent).toBe("campaign_advice");
+    expect(out.questionnaire).toBeNull();
+  });
+
+  it("keeps missing-fields cards ahead of ideas (evidence first)", async () => {
+    const service = createThreadService({
+      threads: mockThreads(),
+      proposeRouter: async () => ({
+        intent: "campaign_advice",
+        confidence: "high",
+        missing: ["evidence_window"],
+      }),
+      contextReaders: readers,
+      synthesizeIdeas: ideasSynthesizer(),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+
+    expect(out.intent).toBe("campaign_advice");
+    expect(out.questionnaire?.kind).toBe("evidence_window");
+  });
+
+  it("never attaches ideas off the campaign lane", async () => {
+    const synthesizeIdeas = ideasSynthesizer();
+    const service = createThreadService({
+      threads: mockThreads(),
+      proposeRouter: async () => ({ intent: "answer_memory", confidence: "high", missing: [] }),
+      contextReaders: readers,
+      synthesizeIdeas,
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+
+    expect(out.intent).toBe("answer_memory");
+    expect(out.questionnaire).toBeNull();
+    expect(synthesizeIdeas).not.toHaveBeenCalled();
+  });
+});

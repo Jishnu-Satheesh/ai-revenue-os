@@ -8,16 +8,12 @@ import { Button } from "@/components/ui/button";
 import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
-  adviseCampaign,
   buildCampaignMarkerReceipts,
-  buildPrefilledBriefUrl,
   campaignBundleLink,
-  labelCampaignEstimate,
-  type AdviseCampaignOutcome,
   type AdviseCampaignSeams,
-  type CampaignAdviceReasonCode,
   type CampaignEstimate,
   type CampaignEvidenceSnapshot,
+  type IdeaDraftOutcome,
 } from "@/modules/agent-chat/application/campaign-advise";
 import type { ThreadSummary } from "@/modules/agent-chat/infrastructure/thread-repository";
 
@@ -44,253 +40,126 @@ export type AgentCampaignAdviceProps = {
   thread: ThreadSummary | null;
   canDraft: boolean;
   isViewer: boolean;
+  /** Retained for call-site stability; the form-first flow is removed (see below). */
   opportunity?: CampaignAdviceOpportunity | null;
+  /** Retained for call-site stability; the form-first flow is removed (see below). */
   advice?: CampaignAdviceContext | null;
-  /** Injected seams for tests and future wiring; defaults post to the live routes. */
+  /**
+   * Retained for call-site stability; ignored. Drafts are requested
+   * server-side on pick through the answers route — the client-side draft
+   * path (and its seams) is removed.
+   */
   seams?: AdviseCampaignSeams;
+  /**
+   * Pick-to-draft envelope from the answers route: draft id plus inline
+   * approve action plus Studio hyperlink in one payload — or the retained
+   * pre-filled brief when the pick was ineligible.
+   */
+  ideaDraft?: IdeaDraftOutcome | null;
 };
-
-type Outcome =
-  | { kind: "draft"; result: Extract<AdviseCampaignOutcome, { outcome: "draft_requested" }> }
-  | { kind: "brief"; briefUrl: string; reasonCodes: CampaignAdviceReasonCode[] };
 
 type RecommendationState = "idle" | "saved" | "planned" | "snoozed" | "dismissed";
 
-function defaultFetchSeams(
-  organizationId: string,
-  opportunityId: string,
-  options: {
-    correlationId?: string;
-    existingLinks?: { projectId?: string; requestId?: string; campaignId?: string };
-  } = {},
-): AdviseCampaignSeams {
-  async function postJson(path: string, payload: Record<string, unknown>): Promise<unknown> {
-    const response = await fetch(path, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        accept: "application/json",
-        // The campaign-draft route honors x-correlation-id; every agent
-        // fetch sends no-store + correlation (Task 8 drawer contract).
-        ...(options.correlationId ? { "x-correlation-id": options.correlationId } : {}),
-      },
-      cache: "no-store",
-      body: JSON.stringify(payload),
-    });
-    const body = (await response.json().catch(() => null)) as {
-      error?: { message?: string };
-      outcome?: unknown;
-      requestId?: unknown;
-      draftRequestStatus?: unknown;
-    } | null;
-    if (!response.ok) {
-      throw new Error(body?.error?.message ?? `Request failed (${response.status}).`);
-    }
-    return body;
-  }
-  return {
-    drafts: {
-      requestDraft: async (args) => {
-        const body = (await postJson(
-          `/api/organizations/${organizationId}/opportunities/${opportunityId}/campaign-draft`,
-          {
-            opportunityVersion: args.opportunityVersion,
-            objective: args.objective,
-            audience: args.audience,
-            assertions: args.assertions,
-            idempotencyKey: args.idempotencyKey,
-          },
-        )) as { outcome: unknown; requestId: unknown; draftRequestStatus: unknown };
-        if (
-          (body.outcome !== "created" && body.outcome !== "replayed") ||
-          typeof body.requestId !== "string"
-        ) {
-          throw new Error("The draft request could not be recorded. Nothing was created.");
-        }
-        return {
-          outcome: body.outcome,
-          requestId: body.requestId,
-          draftRequestStatus:
-            typeof body.draftRequestStatus === "string" ? body.draftRequestStatus : "pending",
-        };
-      },
-    },
-    links: {
-      setThreadLinks: async (args) => {
-        await postJson(
-          `/api/organizations/${organizationId}/agent/threads/${args.threadId}/links`,
-          {
-            // Sibling ids already on the thread ride along: the links RPC
-            // overwrites every link column, so posting the draft id alone
-            // would wipe the thread → research chain.
-            ...(options.existingLinks ?? {}),
-            draftRequestId: args.draftRequestId,
-          },
-        );
-        return { threadId: args.threadId };
-      },
-    },
-  };
-}
-
 /**
- * The `Draft advice for your review` tab card (spec section 11).
+ * The `Draft advice for your review` card (spec section 11, ideas-first).
  *
- * Advice renders with citations, the exact evidence window, limitations,
- * and cost/impact inputs labeled as estimates with assumptions on the
- * same surface. The primary button initiates campaign creation through
- * `adviseCampaign`: eligible advice admits one atomic governed draft
- * request (never approval, never publish, never spend); anything else
- * resolves to a pre-filled `/campaigns/new` brief with named reason
- * codes — never a silent upgrade. The secondary button saves a manual
- * outside-platform recommendation with plan/snooze/dismiss semantics
- * that never auto-completes.
+ * There is no form here: the pick happens on the ideas questionnaire card,
+ * and the answers route calls the draft seam immediately in the same POST.
+ * This card renders the result — the picked idea, the draft receipt with
+ * its exact-version binding, the inline review-and-approve button, and the
+ * Studio hyperlink — or the pre-filled `/campaigns/new` brief with named
+ * reason codes when the pick was ineligible. Draft creation is never
+ * approval, never publish, never spend; approval binds the exact version
+ * in review, and material edits need a new request. The secondary button
+ * saves a manual outside-platform recommendation with plan/snooze/dismiss
+ * semantics that never auto-completes.
  */
 export function AgentCampaignAdvice({
   organizationId,
-  actorId,
-  threadId,
   thread,
   canDraft,
   isViewer,
-  opportunity = null,
-  advice = null,
-  seams,
+  ideaDraft = null,
 }: AgentCampaignAdviceProps) {
-  const [objective, setObjective] = useState("");
-  const [audience, setAudience] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [requestedIntent, setRequestedIntent] = useState<{
-    objective: string;
-    audience: string;
-  } | null>(null);
   const [recommendation, setRecommendation] = useState<RecommendationState>("idle");
 
   const gated = !canDraft || isViewer;
-  const ready = objective.trim().length > 0 && audience.trim().length > 0;
-  const invalidated =
-    outcome?.kind === "draft" &&
-    requestedIntent !== null &&
-    (requestedIntent.objective !== objective.trim() ||
-      requestedIntent.audience !== audience.trim());
-
-  const linkedDraftRequestId = outcome?.kind === "draft" ? outcome.result.draftRequestId : null;
-  const priorDraftRequestId = linkedDraftRequestId ?? thread?.linkedDraftRequestId ?? null;
-
-  async function initiate() {
-    if (!ready || pending) return;
-    if (!threadId) {
-      setError("No conversation yet. Send a message first — the draft links back to this chat.");
-      return;
-    }
-    setPending(true);
-    setError(null);
-    try {
-      if (opportunity && advice && actorId) {
-        // One uuid per initiation: it travels as the adviseCampaign
-        // correlation id and on the wire as x-correlation-id, so the
-        // draft admission and the thread link share one trail.
-        const correlationId = crypto.randomUUID();
-        const existingLinks: { projectId?: string; requestId?: string; campaignId?: string } = {
-          ...(thread?.linkedResearchProjectId ? { projectId: thread.linkedResearchProjectId } : {}),
-          ...(thread?.linkedRequestId ? { requestId: thread.linkedRequestId } : {}),
-          ...(thread?.linkedCampaignId ? { campaignId: thread.linkedCampaignId } : {}),
-        };
-        const result = await adviseCampaign(
-          {
-            organizationId,
-            actorId,
-            threadId,
-            permissions: gated ? [] : ["campaign.create"],
-            opportunity: { id: opportunity.id, version: opportunity.version },
-            objective: objective.trim(),
-            audience: audience.trim(),
-            assertions: advice.assertions,
-            evidenceSnapshot: advice.evidenceSnapshot,
-            evidenceSnapshotFreezable: advice.evidenceSnapshotFreezable,
-            marketProfile: advice.marketProfile,
-            policyPass: advice.policyPass,
-            capabilityPass: advice.capabilityPass,
-            schedulePass: advice.schedulePass,
-            audienceReady: advice.audienceReady,
-            estimate: advice.estimate,
-            correlationId,
-            existingLinks,
-          },
-          seams ??
-            defaultFetchSeams(organizationId, opportunity.id, { correlationId, existingLinks }),
-        );
-        if (result.outcome === "draft_requested") {
-          setOutcome({ kind: "draft", result });
-          setRequestedIntent({ objective: objective.trim(), audience: audience.trim() });
-        } else {
-          setOutcome({ kind: "brief", briefUrl: result.briefUrl, reasonCodes: result.reasonCodes });
-        }
-      } else {
-        // No opportunity is bound to this chat, so there is no draft path:
-        // resolve to the pre-filled brief with the reason named. The draft
-        // seams are never touched on this path.
-        const reasonCodes: CampaignAdviceReasonCode[] = [];
-        if (gated) reasonCodes.push("CAMPAIGN_REQUIRES_CREATE");
-        reasonCodes.push("ADVICE_NO_OPPORTUNITY");
-        setOutcome({
-          kind: "brief",
-          briefUrl: buildPrefilledBriefUrl({
-            organizationId,
-            objective: objective.trim(),
-            audience: audience.trim(),
-            reasonCodes,
-          }),
-          reasonCodes,
-        });
-      }
-    } catch (cause) {
-      setError(
-        cause instanceof Error
-          ? cause.message
-          : "The draft request could not be recorded. Nothing was created.",
-      );
-    } finally {
-      setPending(false);
-    }
-  }
-
-  const estimate =
-    outcome?.kind === "draft"
-      ? outcome.result.estimate
-      : advice
-        ? labelCampaignEstimate(advice.estimate)
-        : null;
+  const draftRequestId =
+    ideaDraft?.outcome === "draft_requested" ? ideaDraft.draftRequestId : null;
+  const priorDraftRequestId = draftRequestId ?? thread?.linkedDraftRequestId ?? null;
+  const markers =
+    ideaDraft?.outcome === "draft_requested"
+      ? ideaDraft.markers
+      : buildCampaignMarkerReceipts("requested");
 
   return (
     <TooltipProvider>
       <div className="flex flex-col gap-3">
         <p className="text-sm">
-          Draft advice for your review. Estimates on this surface state their inputs and assumptions
-          next to the numbers.
+          Draft advice for your review. Pick an idea above — the draft request starts from your
+          pick, and approval stays in review.
         </p>
 
-        {estimate ? (
+        {ideaDraft ? (
           <div className="flex flex-col gap-1 rounded-lg border border-border p-2">
             <p className="flex items-center gap-2 text-sm font-medium">
-              <Badge variant="secondary">Estimate</Badge>
-              <span>{estimate.valueText}</span>
+              <span>{ideaDraft.idea.title}</span>
+              {ideaDraft.idea.recommended ? <Badge variant="secondary">Recommended</Badge> : null}
             </p>
-            <p className="text-xs text-muted-foreground">Inputs: {estimate.inputs.join("; ")}</p>
+            <p className="text-xs text-muted-foreground">{ideaDraft.idea.description}</p>
+          </div>
+        ) : null}
+
+        {ideaDraft?.outcome === "draft_requested" ? (
+          <div className="flex flex-col gap-2 rounded-lg border border-border p-2">
+            {ideaDraft.replayed ? (
+              <p className="text-xs text-muted-foreground">
+                Already requested — showing the kept draft. Nothing was created twice.
+              </p>
+            ) : null}
             <p className="text-xs text-muted-foreground">
-              Assumptions: {estimate.assumptions.join("; ")}
+              Version {ideaDraft.adviceFingerprint.slice(0, 8)} — approval binds this exact
+              version; edits need a new request. Draft creation is never approval, never publish,
+              never spend.
             </p>
+            <div className="flex flex-wrap gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="inline-flex">
+                    <Button
+                      type="button"
+                      disabled={gated}
+                      asChild={!gated}
+                      title={
+                        gated
+                          ? "Needs the campaign.create grant — enforcement stays server-side."
+                          : "Opens review for this exact version. Approval binds the version shown; edits need a new request."
+                      }
+                    >
+                      {gated ? (
+                        <span>Review and approve this version</span>
+                      ) : (
+                        <a href={ideaDraft.approveAction.href}>Review and approve this version</a>
+                      )}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {gated
+                    ? "Needs the campaign.create grant — enforcement stays server-side."
+                    : "Opens review for this exact version. Approval binds the version shown; edits need a new request."}
+                </TooltipContent>
+              </Tooltip>
+              <Button type="button" variant="outline" asChild>
+                <a href={ideaDraft.studioLink.href}>Open in Studio</a>
+              </Button>
+            </div>
           </div>
         ) : null}
 
         {priorDraftRequestId ? (
           <div className="flex flex-col gap-2" aria-label="Draft request progress">
-            {(outcome?.kind === "draft"
-              ? outcome.result.markers
-              : buildCampaignMarkerReceipts("requested")
-            ).map((marker) => (
+            {markers.map((marker) => (
               <Marker key={marker.stage} variant="border">
                 <MarkerIcon
                   aria-label={marker.state === "pending" ? `${marker.label} pending` : marker.label}
@@ -306,10 +175,13 @@ export function AgentCampaignAdvice({
               </Marker>
             ))}
             {(() => {
-              const link = campaignBundleLink(organizationId, {
-                draftRequestId: priorDraftRequestId,
-                ...(thread?.linkedCampaignId ? { campaignId: thread.linkedCampaignId } : {}),
-              });
+              const link =
+                ideaDraft?.outcome === "draft_requested"
+                  ? ideaDraft.studioLink
+                  : campaignBundleLink(organizationId, {
+                      draftRequestId: priorDraftRequestId,
+                      ...(thread?.linkedCampaignId ? { campaignId: thread.linkedCampaignId } : {}),
+                    });
               return (
                 <Marker asChild>
                   <a href={link.href}>
@@ -324,49 +196,15 @@ export function AgentCampaignAdvice({
           </div>
         ) : null}
 
-        <label className="flex flex-col gap-1 text-xs font-medium">
-          Objective
-          <input
-            aria-label="Objective"
-            className="rounded-lg border border-border bg-background p-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={objective}
-            onChange={(event) => setObjective(event.target.value)}
-            placeholder="What the draft must achieve"
-          />
-        </label>
-        <label className="flex flex-col gap-1 text-xs font-medium">
-          Audience
-          <input
-            aria-label="Audience"
-            className="rounded-lg border border-border bg-background p-2 text-sm font-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={audience}
-            onChange={(event) => setAudience(event.target.value)}
-            placeholder="Who the draft speaks to"
-          />
-        </label>
-
-        {invalidated ? (
-          <p role="alert" className="text-xs font-medium text-warning">
-            Advice changed since the draft was requested — review again before relying on it. A
-            fresh request replaces the stale one; nothing was approved or published.
-          </p>
-        ) : null}
-
-        {error ? (
-          <p role="alert" className="text-xs font-medium text-warning">
-            {error}
-          </p>
-        ) : null}
-
-        {outcome?.kind === "brief" ? (
+        {ideaDraft?.outcome === "brief_prefilled" ? (
           <div className="flex flex-col gap-2 rounded-lg border border-border p-2">
             <p className="text-xs text-muted-foreground">
-              No draft was created ({outcome.reasonCodes.join(", ")}). Continue in the campaign
+              No draft was created ({ideaDraft.reasonCodes.join(", ")}). Continue in the campaign
               brief with your intent pre-filled — never a silent upgrade.
             </p>
             <a
               className="text-xs font-medium text-primary underline-offset-4 hover:underline"
-              href={outcome.briefUrl}
+              href={ideaDraft.briefUrl}
             >
               Open prefilled brief
             </a>
@@ -374,31 +212,6 @@ export function AgentCampaignAdvice({
         ) : null}
 
         <div className="flex gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span className="inline-flex">
-                <Button
-                  type="button"
-                  disabled={gated || !ready || pending}
-                  onClick={initiate}
-                  title={
-                    gated
-                      ? "Needs the campaign.create grant — enforcement stays server-side."
-                      : !ready
-                        ? "State the objective and audience first."
-                        : "Request one governed draft. Draft creation is never approval, never publish, never spend."
-                  }
-                >
-                  Initiate campaign draft
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>
-              {gated
-                ? "Needs the campaign.create grant — enforcement stays server-side."
-                : "Request one governed draft. Draft creation is never approval, never publish, never spend."}
-            </TooltipContent>
-          </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>
               <span className="inline-flex">
