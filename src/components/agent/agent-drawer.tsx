@@ -911,6 +911,12 @@ export function AgentDrawer({
   // previous classification is never carried forward. The idempotency key
   // is minted in the submit handler (one per user submit) and travels in
   // the mutation vars, so a transport retry replays the same submit.
+  // Double-submit guard for the answers card below. The card locks via
+  // `disabled` on the next render, but two submits in the same tick both see
+  // `isPending` false — the ref drops the second synchronously, so one user
+  // submit posts exactly once. Cleared when the mutation settles, so a failed
+  // save stays retryable.
+  const answersSubmitOpenRef = useRef(false);
   const submitAnswers = useMutation({
     mutationFn: async (vars: {
       spec: QuestionnaireSpec;
@@ -1401,11 +1407,20 @@ export function AgentDrawer({
                   disabledOptionValues={gatedChoices}
                   disabledOptionReason={gatedChoiceReason}
                   onSubmit={(answers) => {
-                    submitAnswers.mutate({
-                      spec: questionnaire,
-                      answers,
-                      idempotencyKey: crypto.randomUUID(),
-                    });
+                    if (answersSubmitOpenRef.current) return;
+                    answersSubmitOpenRef.current = true;
+                    submitAnswers.mutate(
+                      {
+                        spec: questionnaire,
+                        answers,
+                        idempotencyKey: crypto.randomUUID(),
+                      },
+                      {
+                        onSettled: () => {
+                          answersSubmitOpenRef.current = false;
+                        },
+                      },
+                    );
                   }}
                   onCancel={() => {
                     if (cardKey) setDismissedCards((previous) => [...previous, cardKey]);

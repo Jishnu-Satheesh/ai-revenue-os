@@ -196,8 +196,16 @@ export function AgentQuestionnaireCard({
     : 0;
 
   const itemDefs = useMemo(
-    () => visibleItems.map((item) => ({ name: item.key, required: item.required })),
-    [visibleItems],
+    () =>
+      visibleItems.map((item) => ({
+        name: item.key,
+        required: item.required,
+        // Mirrors the rendered Item below: a locked card (saving, viewer)
+        // disables its steps, so the primitive treats them as valid instead
+        // of flagging the touched-but-unanswerable items.
+        disabled,
+      })),
+    [visibleItems, disabled],
   );
 
   function setAnswer(key: string, value: string | string[] | boolean) {
@@ -349,6 +357,7 @@ export function AgentQuestionnaireCard({
               required={item.required}
               multiple={item.kind === "multi_select"}
               invalid={Boolean(errors[item.key])}
+              disabled={disabled}
             >
               <QuestionnaireTitle>{item.label}</QuestionnaireTitle>
               {item.helpText ? (

@@ -60,7 +60,7 @@ const ANSWERS_MESSAGE: ThreadMessageView = {
 
 type FetchPlan = {
   route?: unknown | "hang" | { status: number; message: string };
-  answers?: unknown | { status: number; message: string };
+  answers?: unknown | "hang" | { status: number; message: string };
   threads?: ThreadSummary[];
   /** Single-thread GET row (Slice C M9 poll endpoint). */
   thread?: ThreadSummary | null;
@@ -102,6 +102,7 @@ function mockAgentFetch(plan: FetchPlan = {}) {
       return Response.json({ message, replayed: false, correlationId: "c2" });
     }
     if (target.includes("/answers") && method === "POST") {
+      if (plan.answers === "hang") return new Promise<Response>(() => {});
       const failure = asRouteFailure(plan.answers);
       if (failure) {
         return Response.json(
@@ -639,6 +640,22 @@ describe("questionnaire cards", () => {
     expect(onSubmit).toHaveBeenCalledWith({ confirm_upgrade: true });
   });
 
+  it("keeps a checked confirm error-free when the card locks while saving (finding A)", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = render(<AgentQuestionnaireCard spec={UPGRADE} onSubmit={onSubmit} />);
+    await user.click(screen.getByText("Yes"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith({ confirm_upgrade: true });
+    // The drawer disables the card while the answers POST is in flight.
+    // Locking the step must not invalidate the checked confirm: the actions
+    // hide with the locked step and no validation error appears.
+    rerender(<AgentQuestionnaireCard spec={UPGRADE} onSubmit={onSubmit} disabled />);
+    expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
+    expect(screen.queryByText(/confirm to continue/i)).not.toBeVisible();
+  });
+
   it("walks clarify text then optional confirm to a full payload", async () => {
     const onSubmit = vi.fn();
     const user = userEvent.setup();
@@ -824,7 +841,9 @@ describe("questionnaire submit wiring", () => {
     globalThis.fetch = mockAgentFetch({ route: upgradeRoute }) as never;
     render(<Harness pendingPrompt={sendPrompt()} role="viewer" />);
     expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /submit/i })).toBeDisabled();
+    // A locked step offers no submit affordance at all; the read-only copy
+    // carries the explanation.
+    expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
     expect(screen.getByText(/viewers cannot change this chat/i)).toBeInTheDocument();
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -849,6 +868,60 @@ describe("questionnaire submit wiring", () => {
     // Nothing marked saved: the card stays so the operator can retry.
     expect(screen.getByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
     expect(screen.queryByText(/answers saved:/i)).not.toBeInTheDocument();
+  });
+
+  it("shows no confirm error while the checked upgrade answer saves (finding A)", async () => {
+    globalThis.fetch = mockAgentFetch({ route: upgradeRoute, answers: "hang" }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
+    await user.click(screen.getByText("Yes"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    // The POST hangs: the pending lock is on and the checked confirm must
+    // stay valid — no red error beside the saving note.
+    expect(await screen.findByText(/saving answers/i)).toBeInTheDocument();
+    expect(screen.queryByText(/confirm to continue/i)).not.toBeVisible();
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      const posts = fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes("/answers") && (init as RequestInit | undefined)?.method === "POST",
+      );
+      expect(posts).toHaveLength(1);
+    });
+    const answersCall = fetchMock.mock.calls.find(
+      ([url, init]) =>
+        String(url).includes("/answers") && (init as RequestInit | undefined)?.method === "POST",
+    );
+    const payload = JSON.parse(String((answersCall?.[1] as RequestInit).body)) as Record<
+      string,
+      unknown
+    >;
+    expect(payload).toMatchObject({ answers: { confirm_upgrade: true } });
+  });
+
+  it("drops a second synchronous submit so one user submit posts once", async () => {
+    globalThis.fetch = mockAgentFetch({ route: upgradeRoute, answers: "hang" }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
+    await user.click(screen.getByText("Yes"));
+    // Two submits in the same tick, before any re-render can lock the card.
+    const submit = screen.getByRole("button", { name: /submit/i });
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    const answersPosts = () =>
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes("/answers") && (init as RequestInit | undefined)?.method === "POST",
+      );
+    await waitFor(() => expect(answersPosts().length).toBeGreaterThanOrEqual(1));
+    // Let a raced second POST land if the guard missed it.
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(answersPosts()).toHaveLength(1);
   });
 });
 
