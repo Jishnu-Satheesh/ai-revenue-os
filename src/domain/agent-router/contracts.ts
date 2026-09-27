@@ -90,8 +90,25 @@ export const questionnaireKindSchema = z.enum([
   "deepthink_upgrade",
   "duplicate_watch",
   "evidence_window",
+  "campaign_ideas",
 ]);
 export type QuestionnaireKind = z.infer<typeof questionnaireKindSchema>;
+
+/**
+ * One pickable option. `label` is the title the card renders;
+ * `description` is the short description under it. `description` and
+ * `recommended` stay optional because the older kinds predate them — the
+ * `campaign_ideas` invariant below requires them there, and only there.
+ */
+export const questionnaireOptionSchema = z
+  .object({
+    value: z.string().trim().min(1).max(120),
+    label: z.string().trim().min(1).max(120),
+    description: z.string().trim().min(1).max(280).optional(),
+    recommended: z.boolean().optional(),
+  })
+  .strict();
+export type QuestionnaireOption = z.infer<typeof questionnaireOptionSchema>;
 
 export const questionnaireItemSchema = z
   .object({
@@ -102,17 +119,7 @@ export const questionnaireItemSchema = z
     label: z.string().trim().min(1).max(120),
     kind: z.enum(["text", "single_select", "multi_select", "date", "confirm"]),
     required: z.boolean(),
-    options: z
-      .array(
-        z
-          .object({
-            value: z.string().trim().min(1).max(120),
-            label: z.string().trim().min(1).max(120),
-          })
-          .strict(),
-      )
-      .max(12)
-      .optional(),
+    options: z.array(questionnaireOptionSchema).max(12).optional(),
     helpText: z.string().trim().max(280).optional(),
   })
   .strict();
@@ -121,6 +128,14 @@ export type QuestionnaireItem = z.infer<typeof questionnaireItemSchema>;
 /**
  * Questionnaire spec. Nullable in the output: present means "ask before
  * routing", absent means "route directly". Task 4 renders this shape.
+ *
+ * `campaign_ideas` invariant (streaming-synthesis Task 5): every
+ * options-bearing item is one choice set of ideas, so each option must
+ * carry its short description plus an explicit recommended flag, and
+ * exactly one option per item must be recommended. The card renders the
+ * description under the title and marks the recommended pick; the Task 6
+ * executor reads the pick plus this flag off the echoed spec. Other kinds
+ * are untouched: their options predate both fields and still parse.
  */
 export const questionnaireSpecSchema = z
   .object({
@@ -133,7 +148,42 @@ export const questionnaireSpecSchema = z
       .regex(/^[a-z0-9:_\-.]{1,160}$/),
     items: z.array(questionnaireItemSchema).min(1).max(8),
   })
-  .strict();
+  .strict()
+  .superRefine((spec, ctx) => {
+    if (spec.kind !== "campaign_ideas") return;
+    const choiceItems = spec.items.filter((item) => (item.options?.length ?? 0) > 0);
+    if (choiceItems.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "A campaign-ideas card needs at least one idea to pick.",
+        path: ["items"],
+      });
+      return;
+    }
+    for (const item of choiceItems) {
+      const options = item.options ?? [];
+      if (
+        options.some(
+          (option) => option.description === undefined || typeof option.recommended !== "boolean",
+        )
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Every idea in "${item.key}" needs a short description and an explicit recommended flag.`,
+          path: ["items"],
+        });
+        continue;
+      }
+      const recommendedCount = options.filter((option) => option.recommended).length;
+      if (recommendedCount !== 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Exactly one idea in "${item.key}" must be recommended, found ${recommendedCount}.`,
+          path: ["items"],
+        });
+      }
+    }
+  });
 export type QuestionnaireSpec = z.infer<typeof questionnaireSpecSchema>;
 
 const reasonCodeSchema = z

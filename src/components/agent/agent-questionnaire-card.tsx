@@ -7,6 +7,7 @@ import {
   Questionnaire,
   QuestionnaireActions,
   QuestionnaireChoice,
+  QuestionnaireChoiceDescription,
   QuestionnaireChoices,
   QuestionnaireDescription,
   QuestionnaireError,
@@ -19,6 +20,7 @@ import {
   QuestionnaireSubmit,
   QuestionnaireTitle,
 } from "@/components/ui/questionnaire";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type {
@@ -56,6 +58,7 @@ const KIND_INTRO: Record<QuestionnaireKind, string> = {
   duplicate_watch:
     "A similar watch is already running. Viewing it costs nothing; starting fresh runs a second watch.",
   evidence_window: "Advice is only as wide as the evidence window behind it.",
+  campaign_ideas: "Pick one idea — the recommended pick is marked.",
 };
 
 function normalizeSaved(value: unknown): string | string[] | boolean | undefined {
@@ -276,6 +279,10 @@ export function AgentQuestionnaireCard({
     const picked =
       multiple && Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
     const disabledOptions = new Set(disabledOptionValues);
+    // Campaign ideas read as titled proposals, not bare values: the title
+    // plus its short description, with the recommended pick badged. Other
+    // kinds keep the bare label exactly as before.
+    const showIdeaDetail = spec.kind === "campaign_ideas";
     return (
       <QuestionnaireChoices>
         {(item.options ?? []).map((option) => (
@@ -295,7 +302,21 @@ export function AgentQuestionnaireCard({
               setAnswer(item.key, next);
             }}
           >
-            {option.label}
+            {showIdeaDetail ? (
+              <>
+                <span className="flex items-center gap-2">
+                  <span>{option.label}</span>
+                  {option.recommended ? <Badge variant="secondary">Recommended</Badge> : null}
+                </span>
+                {option.description ? (
+                  <QuestionnaireChoiceDescription>
+                    {option.description}
+                  </QuestionnaireChoiceDescription>
+                ) : null}
+              </>
+            ) : (
+              option.label
+            )}
           </QuestionnaireChoice>
         ))}
       </QuestionnaireChoices>

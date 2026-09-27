@@ -574,6 +574,40 @@ const EVIDENCE_WINDOW: QuestionnaireSpec = {
   ],
 };
 
+const CAMPAIGN_IDEAS: QuestionnaireSpec = {
+  kind: "campaign_ideas",
+  title: "Campaign ideas",
+  resumeKey: "router:campaign_advice:overview:abc123",
+  items: [
+    {
+      key: "idea",
+      label: "Which idea should become a draft?",
+      kind: "single_select",
+      required: true,
+      options: [
+        {
+          value: "idea-a",
+          label: "Lunch rush bundle",
+          description: "Noon combo for nearby offices.",
+          recommended: false,
+        },
+        {
+          value: "idea-b",
+          label: "Weekend family table",
+          description: "Saturday set menu for families.",
+          recommended: true,
+        },
+        {
+          value: "idea-c",
+          label: "Late-night dessert",
+          description: "After-9pm dessert counter.",
+          recommended: false,
+        },
+      ],
+    },
+  ],
+};
+
 describe("questionnaire cards", () => {
   it("renders the inline upgrade card after routing and saves the confirm answer", async () => {
     globalThis.fetch = mockAgentFetch({
@@ -669,6 +703,33 @@ describe("questionnaire cards", () => {
     await user.click(screen.getByRole("button", { name: /submit/i }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit).toHaveBeenCalledWith({ choice: "view_existing" });
+  });
+
+  it("renders campaign ideas with titles, descriptions, and one Recommended marker", () => {
+    const onSubmit = vi.fn();
+    render(<AgentQuestionnaireCard spec={CAMPAIGN_IDEAS} onSubmit={onSubmit} />);
+    expect(screen.getByText(/recommended pick is marked/i)).toBeInTheDocument();
+    expect(screen.getByText("Lunch rush bundle")).toBeInTheDocument();
+    expect(screen.getByText("Weekend family table")).toBeInTheDocument();
+    expect(screen.getByText("Late-night dessert")).toBeInTheDocument();
+    expect(screen.getByText("Noon combo for nearby offices.")).toBeInTheDocument();
+    expect(screen.getByText("Saturday set menu for families.")).toBeInTheDocument();
+    expect(screen.getByText("After-9pm dessert counter.")).toBeInTheDocument();
+    // Exactly one idea carries the recommendation marker.
+    expect(screen.getAllByText("Recommended")).toHaveLength(1);
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("submits the picked campaign idea value", async () => {
+    const onSubmit = vi.fn();
+    const user = userEvent.setup();
+    render(<AgentQuestionnaireCard spec={CAMPAIGN_IDEAS} onSubmit={onSubmit} />);
+    // A single required item renders Submit immediately; picking the
+    // recommended idea posts its value, not the marker.
+    await user.click(screen.getByText("Weekend family table"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit).toHaveBeenCalledWith({ idea: "idea-b" });
   });
 
   it("resumes on the first unanswered item with saved answers intact", async () => {

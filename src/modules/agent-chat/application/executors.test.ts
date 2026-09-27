@@ -661,6 +661,60 @@ describe("questionnaire answers (F2)", () => {
   });
 });
 
+const IDEAS_SPEC: QuestionnaireSpec = {
+  kind: "campaign_ideas",
+  title: "Campaign ideas",
+  resumeKey: "router:campaign_advice:overview:abc123",
+  items: [
+    {
+      key: "idea",
+      label: "Which idea should become a draft?",
+      kind: "single_select",
+      required: true,
+      options: [
+        {
+          value: "idea-a",
+          label: "Lunch rush bundle",
+          description: "Noon combo for nearby offices.",
+          recommended: false,
+        },
+        {
+          value: "idea-b",
+          label: "Weekend family table",
+          description: "Saturday set menu for families.",
+          recommended: true,
+        },
+        {
+          value: "idea-c",
+          label: "Late-night dessert",
+          description: "After-9pm dessert counter.",
+          recommended: false,
+        },
+      ],
+    },
+  ],
+};
+
+describe("campaign_ideas answers (Task 5)", () => {
+  it("validates the picked idea against the echoed-spec options", () => {
+    expect(validateQuestionnaireAnswers(IDEAS_SPEC, { idea: "idea-b" })).toEqual({
+      idea: "idea-b",
+    });
+    expect(() => validateQuestionnaireAnswers(IDEAS_SPEC, {})).toThrow(
+      /Which idea should become a draft/,
+    );
+    expect(() => validateQuestionnaireAnswers(IDEAS_SPEC, { idea: "idea-z" })).toThrow(
+      /Which idea should become a draft/,
+    );
+  });
+
+  it("encodes the pick under the ideas header for the appended message", () => {
+    expect(encodeQuestionnaireAnswerBody(IDEAS_SPEC, { idea: "idea-b" })).toBe(
+      "[answers campaign_ideas]\nidea: idea-b",
+    );
+  });
+});
+
 describe("resolvePackContextDigest", () => {
   it("returns the real pack digest off the V1 placeholder", async () => {
     const { digest, pack } = await resolvePackContextDigest({

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import type { RouterInput, RouterProposal } from "@/domain/agent-router/contracts";
+import {
+  questionnaireSpecSchema,
+  type QuestionnaireSpec,
+  type RouterInput,
+  type RouterProposal,
+} from "@/domain/agent-router/contracts";
 import { routeAgentMessage } from "@/modules/agent-router/application/router-service";
 
 const baseInput: Omit<RouterInput, "text" | "model"> = {
@@ -181,5 +186,109 @@ describe("router", () => {
       model: { kind: "stub", intent: "campaign_advice", confidence: "high", missing: ["branch"] },
     });
     expect(withoutWindow.questionnaire?.kind).toBe("missing_fields");
+  });
+});
+
+function ideasSpec(
+  options: Array<{ value: string; label: string; description?: string; recommended?: boolean }>,
+): QuestionnaireSpec {
+  return {
+    kind: "campaign_ideas",
+    title: "Campaign ideas",
+    resumeKey: "router:campaign_advice:overview:abc123",
+    items: [
+      {
+        key: "idea",
+        label: "Which idea should become a draft?",
+        kind: "single_select",
+        required: true,
+        options,
+      },
+    ],
+  };
+}
+
+const VALID_IDEAS = ideasSpec([
+  { value: "idea-a", label: "Lunch rush bundle", description: "Noon combo for nearby offices.", recommended: false },
+  { value: "idea-b", label: "Weekend family table", description: "Saturday set menu for families.", recommended: true },
+  { value: "idea-c", label: "Late-night dessert", description: "After-9pm dessert counter.", recommended: false },
+]);
+
+describe("campaign_ideas questionnaire spec", () => {
+  it("accepts three ideas with exactly one recommended", () => {
+    expect(questionnaireSpecSchema.parse(VALID_IDEAS).kind).toBe("campaign_ideas");
+  });
+
+  it("rejects ideas with none recommended", () => {
+    const options = VALID_IDEAS.items[0]?.options?.map((option) => ({
+      ...option,
+      recommended: false,
+    }));
+    expect(() => questionnaireSpecSchema.parse(ideasSpec(options ?? []))).toThrow(
+      /exactly one idea.*must be recommended/i,
+    );
+  });
+
+  it("rejects ideas with two recommended", () => {
+    const options = VALID_IDEAS.items[0]?.options?.map((option) => ({
+      ...option,
+      recommended: true,
+    }));
+    expect(() => questionnaireSpecSchema.parse(ideasSpec(options ?? []))).toThrow(
+      /exactly one idea.*must be recommended/i,
+    );
+  });
+
+  it("rejects an idea without a short description", () => {
+    const options = (VALID_IDEAS.items[0]?.options ?? []).map((option, index) =>
+      index === 0 ? { value: option.value, label: option.label, recommended: false } : option,
+    );
+    expect(() => questionnaireSpecSchema.parse(ideasSpec(options))).toThrow(
+      /short description and an explicit recommended flag/i,
+    );
+  });
+
+  it("rejects an idea without an explicit recommended flag", () => {
+    const options = (VALID_IDEAS.items[0]?.options ?? []).map((option) => ({
+      value: option.value,
+      label: option.label,
+      description: option.description,
+    }));
+    expect(() => questionnaireSpecSchema.parse(ideasSpec(options))).toThrow(
+      /short description and an explicit recommended flag/i,
+    );
+  });
+
+  it("rejects an ideas card with nothing to pick", () => {
+    expect(() =>
+      questionnaireSpecSchema.parse({
+        kind: "campaign_ideas",
+        title: "Campaign ideas",
+        resumeKey: "router:campaign_advice:overview:abc123",
+        items: [{ key: "idea", label: "Which idea?", kind: "text", required: true }],
+      }),
+    ).toThrow(/at least one idea to pick/i);
+  });
+
+  it("leaves older kinds untouched when options carry neither field", () => {
+    expect(
+      questionnaireSpecSchema.parse({
+        kind: "missing_fields",
+        title: "One more detail",
+        resumeKey: "router:watch:overview:abc123",
+        items: [
+          {
+            key: "frequency",
+            label: "How often?",
+            kind: "single_select",
+            required: true,
+            options: [
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+            ],
+          },
+        ],
+      }).kind,
+    ).toBe("missing_fields");
   });
 });

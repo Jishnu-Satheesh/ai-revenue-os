@@ -308,4 +308,104 @@ describe("agent thread answers route", () => {
     );
     expect(accepted.status).toBe(201);
   });
+
+  it("accepts a campaign-ideas pick through the echoed spec and refuses a broken invariant", async () => {
+    const ideasSpec = {
+      kind: "campaign_ideas",
+      title: "Campaign ideas",
+      resumeKey: "router:campaign_advice:overview:abcdef1234567890",
+      items: [
+        {
+          key: "idea",
+          label: "Which idea should become a draft?",
+          kind: "single_select",
+          required: true,
+          options: [
+            {
+              value: "idea-a",
+              label: "Lunch rush bundle",
+              description: "Noon combo for nearby offices.",
+              recommended: false,
+            },
+            {
+              value: "idea-b",
+              label: "Weekend family table",
+              description: "Saturday set menu for families.",
+              recommended: true,
+            },
+            {
+              value: "idea-c",
+              label: "Late-night dessert",
+              description: "After-9pm dessert counter.",
+              recommended: false,
+            },
+          ],
+        },
+      ],
+    };
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW),
+      appendMessageKeyed: vi.fn(async () => ({
+        messageId: ANSWERS_MESSAGE.id,
+        threadId: THREAD,
+        replayed: false,
+      })),
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE),
+      latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+    });
+    mocks.propose.mockResolvedValue({ intent: "answer_memory", confidence: "high", missing: [] });
+    const accepted = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "i-1234567890123456",
+            resumeKey: ideasSpec.resumeKey,
+            spec: ideasSpec,
+            answers: { idea: "idea-b" },
+          }),
+        },
+      ),
+      params,
+    );
+    expect(accepted.status).toBe(201);
+    expect(await accepted.json()).toMatchObject({
+      answers: { idea: "idea-b" },
+      resumeKey: ideasSpec.resumeKey,
+    });
+
+    // Two recommended flags break the exactly-one invariant, so the
+    // echoed spec itself is refused before anything is persisted.
+    const broken = {
+      ...ideasSpec,
+      items: [
+        {
+          ...ideasSpec.items[0],
+          options: ideasSpec.items[0].options.map((option) => ({
+            ...option,
+            recommended: true,
+          })),
+        },
+      ],
+    };
+    mocks.createRepo.mockClear();
+    const refused = await POST(
+      request(
+        `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            idempotencyKey: "i-1234567890123457",
+            resumeKey: broken.resumeKey,
+            spec: broken,
+            answers: { idea: "idea-b" },
+          }),
+        },
+      ),
+      params,
+    );
+    expect(refused.status).toBe(400);
+    expect(mocks.createRepo).not.toHaveBeenCalled();
+  });
 });
