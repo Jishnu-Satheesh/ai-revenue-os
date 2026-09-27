@@ -217,9 +217,16 @@ export function resolveAnswerModelId(
  *   ideas use `AI_ANSWER_STRONG_MODEL` (stronger). The writer never
  *   silently borrows across tiers or from the router/default model, so
  *   cost and quality stay a decision someone made.
- * - Null-without-config is preserved: no model id for the requested tier
- *   (or no Google credential) returns null, so callers take the
- *   deterministic fallback with zero provider calls. Reads `process.env`
+ * - Null-without-config is preserved per tier: with `config.mode`, a
+ *   missing model id for that tier (or a missing Google credential)
+ *   returns null, so callers take the deterministic fallback with zero
+ *   provider calls.
+ * - Without `config.mode` the factory returns null only when neither tier
+ *   is configured; otherwise it returns a mode-honoring synthesizer that
+ *   throws per request for the unconfigured tier — before any provider
+ *   import, so still zero provider calls. Direct callers must catch that
+ *   throw and fall back (`writeAnswer` does); prefer the per-tier
+ *   `config.mode` form when only one tier is needed. Reads `process.env`
  *   directly (light-model-provider precedent) to stay path-limited.
  */
 export function createAnswerSynthesizer(
