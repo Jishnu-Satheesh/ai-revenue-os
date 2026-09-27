@@ -1305,6 +1305,10 @@ describe("live answer stream", () => {
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(await within(thread).findByText("Half.")).toBeInTheDocument();
     expect(await within(thread).findByText(/the live answer stopped here/i)).toBeInTheDocument();
+    // Partial text rendered, so the stop is announced to screen readers too.
+    expect(
+      screen.getByText("The live answer stopped. Showing what arrived so far."),
+    ).toBeInTheDocument();
 
     // The drawer reads the durable row instead of reopening the stream.
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
@@ -1317,6 +1321,19 @@ describe("live answer stream", () => {
         ),
       ).toBe(true);
     });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(streamCalls()).toHaveLength(1);
+  });
+
+  it("stays silent everywhere when the stream drops before any token", async () => {
+    globalThis.fetch = mockAgentFetch({ stream: [], messages: [USER_MESSAGE, ASSISTANT] }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    // The durable row still renders, but nothing announces a stop: the
+    // visual fallback is silent, so the live region stays silent too.
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    expect(screen.queryByText(/live answer stopped/i)).toBeNull();
+    expect(screen.getByText(/routed to answer_memory/i)).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(streamCalls()).toHaveLength(1);
   });

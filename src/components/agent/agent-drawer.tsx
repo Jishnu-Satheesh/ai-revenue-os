@@ -788,14 +788,20 @@ export function AgentDrawer({
         },
         onDrop: () => {
           if (!alive()) return;
+          // Announce the stop only when partial text actually rendered —
+          // an empty drop stays silent everywhere, like the visual.
+          let hadText = false;
           setLiveStream((previous) => {
             if (!previous || previous.key !== key) return previous;
             // Nothing arrived: fall back to the durable read silently —
             // the routed turn's row renders when it lands.
             if (previous.text === "") return null;
+            hadText = true;
             return { ...previous, phase: "dropped" };
           });
-          setAnnouncement("The live answer stopped. Showing what arrived so far.");
+          if (hadText) {
+            setAnnouncement("The live answer stopped. Showing what arrived so far.");
+          }
           void refreshMessages(args.threadId);
         },
       });
