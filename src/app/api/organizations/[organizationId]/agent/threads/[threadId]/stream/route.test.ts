@@ -35,6 +35,7 @@ import {
   STREAM_DONE_DATA,
   streamEndPayloadSchema,
   type AgentStreamSource,
+  type AgentStreamSourceResult,
 } from "@/app/api/organizations/[organizationId]/agent/threads/[threadId]/stream/route";
 
 const ORGANIZATION = "10000000-0000-4000-8000-000000000001";
@@ -140,7 +141,7 @@ beforeEach(() => {
 describe("agent thread stream route", () => {
   it("streams token frames, the done marker, and a validated end payload with durable persist", async () => {
     const source: AgentStreamSource = async () => ({
-      tokens: ["Hello ", "world, here is what the stored context supports."],
+      deltas: ["Hello ", "world, here is what the stored context supports."],
       candidate: CANDIDATE,
     });
     setStreamRouteTestSeams({ source });
@@ -189,7 +190,7 @@ describe("agent thread stream route", () => {
 
   it("discards invalid candidates and persists the named fallback", async () => {
     const source: AgentStreamSource = async () => ({
-      tokens: ["Shiny unvalidated text."],
+      deltas: ["Shiny unvalidated text."],
       candidate: { body: "", baseline: "AED 4,000", attribution: "ads", window: "Q1" },
     });
     setStreamRouteTestSeams({ source });
@@ -213,7 +214,10 @@ describe("agent thread stream route", () => {
   });
 
   it("replays retries under the same idempotency key", async () => {
-    const source: AgentStreamSource = async () => ({ tokens: ["Hi."], candidate: CANDIDATE });
+    const source: AgentStreamSource = async () => ({
+      deltas: ["Hi."],
+      candidate: { ...CANDIDATE, body: "Hi." },
+    });
     setStreamRouteTestSeams({ source });
 
     const first = await GET(request(streamUrl()), params);
@@ -245,7 +249,10 @@ describe("agent thread stream route", () => {
 
   it("streams read-only for viewers without persisting", async () => {
     mocks.getOrganizationContext.mockResolvedValue(operatorContext("viewer"));
-    const source: AgentStreamSource = async () => ({ tokens: ["Hi."], candidate: CANDIDATE });
+    const source: AgentStreamSource = async () => ({
+      deltas: ["Hi."],
+      candidate: { ...CANDIDATE, body: "Hi." },
+    });
     setStreamRouteTestSeams({ source });
     const response = await GET(request(streamUrl()), params);
 
@@ -296,7 +303,7 @@ describe("agent thread stream route", () => {
   });
 
   it("times out to the named fallback instead of hanging the stream", async () => {
-    const source: AgentStreamSource = () => new Promise(() => {});
+    const source: AgentStreamSource = () => new Promise<AgentStreamSourceResult>(() => {});
     setStreamRouteTestSeams({ source, timeoutMs: 15 });
     const response = await GET(request(streamUrl()), params);
 
@@ -305,5 +312,133 @@ describe("agent thread stream route", () => {
     const payload = streamEndPayloadSchema.parse(JSON.parse(end!.data));
     expect(payload.fallback).toBe(true);
     expect(payload.reason).toBe("timeout");
+  });
+
+  it("flushes the first token frame before the candidate resolves", async () => {
+    let releaseGate!: () => void;
+    let candidateResolved = false;
+    const gate = new Promise<void>((resolve) => {
+      releaseGate = resolve;
+    });
+    const source: AgentStreamSource = async () => ({
+      deltas: (async function* () {
+        yield "Hello ";
+        await gate;
+        yield "world.";
+      })(),
+      candidate: gate.then(() => {
+        candidateResolved = true;
+        return { ...CANDIDATE, body: "Hello world." };
+      }),
+    });
+    setStreamRouteTestSeams({ source });
+    const response = await GET(request(streamUrl()), params);
+
+    expect(response.status).toBe(200);
+    const reader = response.body!.getReader();
+    const decoder = new TextDecoder();
+    // The first frame arrives while the candidate is still gated: proof
+    // the route forwards incrementally instead of buffering synthesis.
+    const first = await reader.read();
+    expect(first.done).toBe(false);
+    expect(candidateResolved).toBe(false);
+    const firstText = decoder.decode(first.value);
+    const firstFrames = parseSse(firstText);
+    expect(firstFrames[0]?.event).toBe("token");
+    expect(JSON.parse(firstFrames[0]!.data)).toEqual({ text: "Hello " });
+
+    releaseGate();
+    let rest = "";
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      rest += decoder.decode(next.value, { stream: true });
+    }
+    rest += decoder.decode();
+    const frames = parseSse(firstText + rest);
+    const tokens = frames.filter((frame) => frame.event === "token");
+    expect(tokens.map((frame) => JSON.parse(frame.data).text).join("")).toBe("Hello world.");
+    const doneIndex = frames.findIndex((frame) => frame.event === "done");
+    expect(doneIndex).toBe(tokens.length);
+    const end = frames.find((frame) => frame.event === "end");
+    expect(frames.indexOf(end!)).toBe(doneIndex + 1);
+    const payload = streamEndPayloadSchema.parse(JSON.parse(end!.data));
+    expect(payload).toMatchObject({
+      messageId: ASSISTANT_MESSAGE,
+      replayed: false,
+      fallback: false,
+      reason: null,
+      correlationId: CORRELATION,
+    });
+    // Preview/draft join contract, end to end.
+    expect(payload.draft.body).toBe("Hello world.");
+  });
+
+  it("discards the preview when it diverges from the validated draft", async () => {
+    const source: AgentStreamSource = async () => ({
+      deltas: ["Preview text."],
+      candidate: { ...CANDIDATE, body: "Different validated body." },
+    });
+    setStreamRouteTestSeams({ source });
+    const response = await GET(request(streamUrl()), params);
+
+    expect(response.status).toBe(200);
+    const frames = parseSse(await response.text());
+    // The diverted preview stays on the wire; the `end` draft wins.
+    expect(frames.filter((frame) => frame.event === "token")).toHaveLength(1);
+    const end = frames.find((frame) => frame.event === "end");
+    const payload = streamEndPayloadSchema.parse(JSON.parse(end!.data));
+    expect(payload.fallback).toBe(true);
+    expect(payload.reason).toBe("invalid_candidate");
+    expect(payload.draft.body).toMatch(/stored organization context/);
+    expect(payload.draft.body).not.toContain("Preview text.");
+    expect(payload.draft.body).not.toContain("Different validated body.");
+
+    const repo = mocks.createRepo.mock.results[0]?.value;
+    const append = repo.appendMessageKeyed.mock.calls[0][0];
+    expect(append.body).toContain("failed validation");
+  });
+
+  it("caps forwarded frames while the end stays an honest model draft", async () => {
+    const body = "x".repeat(2005);
+    const source: AgentStreamSource = async () => ({
+      deltas: Array.from({ length: 2005 }, () => "x"),
+      candidate: { ...CANDIDATE, body },
+    });
+    setStreamRouteTestSeams({ source });
+    const response = await GET(request(streamUrl()), params);
+
+    expect(response.status).toBe(200);
+    const frames = parseSse(await response.text());
+    expect(frames.filter((frame) => frame.event === "token")).toHaveLength(2000);
+    const end = frames.find((frame) => frame.event === "end");
+    const payload = streamEndPayloadSchema.parse(JSON.parse(end!.data));
+    expect(payload.fallback).toBe(false);
+    expect(payload.reason).toBeNull();
+    expect(payload.draft.body).toBe(body);
+  });
+
+  it("validates end message ids as uuids like the query does", () => {
+    const draft = { ...CANDIDATE };
+    expect(() =>
+      streamEndPayloadSchema.parse({
+        messageId: "not-a-uuid",
+        replayed: false,
+        fallback: false,
+        reason: null,
+        draft,
+        correlationId: CORRELATION,
+      }),
+    ).toThrow();
+    expect(
+      streamEndPayloadSchema.parse({
+        messageId: ASSISTANT_MESSAGE,
+        replayed: false,
+        fallback: false,
+        reason: null,
+        draft,
+        correlationId: CORRELATION,
+      }).messageId,
+    ).toBe(ASSISTANT_MESSAGE);
   });
 });

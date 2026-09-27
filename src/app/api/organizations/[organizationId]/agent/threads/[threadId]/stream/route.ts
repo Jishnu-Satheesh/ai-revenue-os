@@ -13,12 +13,13 @@ import {
   agentPersistenceFor,
 } from "@/modules/agent-chat/application/http";
 import {
+  ANSWER_MODEL_TEMPERATURE,
   answerDraftSchema,
   buildAnswerIdempotencyKey,
   buildFallbackAnswer,
   buildSynthesisPrompt,
-  createAnswerSynthesizer,
   encodeAnswerBody,
+  resolveAnswerModelId,
   synthesisCandidateSchema,
   type AnswerDraft,
 } from "@/modules/agent-chat/application/answer-writer";
@@ -36,14 +37,24 @@ import {
 /**
  * Agent thread SSE stream route (ADR 0072, spec section 4).
  *
- * GET opens one server-sent-events connection per thread. The server picks
- * the model by the thread's tier (Quick → `AI_ANSWER_MODEL`, DeepThink →
- * `AI_ANSWER_STRONG_MODEL`, via the Task 1 `createAnswerSynthesizer`
- * seam — null without config stays the honest fallback), forwards body
- * tokens as frames, validates the full candidate through the existing
- * strict synthesis schema at stream end, and persists the encoded durable
- * assistant row under the existing nonce-derived idempotency key, so
- * retries replay instead of double-posting.
+ * GET opens one server-sent-events connection per thread. Headers flush as
+ * soon as the local work (auth, thread lookup, context pack, routing note)
+ * is done; the first `token` frame flushes with the first model delta, so
+ * time-to-first-token tracks synthesis rather than waiting for it. The
+ * server picks the model by the thread's tier (Quick → `AI_ANSWER_MODEL`,
+ * DeepThink → `AI_ANSWER_STRONG_MODEL`, resolved through the Task 1
+ * `resolveAnswerModelId` seam — null without config stays the honest
+ * fallback), streams the answer body with `streamObject` against the Task 1
+ * `synthesisCandidateSchema`, validates the full candidate through the
+ * existing strict synthesis disposal at stream end, and persists the
+ * encoded durable assistant row under the existing nonce-derived
+ * idempotency key, so retries replay instead of double-posting.
+ *
+ * Task 1's `answer-writer` contract is fixed (buffered `generateObject`);
+ * the streaming provider call lives in this module and reuses Task 1's
+ * prompt assembly, temperature, and strict end-validation. One model call
+ * per stream. The client abort signal plus the 15 s synthesis budget feed
+ * the provider call, so a disconnect stops paying for generation.
  *
  * Streaming is transport only: durable rows stay the system of record.
  * Reconnects and reopens read durable rows, never resume dead streams.
@@ -89,13 +100,19 @@ import {
 //
 // - Every `token` data line is JSON `{"text": <non-empty string>}`. The
 //   chunks arrive in order; joining every `text` with `""` reproduces the
-//   streamed body preview.
+//   streamed body preview. Production slices streamed body text into
+//   fixed-width frames; injected test sources forward verbatim.
+// - When `end` carries `fallback: false`, the joined preview equals the
+//   `end` draft body (trim-tolerant — both schemas trim bodies). This
+//   holds by contract: the route discards the preview and falls back when
+//   the streamed text diverges from the validated draft, so a mismatch can
+//   never ride a model-draft `end`.
 // - `done` carries the literal `[DONE]` (no JSON). It means the token
 //   stream is complete; the `end` frame follows immediately.
 // - `end` carries the validated end payload (schema below). `draft` is
 //   the same content the server persisted (when `messageId` is non-null)
 //   and always validates through `answerDraftSchema`.
-// - `messageId` is the durable assistant row id, or null for viewers and
+// - `messageId` is the durable assistant row id (uuid), or null for viewers and
 //   for conflicting/failed appends (draft-only). `replayed` is true when
 //   the idempotency key replayed a kept row.
 // - `fallback` with its `reason` names the honest path taken:
@@ -145,7 +162,7 @@ export type StreamFallbackReason = z.infer<typeof streamFallbackReasonSchema>;
 
 export const streamEndPayloadSchema = z
   .object({
-    messageId: z.string().min(1).nullable(),
+    messageId: z.string().uuid().nullable(),
     replayed: z.boolean(),
     fallback: z.boolean(),
     reason: streamFallbackReasonSchema.nullable(),
@@ -156,7 +173,7 @@ export const streamEndPayloadSchema = z
 export type StreamEndPayload = z.infer<typeof streamEndPayloadSchema>;
 
 // ---------------------------------------------------------------------------
-// Stream source seam (model call; tests inject, production uses the tier seam)
+// Stream source seam (model call; tests inject, production streams below)
 // ---------------------------------------------------------------------------
 
 export type AgentStreamSourceArgs = {
@@ -166,14 +183,25 @@ export type AgentStreamSourceArgs = {
   sourceIds: string[];
   mode: ThreadMode;
   correlationId: string;
+  /**
+   * Combined client-abort + synthesis-budget signal. Aborts on disconnect
+   * or when the budget expires; sources that ignore it are still bounded
+   * by the route's timeout race.
+   */
   signal: AbortSignal;
 };
 
 export type AgentStreamSourceResult = {
-  /** Body chunks forwarded live, in order. */
-  tokens: Iterable<string> | AsyncIterable<string>;
-  /** Full model candidate, validated at stream end. Unknown until then. */
-  candidate: unknown;
+  /**
+   * Body-text deltas forwarded live, in order. Consumed incrementally —
+   * each delta enqueues as it arrives, before `candidate` resolves.
+   */
+  deltas: Iterable<string> | AsyncIterable<string>;
+  /**
+   * Full model candidate, validated at stream end. May defer past the
+   * first flush: the route forwards deltas first and awaits this after.
+   */
+  candidate: unknown | Promise<unknown>;
 };
 
 export type AgentStreamSource = (
@@ -206,17 +234,97 @@ class StreamTimeoutError extends Error {
   }
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+/** The client went away mid-stream: close quietly, never a fallback `end`. */
+class StreamDisconnectedError extends Error {
+  constructor() {
+    super("Stream client disconnected.");
+    this.name = "StreamDisconnectedError";
+  }
+}
+
+/** A provider rejection shaped like end-validation failure, not transport. */
+class StreamInvalidCandidateError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StreamInvalidCandidateError";
+  }
+}
+
+/** The tier has no model (or no credential): honest fallback, zero provider calls. */
+class StreamNotConfiguredError extends Error {
+  constructor() {
+    super("Answer synthesis is not configured; using stored context only.");
+    this.name = "StreamNotConfiguredError";
+  }
+}
+
+/** Provider validation-shaped failures (AI SDK type-validation errors). */
+function isValidationShaped(error: unknown): boolean {
+  return error instanceof Error && /valid/i.test(error.name);
+}
+
+/**
+ * Bounds one model phase by the synthesis budget and the client
+ * connection: rejects with `StreamTimeoutError` on budget expiry and
+ * `StreamDisconnectedError` on disconnect, whichever happens first. A
+ * source that ignores its abort signal is still bounded here.
+ */
+function raceStreamPhase<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  requestSignal: AbortSignal,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
-      reject(new StreamTimeoutError(`Stream synthesis timed out after ${ms}ms.`));
-    }, ms);
+      reject(new StreamTimeoutError(`Stream synthesis timed out after ${timeoutMs}ms.`));
+    }, timeoutMs);
   });
-  const guarded = Promise.race([promise, timeout]);
-  return guarded.finally(() => {
+  const disconnect = new Promise<never>((_, reject) => {
+    if (requestSignal.aborted) {
+      reject(new StreamDisconnectedError());
+    } else {
+      requestSignal.addEventListener(
+        "abort",
+        () => reject(new StreamDisconnectedError()),
+        { once: true },
+      );
+    }
+  });
+  return Promise.race([promise, timeout, disconnect]).finally(() => {
     if (timer !== undefined) clearTimeout(timer);
   });
+}
+
+/**
+ * Client-disconnect + synthesis-budget signal for one stream. The provider
+ * call aborts on either, so a disconnect stops paying for generation;
+ * `didTimeout` tells the disposal whether an abort was the budget.
+ */
+function armStreamBudget(
+  requestSignal: AbortSignal,
+  ms: number,
+): { signal: AbortSignal; didTimeout: () => boolean; dispose: () => void } {
+  const controller = new AbortController();
+  let expired = false;
+  const timer = setTimeout(() => {
+    expired = true;
+    controller.abort();
+  }, ms);
+  const onDisconnect = () => controller.abort();
+  if (requestSignal.aborted) {
+    controller.abort();
+  } else {
+    requestSignal.addEventListener("abort", onDisconnect, { once: true });
+  }
+  return {
+    signal: controller.signal,
+    didTimeout: () => expired,
+    dispose: () => {
+      clearTimeout(timer);
+      requestSignal.removeEventListener("abort", onDisconnect);
+    },
+  };
 }
 
 /**
@@ -231,17 +339,75 @@ export function chunkBodyText(body: string): string[] {
   return chunks;
 }
 
-/** Bounds an injected token iterable: skips junk, caps count and width. */
-async function collectStreamTokens(
-  tokens: Iterable<string> | AsyncIterable<string>,
-): Promise<string[]> {
-  const collected: string[] = [];
-  for await (const token of tokens) {
-    if (typeof token !== "string" || token.length === 0) continue;
-    collected.push(token.slice(0, 4096));
-    if (collected.length >= STREAM_MAX_TOKENS) break;
+/**
+ * Body-text suffixes of successive `streamObject` partials. Partials are
+ * cumulative prefixes, so each suffix is new preview text; joining every
+ * suffix reproduces the model's body exactly — the same text the
+ * validated end object carries, which is what makes the preview/draft
+ * join contract hold structurally on the production path.
+ */
+async function* bodyTextDeltas(
+  partials: AsyncIterable<{ body?: string | null | undefined } | null | undefined>,
+): AsyncGenerator<string> {
+  let forwarded = 0;
+  for await (const partial of partials) {
+    const body = typeof partial?.body === "string" ? partial.body : "";
+    if (body.length > forwarded) {
+      yield body.slice(forwarded);
+      forwarded = body.length;
+    }
   }
-  return collected;
+}
+
+type ForwardedPreview = {
+  /** Preview text actually put on the wire, in order. */
+  text: string;
+  /** True when the frame cap stopped forwarding (the preview is a prefix). */
+  truncated: boolean;
+};
+
+/**
+ * Forwards one delta stream as `token` frames, incrementally — each frame
+ * enqueues as its delta arrives, so time-to-first-token tracks the first
+ * model delta rather than the full synthesis. Junk is skipped, every frame
+ * validates through `streamTokenFrameSchema`, and forwarding stops at
+ * `STREAM_MAX_TOKENS` frames on every path while the stream keeps
+ * draining underneath.
+ *
+ * `sliceWidth` controls granularity: the production provider path slices
+ * streamed body text into fixed-width frames; injected sources forward
+ * verbatim (one frame per delta) so tests observe exactly what they sent.
+ */
+async function forwardStreamDeltas(input: {
+  deltas: Iterable<string> | AsyncIterable<string>;
+  sliceWidth: number | null;
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  isAborted: () => boolean;
+}): Promise<ForwardedPreview> {
+  let text = "";
+  let frames = 0;
+  let truncated = false;
+  for await (const delta of input.deltas) {
+    if (input.isAborted()) break;
+    if (typeof delta !== "string" || delta.length === 0) continue;
+    const pieces =
+      input.sliceWidth === null
+        ? [delta.slice(0, 4096)]
+        : chunkBodyText(delta);
+    for (const piece of pieces) {
+      if (input.isAborted()) break;
+      if (frames >= STREAM_MAX_TOKENS) {
+        truncated = true;
+        break;
+      }
+      const frame = streamTokenFrameSchema.safeParse({ text: piece });
+      if (!frame.success) continue;
+      input.controller.enqueue(sseFrame(STREAM_EVENT_TOKEN, JSON.stringify(frame.data)));
+      text += piece;
+      frames += 1;
+    }
+  }
+  return { text, truncated };
 }
 
 const STREAM_FALLBACK_TEXT = {
@@ -305,111 +471,264 @@ function disposeStreamCandidate(
   }
 }
 
-type StreamSynthesis = {
-  /** Tokens to forward live, in order. */
-  forwardedTokens: string[];
+/** Resolved synthesis for one stream: persisted and sent in `end`. */
+type StreamOutcome = {
   /** Validated model draft or honest fallback — persisted and sent in `end`. */
   draft: AnswerDraft;
   fallback: boolean;
   reason: StreamFallbackReason | null;
 };
 
+type StreamSynthesis = StreamOutcome;
+
+/** Output-token budget for the streaming answer call (Task 1 parity). */
+const STREAM_MAX_OUTPUT_TOKENS = 1500;
+
+function readAnswerApiKey(): string | undefined {
+  // Same rule as Task 1 (light-model-provider precedent): reads
+  // `process.env` directly to stay path-limited; empty counts as
+  // unconfigured.
+  const raw = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim() ?? "";
+  return raw.length > 0 ? raw : undefined;
+}
+
 /**
- * Tier-selected synthesis for one stream. Reuses the Task 1 seam — never
- * reimplements tier selection: `createAnswerSynthesizer({ mode })` returns
- * null without config for that tier, and the route takes the fallback with
- * zero provider calls. The injected source (tests) replaces the model call
- * only; end-of-stream validation stays in this module either way.
+ * One streaming model call for the stream route, built here — Task 1's
+ * `answer-writer` contract (buffered `generateObject`) stays fixed.
+ * Reuses Task 1's tier resolution (`resolveAnswerModelId`: Quick →
+ * `AI_ANSWER_MODEL`, DeepThink/ideas → `AI_ANSWER_STRONG_MODEL`), prompt
+ * assembly (`buildSynthesisPrompt`), temperature, output budget, and the
+ * strict candidate schema (`streamObject`, then `disposeStreamCandidate`
+ * for digest stamping at stream end). Returns null without a credential
+ * or without a model id for the tier, so the caller takes the honest
+ * fallback with zero provider calls — null-without-config preserved.
  */
-async function runStreamSynthesis(input: {
+async function streamModelAnswer(input: {
+  pack: ContextPack;
+  system: string;
+  prompt: string;
+  mode: ThreadMode;
+  signal: AbortSignal;
+}): Promise<{ deltas: AsyncIterable<string>; candidate: Promise<unknown> } | null> {
+  const apiKey = readAnswerApiKey();
+  const modelId = resolveAnswerModelId(input.mode);
+  if (!apiKey || !modelId) return null;
+  // Lazy: the provider SDKs load only on the server path that actually
+  // synthesizes (answer-writer precedent keeps assistants client-safe).
+  const { streamObject } = await import("ai");
+  const { createGoogleGenerativeAI } = await import("@ai-sdk/google");
+  const google = createGoogleGenerativeAI({ apiKey });
+  const result = streamObject({
+    model: google(modelId),
+    schema: synthesisCandidateSchema,
+    system: input.system,
+    prompt: input.prompt,
+    temperature: ANSWER_MODEL_TEMPERATURE,
+    maxOutputTokens: STREAM_MAX_OUTPUT_TOKENS,
+    abortSignal: input.signal,
+  });
+  return {
+    deltas: bodyTextDeltas(result.partialObjectStream),
+    candidate: result.object.then(
+      (value) => value,
+      (error: unknown) => {
+        if (isValidationShaped(error)) {
+          throw new StreamInvalidCandidateError(
+            "The streamed answer failed end validation; using stored context only.",
+          );
+        }
+        throw error;
+      },
+    ),
+  };
+}
+
+type StreamLogContext = {
+  organizationId: string;
+  threadId: string;
+  /** The answered user message — the only message id known at log time. */
+  messageId: string;
+  correlationId: string;
+};
+
+/** Reason-carrying fallback log: operators can tell model vs fallback drafts. */
+function logStreamFallback(
+  logContext: StreamLogContext,
+  reason: StreamFallbackReason,
+): void {
+  // `refusalCode` is the allowlisted stable-reason-code field: every
+  // stream reason is platform-minted, never tenant or model text.
+  logger.info("agent_stream.fallback", { ...logContext, refusalCode: reason });
+}
+
+/** Validation failures are operator-visible, not silent. */
+function logInvalidCandidate(logContext: StreamLogContext): void {
+  logger.warn("agent_stream.candidate_invalid", {
+    ...logContext,
+    refusalCode: "invalid_candidate",
+  });
+}
+
+/**
+ * Tier-selected synthesis for one stream. Fallback bodies forward their
+ * chunked tokens immediately inside the open stream; model paths forward
+ * deltas incrementally while the candidate stays deferred. The whole model
+ * phase runs under one budget/disconnect race: the first delta sets
+ * time-to-first-token, and end-validation plus the durable append still
+ * gate only `end`.
+ *
+ * The preview/draft join contract is enforced here, not by source
+ * convention: a validated draft whose body diverges from the forwarded
+ * preview (trim-tolerant — both schemas trim bodies) degrades to the
+ * named `invalid_candidate` fallback, so a mismatch can never ride a
+ * model-draft `end`. A truncated preview (frame cap hit) skips the check:
+ * the cap only binds pathological sources, and the `end` draft stays
+ * authoritative. Disconnects throw `StreamDisconnectedError` so the
+ * caller closes quietly instead of ending for nobody.
+ */
+async function runStreamingSynthesis(input: {
   pack: ContextPack | null;
   routingNote: string;
   mode: ThreadMode;
   correlationId: string;
   timeoutMs: number;
+  requestSignal: AbortSignal;
+  budgetSignal: AbortSignal;
+  didTimeout: () => boolean;
+  controller: ReadableStreamDefaultController<Uint8Array>;
+  logContext: StreamLogContext;
 }): Promise<StreamSynthesis> {
   const override = testSeams?.source ?? null;
-  const synthesize = override ? null : createAnswerSynthesizer({ mode: input.mode });
-  if (!override && synthesize === null) {
-    const draft = buildFallbackAnswer(
-      input.pack,
-      STREAM_FALLBACK_TEXT.not_configured,
-    );
-    return {
-      forwardedTokens: chunkBodyText(draft.body),
-      draft,
-      fallback: true,
-      reason: "not_configured",
-    };
-  }
+  const readyFallback = (
+    draft: AnswerDraft,
+    reason: StreamFallbackReason,
+  ): StreamSynthesis => {
+    const forwardedTokens = chunkBodyText(draft.body);
+    if (!input.requestSignal.aborted) {
+      for (const token of forwardedTokens) {
+        if (input.requestSignal.aborted) break;
+        const frame = streamTokenFrameSchema.safeParse({ text: token });
+        if (frame.success) {
+          input.controller.enqueue(sseFrame(STREAM_EVENT_TOKEN, JSON.stringify(frame.data)));
+        }
+      }
+    }
+    logStreamFallback(input.logContext, reason);
+    return { draft, fallback: true, reason };
+  };
+
   if (!override && input.pack === null) {
     const draft = buildFallbackAnswer(null, "No context pack was bound to this answer.");
-    return {
-      forwardedTokens: chunkBodyText(draft.body),
-      draft,
-      fallback: true,
-      reason: "not_configured",
-    };
+    return readyFallback(draft, "not_configured");
   }
   const built = input.pack
     ? buildSynthesisPrompt(input.pack, input.routingNote, input.mode)
     : { system: "unbound-context", prompt: input.routingNote };
   const sourceIds = input.pack?.sources ?? [];
-  const timeoutMs = input.timeoutMs;
+
   try {
-    const result = override
-      ? await withTimeout(
+    const live = override
+      ? await raceStreamPhase(
           override({
             system: built.system,
             prompt: built.prompt,
             sourceIds,
             mode: input.mode,
             correlationId: input.correlationId,
-            signal: AbortSignal.timeout(timeoutMs),
-          }),
-          timeoutMs,
+            signal: input.budgetSignal,
+          }).then((result) => ({
+            deltas: result.deltas,
+            candidate: Promise.resolve(result.candidate),
+            sliceWidth: null as number | null,
+          })),
+          input.timeoutMs,
+          input.requestSignal,
         )
-      : await withTimeout(
-          synthesize!({
+      : await (async (): Promise<{
+          deltas: Iterable<string> | AsyncIterable<string>;
+          candidate: Promise<unknown>;
+          sliceWidth: number | null;
+        }> => {
+          const streamed = await streamModelAnswer({
+            pack: input.pack as ContextPack,
             system: built.system,
             prompt: built.prompt,
-            sourceIds,
             mode: input.mode,
-            correlationId: input.correlationId,
-          }),
-          timeoutMs,
-        ).then((candidate) => ({ tokens: [], candidate }));
-    const forwardedTokens = override ? await collectStreamTokens(result.tokens) : [];
-    const draft = disposeStreamCandidate(result.candidate, input.pack);
+            signal: input.budgetSignal,
+          });
+          if (streamed === null) {
+            throw new StreamNotConfiguredError();
+          }
+          return { ...streamed, sliceWidth: STREAM_TOKEN_WIDTH };
+        })();
+    const consumed = await raceStreamPhase(
+      (async () => {
+        const forwarded = await forwardStreamDeltas({
+          deltas: live.deltas,
+          sliceWidth: live.sliceWidth,
+          controller: input.controller,
+          isAborted: () => input.requestSignal.aborted,
+        });
+        const raw = await live.candidate;
+        return { ...forwarded, raw };
+      })(),
+      input.timeoutMs,
+      input.requestSignal,
+    );
+    const draft = disposeStreamCandidate(consumed.raw, input.pack);
     if (!draft) {
+      logInvalidCandidate(input.logContext);
       const fallback = buildFallbackAnswer(
         input.pack,
         STREAM_FALLBACK_TEXT.invalid_candidate,
       );
+      logStreamFallback(input.logContext, "invalid_candidate");
       return {
-        forwardedTokens,
         draft: fallback,
         fallback: true,
         reason: "invalid_candidate",
       };
     }
+    if (!consumed.truncated && consumed.text.trim() !== draft.body) {
+      logInvalidCandidate(input.logContext);
+      const fallback = buildFallbackAnswer(
+        input.pack,
+        STREAM_FALLBACK_TEXT.invalid_candidate,
+      );
+      logStreamFallback(input.logContext, "invalid_candidate");
+      return {
+        draft: fallback,
+        fallback: true,
+        reason: "invalid_candidate",
+      };
+    }
+    logger.info("agent_stream.synthesized", input.logContext);
     return {
-      forwardedTokens: override ? forwardedTokens : chunkBodyText(draft.body),
       draft,
       fallback: false,
       reason: null,
     };
   } catch (error) {
+    if (error instanceof StreamDisconnectedError || input.requestSignal.aborted) {
+      throw new StreamDisconnectedError();
+    }
+    if (error instanceof StreamNotConfiguredError) {
+      const draft = buildFallbackAnswer(
+        input.pack,
+        STREAM_FALLBACK_TEXT.not_configured,
+      );
+      return readyFallback(draft, "not_configured");
+    }
     const reason: StreamFallbackReason =
-      error instanceof StreamTimeoutError ? "timeout" : "synthesis_failed";
-    const fallback = buildFallbackAnswer(
-      input.pack,
-      STREAM_FALLBACK_TEXT[reason],
-    );
+      error instanceof StreamInvalidCandidateError || isValidationShaped(error)
+        ? "invalid_candidate"
+        : error instanceof StreamTimeoutError || input.didTimeout()
+          ? "timeout"
+          : "synthesis_failed";
+    if (reason === "invalid_candidate") logInvalidCandidate(input.logContext);
+    const fallback = buildFallbackAnswer(input.pack, STREAM_FALLBACK_TEXT[reason]);
+    logStreamFallback(input.logContext, reason);
     return {
-      // A discarded model call streams nothing; a failed default call still
-      // streams its honest fallback body.
-      forwardedTokens: override ? [] : chunkBodyText(fallback.body),
       draft: fallback,
       fallback: true,
       reason,
@@ -510,19 +829,6 @@ export async function GET(
     }
 
     const timeoutMs = testSeams?.timeoutMs ?? STREAM_SYNTHESIS_TIMEOUT_MS;
-    const synthesis = await runStreamSynthesis({
-      pack,
-      routingNote,
-      mode: thread.mode,
-      correlationId,
-      timeoutMs,
-    });
-    logger.info("agent_stream.synthesized", {
-      organizationId,
-      threadId: thread.id,
-      messageId: userMessageId,
-      correlationId,
-    });
 
     // Capture server-owned values for the stream closure.
     const orgId = organizationId;
@@ -535,28 +841,67 @@ export async function GET(
       messageId: userMessageId,
       body: userMessageBody,
     });
+    const logContext: StreamLogContext = {
+      organizationId,
+      threadId: thread.id,
+      messageId: userMessageId,
+      correlationId,
+    };
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
+        // Headers flush on return below; the first token frame flushes
+        // with the first model delta — synthesis runs here, inside the
+        // open stream, never before it.
+        const budget = armStreamBudget(request.signal, timeoutMs);
+        let outcome: StreamSynthesis | null = null;
         try {
-          if (!request.signal.aborted) {
-            for (const token of synthesis.forwardedTokens) {
-              if (request.signal.aborted) break;
-              const frame = streamTokenFrameSchema.safeParse({ text: token });
-              if (frame.success) {
-                controller.enqueue(sseFrame(STREAM_EVENT_TOKEN, JSON.stringify(frame.data)));
-              }
-            }
+          outcome = await runStreamingSynthesis({
+            pack,
+            routingNote,
+            mode: thread.mode,
+            correlationId: endCorrelationId,
+            timeoutMs,
+            requestSignal: request.signal,
+            budgetSignal: budget.signal,
+            didTimeout: budget.didTimeout,
+            controller,
+            logContext,
+          });
+        } catch (error) {
+          if (error instanceof StreamDisconnectedError || request.signal.aborted) {
+            // Client gone mid-synthesis: close quietly, no `end` for nobody.
+            // `outcome` stays null and the tail below closes the stream.
+          } else {
+            // Defensive: `runStreamingSynthesis` maps every known failure to
+            // a fallback outcome, so anything escaping here is unexpected —
+            // still end honestly rather than hanging the drawer.
+            logger.warn("agent_stream.failed", {
+              organizationId: orgId,
+              correlationId: endCorrelationId,
+              errorCode: toPublicError(error).code,
+            });
+            outcome = {
+              draft: buildFallbackAnswer(pack, STREAM_FALLBACK_TEXT.synthesis_failed),
+              fallback: true,
+              reason: "synthesis_failed",
+            };
+            logStreamFallback(logContext, "synthesis_failed");
           }
-          if (!request.signal.aborted) {
-            controller.enqueue(sseFrame(STREAM_EVENT_DONE, STREAM_DONE_DATA));
+        }
+        try {
+          if (!outcome || request.signal.aborted) {
+            budget.dispose();
+            controller.close();
+            return;
           }
+          controller.enqueue(sseFrame(STREAM_EVENT_DONE, STREAM_DONE_DATA));
           // Durable end-persist under the existing thread-linked answer key:
           // retries replay the kept row. Viewers stream read-only (ADR 0072:
           // viewer routes synthesize without persisting), and a conflicting
           // or failed append degrades to draft-only — never a failed stream.
           let messageId: string | null = null;
           let replayed = false;
-          let reason = synthesis.reason;
+          let reason = outcome.reason;
           if (!request.signal.aborted && role !== "viewer") {
             try {
               const appended = await threads.appendMessageKeyed({
@@ -564,7 +909,7 @@ export async function GET(
                 actorId,
                 threadId,
                 role: "assistant",
-                body: encodeAnswerBody(synthesis.draft),
+                body: encodeAnswerBody(outcome.draft),
                 idempotencyKey: answerKey,
               });
               const kept = await threads.getMessage({
@@ -583,15 +928,18 @@ export async function GET(
               });
               messageId = null;
               replayed = false;
-              if (reason === null) reason = "append_conflict";
+              if (reason === null) {
+                reason = "append_conflict";
+                logStreamFallback(logContext, "append_conflict");
+              }
             }
           }
           const endPayload = streamEndPayloadSchema.parse({
             messageId,
             replayed,
-            fallback: synthesis.fallback,
+            fallback: outcome.fallback,
             reason,
-            draft: synthesis.draft,
+            draft: outcome.draft,
             correlationId: endCorrelationId,
           });
           if (!request.signal.aborted) {
@@ -620,6 +968,7 @@ export async function GET(
             // The controller closes below regardless.
           }
         }
+        budget.dispose();
         controller.close();
       },
     });
