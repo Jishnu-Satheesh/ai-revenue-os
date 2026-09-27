@@ -96,7 +96,7 @@ describe("router", () => {
     ).toThrow();
   });
 
-  it("nudges Quick threads needing research to DeepThink instead of spending", () => {
+  it("auto-escalates Quick threads needing research instead of nudging (B2)", () => {
     const out = routeAgentMessage({
       ...baseInput,
       text: "research the downtown lunch crowd",
@@ -104,8 +104,8 @@ describe("router", () => {
       model: { kind: "stub", intent: "research_once", confidence: "high", missing: [] },
     });
     expect(out.intent).toBe("research_once");
-    expect(out.questionnaire?.kind).toBe("deepthink_upgrade");
-    expect(out.reasonCodes).toContain("DEEPTHINK_UPGRADE_REQUIRED");
+    expect(out.questionnaire).toBeNull();
+    expect(out.reasonCodes).toContain("DEEPTHINK_AUTO_ESCALATED");
   });
 
   it("routes directly when no thread mode is given (backward compatible)", () => {
@@ -129,7 +129,7 @@ describe("router", () => {
     expect(out.questionnaire).toBeNull();
   });
 
-  it("keeps the permission gate above the Quick upgrade nudge", () => {
+  it("keeps the permission gate above Quick auto-escalation", () => {
     const out = routeAgentMessage({
       ...baseInput,
       text: "research the downtown lunch crowd",
@@ -142,7 +142,7 @@ describe("router", () => {
     expect(out.questionnaire?.kind).not.toBe("deepthink_upgrade");
   });
 
-  it("keeps low confidence above the Quick upgrade nudge", () => {
+  it("keeps low confidence above Quick auto-escalation", () => {
     const out = routeAgentMessage({
       ...baseInput,
       text: "maybe research something",
@@ -356,5 +356,111 @@ describe("campaign_ideas questionnaire spec", () => {
         ],
       }).kind,
     ).toBe("missing_fields");
+  });
+});
+
+describe("zero-click auto-escalation (B2)", () => {
+  it("escalates a holder's Quick research read silently: no nudge card, escalate code", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "research the downtown lunch crowd",
+      threadMode: "quick",
+      model: { kind: "stub", intent: "research_once", confidence: "high", missing: [] },
+    });
+    expect(out.intent).toBe("research_once");
+    expect(out.questionnaire).toBeNull();
+    expect(out.reasonCodes).toContain("DEEPTHINK_AUTO_ESCALATED");
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_UPGRADE_REQUIRED");
+  });
+
+  it("states the assumption inline when escalating on medium confidence", () => {
+    const medium = routeAgentMessage({
+      ...baseInput,
+      text: "research the downtown lunch crowd",
+      threadMode: "quick",
+      model: { kind: "stub", intent: "research_once", confidence: "medium", missing: [] },
+    });
+    expect(medium.questionnaire).toBeNull();
+    expect(medium.reasonCodes).toContain("DEEPTHINK_AUTO_ESCALATED");
+    expect(medium.routingNote).toContain("assumption=");
+
+    const high = routeAgentMessage({
+      ...baseInput,
+      text: "research the downtown lunch crowd",
+      threadMode: "quick",
+      model: { kind: "stub", intent: "research_once", confidence: "high", missing: [] },
+    });
+    expect(high.routingNote).not.toContain("assumption=");
+  });
+
+  it("never escalates for viewers: read-only answer with honest codes", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "research the downtown lunch crowd",
+      threadMode: "quick",
+      role: "viewer",
+      permissions: [],
+      model: { kind: "stub", intent: "research_once", confidence: "high", missing: [] },
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.reasonCodes).toContain("VIEWER_RESTRICTED");
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_AUTO_ESCALATED");
+  });
+
+  it("keeps grant-less operators on Quick with an honest note, never the flip", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "research the downtown lunch crowd",
+      threadMode: "quick",
+      permissions: [],
+      model: { kind: "stub", intent: "research_once", confidence: "high", missing: [] },
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.questionnaire).toBeNull();
+    expect(out.reasonCodes).toContain("RESEARCH_REQUIRES_MANAGE");
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_AUTO_ESCALATED");
+  });
+
+  it("still asks for missing scope instead of escalating blind", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "research something",
+      threadMode: "quick",
+      model: { kind: "stub", intent: "research_once", confidence: "high", missing: ["research_area"] },
+    });
+    expect(out.intent).toBe("research_once");
+    expect(out.questionnaire?.kind).toBe("missing_fields");
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_AUTO_ESCALATED");
+  });
+
+  it("never re-escalates an already-DeepThink thread", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "research the downtown lunch crowd",
+      threadMode: "deepthink",
+      model: { kind: "stub", intent: "research_once", confidence: "high", missing: [] },
+    });
+    expect(out.questionnaire).toBeNull();
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_AUTO_ESCALATED");
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_UPGRADE_REQUIRED");
+  });
+
+  it("keeps old deepthink_upgrade rows parsing", () => {
+    expect(
+      questionnaireSpecSchema.parse({
+        kind: "deepthink_upgrade",
+        title: "Research needed — switch to DeepThink?",
+        resumeKey: "router:research_once:overview:abc123",
+        items: [
+          {
+            key: "confirm_upgrade",
+            label: "Switch this thread to DeepThink?",
+            kind: "confirm",
+            required: true,
+            helpText: "DeepThink may run one bounded research task. Quick never spends.",
+          },
+        ],
+      }).kind,
+    ).toBe("deepthink_upgrade");
   });
 });

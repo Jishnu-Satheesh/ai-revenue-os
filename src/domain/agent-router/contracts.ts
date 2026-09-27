@@ -72,11 +72,12 @@ export const routerInputSchema = z
     historyDigest: digestSchema.optional(),
     activeWatches: z.array(activeWatchCandidateSchema).max(20),
     /**
-     * Shell mode of the calling thread (Task 3, ruling T3a). Optional so
-     * earlier callers keep working: absent means "no mode promise", and
-     * the service never gates on it. Present `quick` plus a research
-     * judgment emits the `deepthink_upgrade` nudge instead of routing
-     * straight into spend — the user confirms before anything runs.
+     * Shell mode of the calling thread (Task 3, ruling T3a; Task B2, ADR
+     * 0074). Optional so earlier callers keep working: absent means "no
+     * mode promise", and the service never gates on it. Present `quick`
+     * plus a research judgment auto-escalates manage-holders zero-click
+     * (`DEEPTHINK_AUTO_ESCALATED`, no nudge card); the deprecated
+     * `deepthink_upgrade` nudge is never emitted for new turns.
      */
     threadMode: threadModeSchema.optional(),
     model: z.union([stubModelProposalSchema, liveModelProposalSchema]),
@@ -87,6 +88,12 @@ export type RouterInput = z.infer<typeof routerInputSchema>;
 export const questionnaireKindSchema = z.enum([
   "clarify",
   "missing_fields",
+  /**
+   * Deprecated (Task B2, ADR 0074): the router no longer emits upgrade
+   * nudges — manage-holders auto-escalate Quick → DeepThink zero-click.
+   * Kept in the enum so old rows and saved specs still parse; never mint
+   * a new `deepthink_upgrade` card.
+   */
   "deepthink_upgrade",
   "duplicate_watch",
   "evidence_window",

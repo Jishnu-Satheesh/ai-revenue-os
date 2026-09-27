@@ -118,6 +118,12 @@ function routingNote(args: {
   watchIds: string[];
   missingFields: MissingField[];
   reasonCodes: string[];
+  /**
+   * B2 handoff invariant (B1 prompt): medium-confidence acts, and the
+   * service states the assumption inline. Present only on the escalated
+   * medium path; every other note stays byte-identical to before.
+   */
+  assumption?: string;
 }): string {
   const lines = [
     `page=${args.page}`,
@@ -129,8 +135,19 @@ function routingNote(args: {
     `missing=${args.missingFields.length > 0 ? args.missingFields.join(",") : "none"}`,
     `reasons=${args.reasonCodes.join(",")}`,
   ];
+  if (args.assumption) {
+    lines.push(`assumption=${args.assumption}`);
+  }
   return lines.join("\n");
 }
+
+/**
+ * The one inline assumption the service may state (B2). The proposal
+ * carries no free text, so this is deterministic platform copy — never
+ * tenant or model text — naming what the medium-confidence act presumes.
+ */
+const MEDIUM_ESCALATION_ASSUMPTION =
+  "medium-confidence research read; acting as one bounded DeepThink task";
 
 function finish(args: {
   intent: AgentIntent;
@@ -142,6 +159,7 @@ function finish(args: {
   contextDigest: string;
   historyDigest?: string;
   watchIds: string[];
+  assumption?: string;
 }): RouterOutput {
   const questionnaire =
     args.questionnaire === null ? null : questionnaireSpecSchema.parse(args.questionnaire);
@@ -158,6 +176,7 @@ function finish(args: {
       watchIds: args.watchIds,
       missingFields: args.missingFields,
       reasonCodes: args.reasonCodes,
+      ...(args.assumption ? { assumption: args.assumption } : {}),
     }),
     questionnaire,
     reasonCodes: args.reasonCodes,
@@ -309,38 +328,23 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
   const missingFields = proposal.missing.slice(0, MAX_MISSING_FIELDS);
   const capped = proposal.missing.length > MAX_MISSING_FIELDS;
 
-  // Quick-mode research guard (ruling T3a): Quick never spends. A Quick
-  // thread whose message judges as needing research gets an upgrade nudge
-  // with a cost/transparency note — the user confirms before any spend.
-  // Sits after the gates (a denied caller stays denied) and after the
-  // low-confidence fallback (an unsure read is never judged as research).
-  // Only research_once is guarded: watch/campaign/profile executors own
-  // their own permission and confirmation fences downstream.
-  if (parsed.threadMode === "quick" && proposal.intent === "research_once") {
-    return finish({
-      ...shared,
-      intent: "research_once",
-      confidence: proposal.confidence,
-      missingFields,
-      questionnaire: {
-        kind: "deepthink_upgrade",
-        title: "Research needed — switch to DeepThink?",
-        resumeKey: resumeKey("research_once", parsed.page, parsed.contextDigest),
-        items: [
-          {
-            key: "confirm_upgrade",
-            label: "Switch this thread to DeepThink?",
-            kind: "confirm",
-            required: true,
-            helpText: "DeepThink may run one bounded research task. Quick never spends.",
-          },
-        ],
-      },
-      reasonCodes: capped
-        ? ["DEEPTHINK_UPGRADE_REQUIRED", "MISSING_FIELDS_CAPPED"]
-        : ["DEEPTHINK_UPGRADE_REQUIRED"],
-    });
-  }
+  // Zero-click auto-escalation (Task B2, ADR 0074 — reverses ruling T3a
+  // for L1/L2): a Quick thread whose message judges as needing research
+  // flips to DeepThink server-side for manage-holders. No nudge card is
+  // emitted; the `DEEPTHINK_AUTO_ESCALATED` code below is the thread
+  // service's flip signal. Sits after the gates (a denied caller stays
+  // denied — viewers and grant-less callers never reach here as research)
+  // and after the low-confidence fallback (an unsure read is never judged
+  // as research). The grant is re-checked explicitly rather than trusted
+  // from gate order, so a future reorder cannot silently escalate a
+  // caller who may not spend. Only research_once escalates:
+  // watch/campaign/profile executors own their own fences downstream.
+  // Missing scope still asks first (the branch below): the flip fires only
+  // on the direct route, never blind.
+  const autoEscalated =
+    parsed.threadMode === "quick" &&
+    proposal.intent === "research_once" &&
+    parsed.permissions.includes(INTENT_REQUIRED_PERMISSION.research_once);
 
   // Duplicate-watch card: a similar active scope already exists.
   if (proposal.intent === "watch" && parsed.activeWatches.length > 0) {
@@ -402,13 +406,24 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
     });
   }
 
-  // Route directly.
+  // Route directly. An escalated Quick research read carries the flip
+  // signal; medium confidence additionally states its assumption inline
+  // in the note (B1 handoff invariant).
+  const directCodes = capped
+    ? ["MODEL_PROPOSAL_ACCEPTED", "MISSING_FIELDS_CAPPED"]
+    : ["MODEL_PROPOSAL_ACCEPTED"];
+  if (autoEscalated) {
+    directCodes.push("DEEPTHINK_AUTO_ESCALATED");
+  }
   return finish({
     ...shared,
     intent: proposal.intent,
     confidence: proposal.confidence,
     missingFields,
     questionnaire: null,
-    reasonCodes: capped ? ["MODEL_PROPOSAL_ACCEPTED", "MISSING_FIELDS_CAPPED"] : ["MODEL_PROPOSAL_ACCEPTED"],
+    reasonCodes: directCodes,
+    ...(autoEscalated && proposal.confidence === "medium"
+      ? { assumption: MEDIUM_ESCALATION_ASSUMPTION }
+      : {}),
   });
 }

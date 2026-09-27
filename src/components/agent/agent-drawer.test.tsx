@@ -9,6 +9,7 @@ import { useState } from "react";
 import {
   AgentDrawer,
   buildDrawerRequestKeys,
+  resolveLiveThread,
   type AgentDrawerProps,
   type AgentDrawerView,
   type PendingPrompt,
@@ -970,6 +971,40 @@ describe("thread checkpoint polling", () => {
     expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
   });
 
+  it("keeps the DeepThink marker when the route escalates but the poll still reads Quick", async () => {
+    // B2: the server-owned flip is in-memory (no mode-write RPC under
+    // RLS-forced writes), so the poll keeps returning the persisted Quick
+    // row. The drawer holds the escalated mode for the session instead of
+    // letting the poll clobber the marker three seconds after the send.
+    const escalated: ThreadSummary = { ...THREAD, mode: "deepthink" };
+    globalThis.fetch = mockAgentFetch({
+      route: {
+        intent: "research_once",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED", "DEEPTHINK_AUTO_ESCALATED"],
+        questionnaire: null,
+        thread: escalated,
+        correlationId: "c3",
+      },
+      thread: THREAD,
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt("research the downtown lunch crowd")} />);
+    expect(await screen.findByText(/switched to deepthink/i)).toBeInTheDocument();
+    // The marker must survive the poll landing, not just the send moment.
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).endsWith(`/agent/threads/${THREAD.id}`) &&
+            ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+        ),
+      ).toBe(true);
+    });
+    expect(screen.getByText(/switched to deepthink/i)).toBeInTheDocument();
+  });
+
+
   it("polls one row per tick, never the thread collection", async () => {
     globalThis.fetch = mockAgentFetch() as never;
     render(<Harness view="thread" threadId={THREAD.id} />);
@@ -1812,5 +1847,42 @@ describe("answer rendering (finding D)", () => {
     expect(
       sources.compareDocumentPosition(limitations) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+});
+
+describe("resolveLiveThread (B2 escalation hold)", () => {
+  const escalated: ThreadSummary = { ...THREAD, mode: "deepthink" };
+  const other: ThreadSummary = {
+    ...THREAD,
+    id: "99999999-9999-4999-8999-999999999999",
+    mode: "deepthink",
+  };
+
+  it("holds the escalated mode when the same-thread poll still reads Quick", () => {
+    const live = resolveLiveThread(THREAD, escalated);
+    expect(live?.mode).toBe("deepthink");
+    expect(live?.id).toBe(THREAD.id);
+  });
+
+  it("lets the poll win for links and status on the merged row", () => {
+    const running: ThreadSummary = {
+      ...THREAD,
+      status: "running",
+      linkedResearchProjectId: "55555555-5555-4555-8555-555555555555",
+    };
+    const live = resolveLiveThread(running, escalated);
+    expect(live?.mode).toBe("deepthink");
+    expect(live?.status).toBe("running");
+    expect(live?.linkedResearchProjectId).toBe("55555555-5555-4555-8555-555555555555");
+  });
+
+  it("ignores a stale optimistic row from another thread", () => {
+    expect(resolveLiveThread(THREAD, other)?.mode).toBe("quick");
+  });
+
+  it("falls back to whichever row exists", () => {
+    expect(resolveLiveThread(null, escalated)?.mode).toBe("deepthink");
+    expect(resolveLiveThread(THREAD, null)?.mode).toBe("quick");
+    expect(resolveLiveThread(null, null)).toBeNull();
   });
 });

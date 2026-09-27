@@ -145,14 +145,16 @@ describe("thread service", () => {
       threadId: "t1",
       page: "overview",
     });
-    // Quick thread + research judgment: the upgrade nudge, not execution.
+    // Quick thread + research judgment: silent server-owned escalation,
+    // not the retired upgrade nudge and not execution.
     expect(out.intent).toBe("research_once");
-    expect(out.questionnaire?.kind).toBe("deepthink_upgrade");
+    expect(out.questionnaire).toBeNull();
     expect(out.thread.id).toBe("t1");
+    expect(out.thread.mode).toBe("deepthink");
     // The routed result carries confidence + reason codes for the drawer
     // steps and the enriched route log line.
     expect(out.confidence).toBe("high");
-    expect(out.reasonCodes).toEqual(expect.arrayContaining(["DEEPTHINK_UPGRADE_REQUIRED"]));
+    expect(out.reasonCodes).toEqual(expect.arrayContaining(["DEEPTHINK_AUTO_ESCALATED"]));
     expect(publish).toHaveBeenCalledWith(
       expect.objectContaining({
         eventName: "agent_thread.routed",
@@ -548,5 +550,82 @@ describe("campaign ideas-first routing (Task 6)", () => {
     expect(out.intent).toBe("campaign_advice");
     expect(out.questionnaire).toBeNull();
     expect(synthesizeIdeas).not.toHaveBeenCalled();
+  });
+});
+
+describe("zero-click auto-escalation (B2)", () => {
+  it("flips a holder's Quick thread to DeepThink silently on a research read", async () => {
+    const publish = vi.fn(async () => {});
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      events: { publish },
+      proposeRouter: async () => ({ intent: "research_once", confidence: "high", missing: [] }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-escalate-00000001",
+    });
+    expect(out.intent).toBe("research_once");
+    expect(out.questionnaire).toBeNull();
+    expect(out.reasonCodes).toContain("DEEPTHINK_AUTO_ESCALATED");
+    expect(out.thread.mode).toBe("deepthink");
+    expect(publish).toHaveBeenCalledWith(
+      expect.objectContaining({
+        eventName: "agent_thread.routed",
+        payload: expect.objectContaining({ intent: "research_once" }),
+      }),
+    );
+    // Replays keep the flipped mode without a duplicate event.
+    const replayed = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+      idempotencyKey: "k-escalate-00000001",
+    });
+    expect(replayed.replayed).toBe(true);
+    expect(replayed.thread.mode).toBe("deepthink");
+  });
+
+  it("keeps viewers read-only: no flip, memory answer with honest codes", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      proposeRouter: async () => ({ intent: "research_once", confidence: "high", missing: [] }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "viewer",
+      threadId: "t1",
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.thread.mode).toBe("quick");
+    expect(out.reasonCodes).toContain("VIEWER_RESTRICTED");
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_AUTO_ESCALATED");
+  });
+
+  it("never flips an already-DeepThink thread again", async () => {
+    const threads = mockThreads({
+      getThread: vi.fn(async () => ({ ...THREAD, mode: "deepthink" })),
+    });
+    const service = createThreadService({
+      threads,
+      proposeRouter: async () => ({ intent: "research_once", confidence: "high", missing: [] }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+    });
+    expect(out.thread.mode).toBe("deepthink");
+    expect(out.reasonCodes).not.toContain("DEEPTHINK_AUTO_ESCALATED");
   });
 });

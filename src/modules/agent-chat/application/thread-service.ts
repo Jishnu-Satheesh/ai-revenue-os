@@ -656,6 +656,10 @@ export function createThreadService(deps: ThreadServiceDeps) {
      * Task 6: digests the real HEAVY pack when `contextReaders` are bound
      * (V1 placeholder otherwise), and dedups redispatch on the carried
      * idempotency token (ruling L4).
+     *
+     * Task B2: applies the server-owned Quick → DeepThink mode flip
+     * in-memory when the router signals `DEEPTHINK_AUTO_ESCALATED` for a
+     * grant-holding caller; the returned thread carries the escalated mode.
      */
     async routeLatest(input: {
       organizationId: string;
@@ -750,6 +754,22 @@ export function createThreadService(deps: ThreadServiceDeps) {
                 missing: proposal.missing,
               },
       });
+      // Zero-click auto-escalation (Task B2, ADR 0074): the router signals
+      // a holder escalation with DEEPTHINK_AUTO_ESCALATED, and the service
+      // applies the server-owned mode flip to the returned thread when the
+      // persisted row is still Quick. In-memory only: RLS carries no
+      // thread-mode write policy and no mode RPC exists, so the persisted
+      // row stays Quick and the drawer merge holds the marker for the
+      // session. The grant is re-checked from the role here, never trusted
+      // from router output alone — viewers and grant-less callers keep the
+      // router's answer_memory downgrade with its honest codes and never
+      // flip.
+      const escalated =
+        hasOrganizationPermission(input.role, "growth_intelligence.manage") &&
+        output.intent === "research_once" &&
+        output.reasonCodes.includes("DEEPTHINK_AUTO_ESCALATED") &&
+        thread.mode === "quick";
+      const routedThread: ThreadSummary = escalated ? { ...thread, mode: "deepthink" } : thread;
       await publishAgentEvent(deps, {
         organizationId: input.organizationId,
         actorId: input.actorId,
@@ -785,12 +805,12 @@ export function createThreadService(deps: ThreadServiceDeps) {
           latestBody: message.body ?? "",
         }),
         routingNote: output.routingNote,
-        thread,
+        thread: routedThread,
         answer: await synthesizeAssistantAnswer(deps, {
           organizationId: input.organizationId,
           actorId: input.actorId,
           role: input.role,
-          thread,
+          thread: routedThread,
           message,
           pack,
           routingNote: output.routingNote,

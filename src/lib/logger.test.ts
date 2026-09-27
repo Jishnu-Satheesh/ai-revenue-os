@@ -17,6 +17,7 @@ describe("agent reason codes (F4 closed vocabulary)", () => {
       "PROFILE_REQUIRES_MANAGE",
       "LOW_CONFIDENCE_FALLBACK",
       "DEEPTHINK_UPGRADE_REQUIRED",
+      "DEEPTHINK_AUTO_ESCALATED",
       "MISSING_FIELDS_CAPPED",
       "QUESTIONNAIRE_REQUIRED",
       "MODEL_PROPOSAL_ACCEPTED",

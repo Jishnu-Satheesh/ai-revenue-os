@@ -107,15 +107,17 @@ describe("agent thread route endpoint", () => {
     );
     expect(response.status).toBe(200);
     const body = await response.json();
-    // Quick thread + research judgment: upgrade nudge, never silent spend.
+    // Quick thread + research judgment: silent server-owned escalation,
+    // never the retired upgrade nudge and never silent spend.
     expect(body.intent).toBe("research_once");
-    expect(body.questionnaire.kind).toBe("deepthink_upgrade");
+    expect(body.questionnaire).toBeNull();
     expect(body.thread.id).toBe(THREAD);
+    expect(body.thread.mode).toBe("deepthink");
     expect(body.correlationId).toBe(CORRELATION);
     // The route answers confidence + reason codes for the drawer steps,
     // and the routed log line carries intent/confidence/reasons/threadId.
     expect(body.confidence).toBe("high");
-    expect(body.reasonCodes).toEqual(expect.arrayContaining(["DEEPTHINK_UPGRADE_REQUIRED"]));
+    expect(body.reasonCodes).toEqual(expect.arrayContaining(["DEEPTHINK_AUTO_ESCALATED"]));
     expect(mocks.info).toHaveBeenCalledWith(
       "agent_thread.routed",
       expect.objectContaining({

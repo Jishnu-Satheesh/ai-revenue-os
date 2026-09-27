@@ -177,6 +177,32 @@ export function buildDrawerRequestKeys(
 }
 
 /**
+ * Session view of the active thread (Task B2 zero-click escalation).
+ *
+ * The polled row wins when it arrives — worker link updates land there —
+ * except the server-owned auto-escalation flips the route-response thread
+ * to DeepThink in-memory (RLS carries no thread-mode write policy and no
+ * mode RPC exists), so a same-thread poll still reading Quick must not
+ * clobber the marker mid-session. Links and status always come from the
+ * poll; only the escalated mode is held from the route response.
+ */
+export function resolveLiveThread(
+  polled: ThreadSummary | null,
+  optimistic: ThreadSummary | null,
+): ThreadSummary | null {
+  if (
+    polled &&
+    optimistic &&
+    polled.id === optimistic.id &&
+    polled.mode === "quick" &&
+    optimistic.mode === "deepthink"
+  ) {
+    return { ...polled, mode: "deepthink" };
+  }
+  return polled ?? optimistic;
+}
+
+/**
  * Task 3 frame protocol, consumed verbatim (task-3 report, wire unchanged
  * after the fix round: token/done/end in order, then the server closes).
  *
@@ -1086,7 +1112,8 @@ export function AgentDrawer({
 
   // The polled row wins when it arrives: worker link updates land here,
   // and the send/reopen paths below seed the same state optimistically.
-  const liveThread = threadPoll.data ?? thread;
+  // resolveLiveThread holds a B2 in-memory escalation across poll ticks.
+  const liveThread = resolveLiveThread(threadPoll.data ?? null, thread);
 
   const reopen = useMutation({
     mutationFn: async (target: ThreadSummary) => {
