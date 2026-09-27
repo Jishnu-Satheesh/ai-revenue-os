@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   publish: vi.fn(),
   trigger: vi.fn(),
   createProjects: vi.fn(),
+  createCompetitors: vi.fn(),
 }));
 
 vi.mock("@/lib/api/organization-context", () => ({
@@ -34,6 +35,9 @@ vi.mock("@trigger.dev/sdk", () => ({
 }));
 vi.mock("@/modules/growth-intelligence/infrastructure/research-project-repository", () => ({
   createAuthenticatedResearchProjectRepository: mocks.createProjects,
+}));
+vi.mock("@/modules/growth-intelligence/infrastructure/organization-competitor-repository", () => ({
+  createAuthenticatedOrganizationCompetitorRepository: mocks.createCompetitors,
 }));
 vi.mock("@/lib/logger", () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
@@ -116,6 +120,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getOrganizationContext.mockResolvedValue(operatorContext());
   mocks.createReaders.mockReturnValue({});
+  mocks.createCompetitors.mockReturnValue({ listCompetitors: async () => [] });
 });
 
 describe("agent thread answers route", () => {
@@ -1394,6 +1399,84 @@ describe("agent thread answers route watch one-tap (B4)", () => {
     expect(body.watchChoice.outcome).toBe("duplicate");
     expect(body.watchChoice.card.kind).toBe("duplicate_watch");
     expect(projects.createProject).not.toHaveBeenCalled();
+  });
+
+  it("prefills the live create from the pack: saved competitors plus branch timezone", async () => {
+    const projects = watchRepo({ listActiveProjects: async () => [] });
+    mocks.createProjects.mockReturnValue(projects);
+    mocks.getOrganizationContext.mockResolvedValue({
+      ...operatorContext(),
+      supabase: { rpc: vi.fn(), from: watchFrom() },
+    });
+    threadRepo();
+    mocks.propose.mockResolvedValue({ intent: "watch", confidence: "high", missing: [] });
+    // Fix round 1 (I-1): the live one-tap create consumes the pack —
+    // branch timezone through the pack reader, competitors from the
+    // org registry — instead of degrading to UTC + card-only.
+    mocks.createReaders.mockReturnValue({
+      resolveBranchTimezone: vi.fn(async () => "Asia/Dubai"),
+    });
+    mocks.createCompetitors.mockReturnValue({
+      listCompetitors: vi.fn(async () => [
+        {
+          id: "44444444-4444-4444-8444-444444444444",
+          organizationId: ORGANIZATION,
+          name: "Pack Rival",
+          website: "https://rival.example",
+          locationHint: null,
+          createdAt: "2026-09-25T10:00:00.000Z",
+          updatedAt: "2026-09-25T10:00:00.000Z",
+        },
+      ]),
+    });
+
+    const packed = await postAnswers({
+      idempotencyKey: "w-1234567890123470",
+      resumeKey: MISSING_WATCH_SPEC.resumeKey,
+      spec: MISSING_WATCH_SPEC,
+      answers: { frequency: "weekly", branch: BRANCH, research_area: "downtown lunch" },
+    });
+
+    expect(packed.status).toBe(201);
+    const packedBody = await packed.json();
+    expect(packedBody.watchChoice.outcome).toBe("created");
+    // Pack timezone reaches the created schedule; the UTC assumption
+    // is suppressed.
+    expect(projects.createProject).toHaveBeenCalledWith(
+      expect.objectContaining({
+        schedule: expect.objectContaining({ cadence: "weekly", timeZone: "Asia/Dubai" }),
+      }),
+    );
+    const packedAssumptions = packedBody.watchChoice.assumptions.join("\n") as string;
+    expect(packedAssumptions).not.toMatch(/UTC/);
+    expect(packedAssumptions).not.toMatch(/No competitors pre-filled/);
+
+    // Same answers without saved competitors: the scope fingerprint
+    // must move (it hashes competitors but not the idempotency key),
+    // and the honest no-competitors assumption returns. The timezone
+    // stays packed so the fingerprint delta proves competitors alone
+    // landed in the create.
+    mocks.createCompetitors.mockReturnValue({ listCompetitors: async () => [] });
+    const unpacked = await postAnswers({
+      idempotencyKey: "w-1234567890123471",
+      resumeKey: MISSING_WATCH_SPEC.resumeKey,
+      spec: MISSING_WATCH_SPEC,
+      answers: { frequency: "weekly", branch: BRANCH, research_area: "downtown lunch" },
+    });
+    expect(unpacked.status).toBe(201);
+    const unpackedBody = await unpacked.json();
+    expect(unpackedBody.watchChoice.outcome).toBe("created");
+    expect(projects.createProject).toHaveBeenCalledTimes(2);
+    const createdInputs = projects.createProject.mock.calls as unknown as Array<
+      [{ scopeFingerprint: string }]
+    >;
+    const packedInput = createdInputs[0]?.[0];
+    const unpackedInput = createdInputs[1]?.[0];
+    expect(packedInput?.scopeFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(unpackedInput?.scopeFingerprint).not.toBe(packedInput?.scopeFingerprint);
+    const unpackedAssumptions = unpackedBody.watchChoice.assumptions.join("\n") as string;
+    expect(unpackedAssumptions).toMatch(/No competitors pre-filled/);
+    expect(unpackedAssumptions).not.toMatch(/UTC/);
   });
 
   it("carries the defaulted evidence window on the idea-draft envelope", async () => {

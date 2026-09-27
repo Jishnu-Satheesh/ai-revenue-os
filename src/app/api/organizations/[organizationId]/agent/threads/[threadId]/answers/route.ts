@@ -33,10 +33,12 @@ import {
   prepareWatchCreate,
   requestWatchFromChoice,
   resolveWatchBranchId,
+  watchCompetitorSchema,
   type WatchTapOutcome,
   type WatchCandidate,
   type WatchCardEdits,
 } from "@/modules/agent-chat/application/executors";
+import { createAuthenticatedOrganizationCompetitorRepository } from "@/modules/growth-intelligence/infrastructure/organization-competitor-repository";
 import { createAuthenticatedResearchProjectRepository } from "@/modules/growth-intelligence/infrastructure/research-project-repository";
 import { createCampaignDraftService } from "@/modules/decisions/application/campaign-draft-service";
 import {
@@ -238,6 +240,82 @@ async function readWatchBriefDocument(
   const document = (data as { document?: unknown }).document;
   const parsed = briefRevisionSchema.safeParse(document);
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Pack context for the one-tap watch create (Task B4 fix round 1): the
+ * branch timezone through the pack's own context reader, plus the
+ * organization's saved competitors from the registry the New-research
+ * dialog maintains (the monitoring projects route round-trips the same
+ * table on create, so names saved on either path pre-fill the other).
+ * Either leg degrades openly on a read failure — the executor then
+ * states the UTC / no-competitors assumption inline — with an
+ * identifier-only warn so the gap stays observable, never silent.
+ * Malformed or unparseable rows are skipped, never papered over.
+ */
+async function resolveWatchPrefillPack(input: {
+  supabase: Parameters<typeof createAgentContextReaders>[0];
+  organizationId: string;
+  branchId?: string;
+  threadId: string;
+  correlationId: string;
+}): Promise<{
+  branchTimezone?: string;
+  competitors: Array<z.infer<typeof watchCompetitorSchema>>;
+}> {
+  let branchTimezone: string | undefined;
+  try {
+    const readers = createAgentContextReaders(input.supabase);
+    const resolved = await readers.resolveBranchTimezone?.({
+      organizationId: input.organizationId,
+      ...(input.branchId ? { branchId: input.branchId } : {}),
+    });
+    const trimmed = typeof resolved === "string" ? resolved.trim() : "";
+    // The schedule contract only accepts real IANA zones (same Intl
+    // check): a garbage row degrades to the stated UTC assumption,
+    // never a 500 on the tap.
+    if (trimmed.length > 0 && trimmed.length <= 100) {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: trimmed }).format();
+        branchTimezone = trimmed;
+      } catch {
+        // Invalid zone on file — leave it absent (UTC assumption).
+      }
+    }
+  } catch {
+    logger.warn("agent_thread.watch_prefill_timezone_degraded", {
+      organizationId: input.organizationId,
+      threadId: input.threadId,
+      correlationId: input.correlationId,
+    });
+  }
+  let competitors: Array<z.infer<typeof watchCompetitorSchema>> = [];
+  try {
+    const saved = await createAuthenticatedOrganizationCompetitorRepository(
+      input.supabase,
+    ).listCompetitors({ organizationId: input.organizationId });
+    competitors = saved
+      .flatMap((entry) => {
+        const parsed = watchCompetitorSchema.safeParse({
+          name: entry.name,
+          ...(entry.website ? { website: entry.website } : {}),
+          ...(entry.locationHint ? { locationHint: entry.locationHint } : {}),
+          source: "suggestion",
+        });
+        return parsed.success ? [parsed.data] : [];
+      })
+      .slice(0, 20);
+  } catch {
+    logger.warn("agent_thread.watch_prefill_competitors_degraded", {
+      organizationId: input.organizationId,
+      threadId: input.threadId,
+      correlationId: input.correlationId,
+    });
+  }
+  return {
+    ...(branchTimezone ? { branchTimezone } : {}),
+    competitors,
+  };
 }
 
 const watchSiblingRowSchema = z
@@ -596,8 +674,21 @@ export async function POST(
           );
         } else {
           // `start_fresh` or a missing-fields create: full pre-fill from
-          // the card answers plus the routing note's question. Unbound
+          // the card answers plus the routing note's question and the
+          // pack (branch timezone + saved competitors). Unbound
           // fields return the named missing set — never an invented scope.
+          // The timezone scope binds the same branch resolution the
+          // payload uses (uuid answer, unique name, or single-branch
+          // auto-bind); ambiguity falls back to the org default, never a
+          // guess.
+          const packBranch = resolveWatchBranchId(branchRows, branchAnswer);
+          const pack = await resolveWatchPrefillPack({
+            supabase: context.supabase,
+            organizationId,
+            ...(packBranch.ok ? { branchId: packBranch.branchId } : {}),
+            threadId: rawParams.threadId,
+            correlationId,
+          });
           const prepared = prepareWatchCreate(
             {
               ...(question ? { question } : {}),
@@ -607,7 +698,7 @@ export async function POST(
               ...(answers["competitors"] ? { competitorName: answers["competitors"] } : {}),
               ...(answers["end_date"] ? { endDate: answers["end_date"] } : {}),
             },
-            { branchRows },
+            { branchRows, pack },
           );
           if (!prepared.ok) {
             watchChoice = {
