@@ -170,6 +170,72 @@ describe("router", () => {
     expect(out.questionnaire?.items.some((item) => item.key === "retry_deepthink")).toBe(true);
   });
 
+  it("fails closed on a forged intent instead of routing it", () => {
+    const out = routeAgentMessage(
+      { ...baseInput, text: "keep watching competitors", model: { kind: "live" } },
+      {
+        propose: () =>
+          ({ intent: "delete_everything", confidence: "high", missing: [] }) as unknown as RouterProposal,
+      },
+    );
+    expect(out.intent).toBe("answer_memory");
+    expect(out.questionnaire?.kind).toBe("clarify");
+    expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
+  });
+
+  it("fails closed on missing fields outside the closed vocabulary", () => {
+    const out = routeAgentMessage(
+      { ...baseInput, text: "keep watching competitors", model: { kind: "live" } },
+      {
+        propose: () =>
+          ({
+            intent: "watch",
+            confidence: "high",
+            missing: ["social_security_number"],
+          }) as unknown as RouterProposal,
+      },
+    );
+    expect(out.intent).toBe("answer_memory");
+    expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
+  });
+
+  it("fails closed when the resolver throws, with an honest limitation", () => {
+    const out = routeAgentMessage(
+      { ...baseInput, text: "keep watching competitors", model: { kind: "live" } },
+      {
+        propose: () => {
+          throw new Error("provider down");
+        },
+      },
+    );
+    expect(out.intent).toBe("answer_memory");
+    expect(out.questionnaire?.kind).toBe("clarify");
+    expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
+  });
+
+  it("keeps the routing note to digests and safe ids, never user text", () => {
+    const marker = "zebra-quasar-invoice-4242";
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: `do the thing with ${marker}`,
+      model: { kind: "stub", intent: "answer_memory", confidence: "high", missing: [] },
+    });
+    expect(out.routingNote).not.toContain(marker);
+    expect(out.routingNote).toContain("context_digest=");
+    expect(out.routingNote).toContain("intent=answer_memory");
+  });
+
+  it("keeps unknown provider data out of the fail-closed note", () => {
+    const marker = "zebra-quasar-invoice-4242";
+    const out = routeAgentMessage(
+      { ...baseInput, text: `do the thing with ${marker}`, model: { kind: "live" } },
+      { propose: () => ({ intent: "nonsense" }) as unknown as RouterProposal },
+    );
+    expect(out.intent).toBe("answer_memory");
+    expect(out.routingNote).not.toContain(marker);
+    expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
+  });
+
   it("picks the evidence-window card only when the window is missing", () => {
     const withWindow = routeAgentMessage({
       ...baseInput,
