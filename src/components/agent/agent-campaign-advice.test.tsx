@@ -62,6 +62,11 @@ function draftResult(replayed = false): IdeaDraftOutcome {
       { stage: "draft-ready", state: "pending", label: "Draft ready" },
     ],
     reasonCodes: [],
+    evidenceWindow: {
+      windowDays: 30,
+      assumption:
+        "Advice uses the last 30 days of evidence (default — the ideas card asks for no window).",
+    },
   };
 }
 
@@ -72,6 +77,11 @@ function briefResult(): IdeaDraftOutcome {
     briefUrl: `/organizations/${ORGANIZATION}/campaigns/new?objective=Weekend+family+table&audience=Saturday+set+menu+for+families.&reason=ADVICE_NO_OPPORTUNITY`,
     prefill: { objective: IDEA.title, audience: IDEA.description },
     reasonCodes: ["ADVICE_NO_OPPORTUNITY"],
+    evidenceWindow: {
+      windowDays: 30,
+      assumption:
+        "Advice uses the last 30 days of evidence (default — the ideas card asks for no window).",
+    },
   };
 }
 
@@ -206,6 +216,33 @@ describe("campaign advice card (ideas-first)", () => {
     // No draft surfaces beside the brief.
     expect(screen.queryByRole("link", { name: /review and approve this version/i })).toBeNull();
     expect(screen.queryByRole("link", { name: /open in studio/i })).toBeNull();
+  });
+
+  it("keeps the evidence window inline on the receipt, assumption when defaulted (B4)", () => {
+    const { rerender } = render(
+      <AgentCampaignAdvice
+        organizationId={ORGANIZATION}
+        thread={THREAD}
+        canDraft
+        isViewer={false}
+        ideaDraft={draftResult()}
+      />,
+    );
+    // Defaulted 30-day window: the stated assumption renders inline.
+    expect(screen.getByText(/last 30 days of evidence \(default/)).toBeInTheDocument();
+
+    const explicit = draftResult();
+    explicit.evidenceWindow = { windowDays: 60, assumption: null };
+    rerender(
+      <AgentCampaignAdvice
+        organizationId={ORGANIZATION}
+        thread={THREAD}
+        canDraft
+        isViewer={false}
+        ideaDraft={explicit}
+      />,
+    );
+    expect(screen.getByText("Evidence window: last 60 days.")).toBeInTheDocument();
   });
 
   it("shows the linked draft progress for an already-linked thread", () => {

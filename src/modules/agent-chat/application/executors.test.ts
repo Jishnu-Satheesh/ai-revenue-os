@@ -8,18 +8,25 @@ import {
   buildProfileScopeQueries,
   buildThreadIdempotencyKey,
   COVERAGE_STATUSES,
+  createPreparedWatch,
   detectScopeWidening,
   encodeQuestionnaireAnswerBody,
   executeResearchOnce,
   executeWatchCreate,
   executeWatchUpdate,
+  freshWatchTitleFor,
   giResearchLink,
   isTerminalRequestStatus,
+  matchWatchCandidate,
   messageDigestFor,
+  prepareWatchCreate,
+  requestWatchFromChoice,
   resolvePackContextDigest,
   resolveResearchLaneGate,
+  resolveWatchBranchId,
   submitQuestionnaireAnswers,
   validateQuestionnaireAnswers,
+  WATCH_EVIDENCE_WINDOW_DAYS,
 } from "@/modules/agent-chat/application/executors";
 import { MONITORING_COVERAGE_STATUSES } from "@/modules/growth-intelligence/application/market-monitoring-update";
 import { fingerprintMonitoringScope } from "@/modules/growth-intelligence/application/market-monitoring-update";
@@ -727,5 +734,642 @@ describe("resolvePackContextDigest", () => {
     expect(digest).toMatch(/^[0-9a-f]{16}$/);
     expect(pack.digest).toBe(digest);
     expect(pack.refused).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task B4: auto-prepared watches behind one tap
+// ---------------------------------------------------------------------------
+
+const B4_BRANCH_ROWS = [
+  { id: "22222222-2222-4222-8222-222222222222", name: "Deira" },
+  { id: "55555555-5555-4555-8555-555555555555", name: "Marina" },
+];
+
+const B4_EXPLICIT = {
+  question: "What are nearby competitors offering for National Day?",
+  researchArea: "Deira",
+};
+
+describe("prepareWatchCreate (B4 pre-fill)", () => {
+  it("pins the evidence window default at 30 days with the assumption stated inline", () => {
+    expect(WATCH_EVIDENCE_WINDOW_DAYS).toBe(30);
+    const out = prepareWatchCreate(B4_EXPLICIT, {
+      branchRows: [{ id: "22222222-2222-4222-8222-222222222222", name: "Deira" }],
+    });
+    if (!out.ok) throw new Error("expected prepared payload");
+    expect(out.evidenceWindowDays).toBe(30);
+    expect(out.assumptions.join("\n")).toMatch(/last 30 days/);
+  });
+
+  it("prefers explicit card answers and defaults the rest with assumptions", () => {
+    const out = prepareWatchCreate(
+      {
+        ...B4_EXPLICIT,
+        branch: "22222222-2222-4222-8222-222222222222",
+        cadence: "daily",
+        title: "National Day watch",
+        endDate: "2026-12-31",
+      },
+      { branchRows: B4_BRANCH_ROWS },
+    );
+    if (!out.ok) throw new Error("expected prepared payload");
+    expect(out.payload.branchId).toBe("22222222-2222-4222-8222-222222222222");
+    expect(out.payload.title).toBe("National Day watch");
+    expect(out.payload.mode).toBe("recurring");
+    expect(out.payload.schedule).toMatchObject({ cadence: "daily", endDate: "2026-12-31" });
+    expect(out.payload.researchArea).toBe("Deira");
+    // Areas default to the full set with the assumption stated — never a silent guess.
+    expect(out.payload.investigationAreas).toEqual([
+      "demand",
+      "presence",
+      "offers",
+      "reviews",
+      "observable_performance",
+    ]);
+    expect(out.assumptions.join("\n")).toMatch(/all five/);
+    // No explicit cadence default was needed (daily came from the card).
+    expect(out.assumptions.join("\n")).not.toMatch(/weekly/i);
+  });
+
+  it("defaults cadence, schedule, and mode with assumptions when the card is silent", () => {
+    const out = prepareWatchCreate(B4_EXPLICIT, {
+      branchRows: [{ id: "22222222-2222-4222-8222-222222222222", name: "Deira" }],
+    });
+    if (!out.ok) throw new Error("expected prepared payload");
+    expect(out.payload.schedule).toMatchObject({
+      cadence: "weekly",
+      localTime: "09:00",
+      timeZone: "UTC",
+    });
+    expect(out.assumptions.join("\n")).toMatch(/weekly/i);
+    expect(out.assumptions.join("\n")).toMatch(/09:00/);
+    expect(out.assumptions.join("\n")).toMatch(/UTC/);
+  });
+
+  it("takes the schedule timezone from the pack when the pack carries one", () => {
+    const out = prepareWatchCreate(B4_EXPLICIT, {
+      branchRows: [{ id: "22222222-2222-4222-8222-222222222222", name: "Deira" }],
+      pack: { branchTimezone: "Asia/Dubai" },
+    });
+    if (!out.ok) throw new Error("expected prepared payload");
+    expect(out.payload.schedule?.timeZone).toBe("Asia/Dubai");
+    expect(out.assumptions.join("\n")).not.toMatch(/UTC/);
+  });
+
+  it("carries pack competitors and records a card-named competitor as an operator lead", () => {
+    const out = prepareWatchCreate(
+      { ...B4_EXPLICIT, competitorName: "Nearby Diner" },
+      {
+        branchRows: [{ id: "22222222-2222-4222-8222-222222222222", name: "Deira" }],
+        pack: {
+          competitors: [
+            { name: "Pack Rival", website: "https://rival.example", source: "suggestion" },
+          ],
+        },
+      },
+    );
+    if (!out.ok) throw new Error("expected prepared payload");
+    expect(out.payload.competitors).toEqual([
+      { name: "Pack Rival", website: "https://rival.example/", source: "suggestion" },
+      { name: "Nearby Diner", source: "operator_lead" },
+    ]);
+  });
+
+  it("derives the title from the question and refuses to invent question, branch, or area", () => {
+    const titled = prepareWatchCreate(
+      { question: `${"word ".repeat(30).trim()}?`, researchArea: "Deira" },
+      { branchRows: [{ id: "22222222-2222-4222-8222-222222222222", name: "Deira" }] },
+    );
+    if (!titled.ok) throw new Error("expected prepared payload");
+    expect(titled.payload.title.length).toBeLessThanOrEqual(200);
+
+    // No question anywhere: no payload, the missing field is named.
+    const noQuestion = prepareWatchCreate(
+      { researchArea: "Deira" },
+      { branchRows: [{ id: "22222222-2222-4222-8222-222222222222", name: "Deira" }] },
+    );
+    expect(noQuestion.ok).toBe(false);
+    if (noQuestion.ok) throw new Error("expected needs-input");
+    expect(noQuestion.missing).toContain("question");
+
+    // Two branches and no branch answer: ambiguous, never guessed.
+    const noBranch = prepareWatchCreate(B4_EXPLICIT, { branchRows: B4_BRANCH_ROWS });
+    expect(noBranch.ok).toBe(false);
+    if (noBranch.ok) throw new Error("expected needs-input");
+    expect(noBranch.missing).toContain("branch");
+
+    // No research area: named, never derived from the question text.
+    const noArea = prepareWatchCreate(
+      { question: B4_EXPLICIT.question },
+      { branchRows: [{ id: "22222222-2222-4222-8222-222222222222", name: "Deira" }] },
+    );
+    expect(noArea.ok).toBe(false);
+    if (noArea.ok) throw new Error("expected needs-input");
+    expect(noArea.missing).toContain("researchArea");
+  });
+});
+
+describe("resolveWatchBranchId (B4)", () => {
+  it("binds a uuid answer that names a live branch, and refuses an unknown uuid", () => {
+    const hit = resolveWatchBranchId(
+      B4_BRANCH_ROWS,
+      "22222222-2222-4222-8222-222222222222",
+    );
+    expect(hit).toEqual({
+      ok: true,
+      branchId: "22222222-2222-4222-8222-222222222222",
+      assumption: null,
+    });
+    expect(
+      resolveWatchBranchId(B4_BRANCH_ROWS, "99999999-9999-4999-8999-999999999999").ok,
+    ).toBe(false);
+  });
+
+  it("matches a branch name case-insensitively and refuses ambiguous or unknown names", () => {
+    expect(resolveWatchBranchId(B4_BRANCH_ROWS, "  deira ")).toEqual({
+      ok: true,
+      branchId: "22222222-2222-4222-8222-222222222222",
+      assumption: null,
+    });
+    expect(resolveWatchBranchId(B4_BRANCH_ROWS, "nowhere").ok).toBe(false);
+    const dupes = [
+      { id: "22222222-2222-4222-8222-222222222222", name: "Deira" },
+      { id: "55555555-5555-4555-8555-555555555555", name: "deira" },
+    ];
+    expect(resolveWatchBranchId(dupes, "Deira").ok).toBe(false);
+  });
+
+  it("binds the only branch with an assumption, and refuses silence among many", () => {
+    const single = resolveWatchBranchId([
+      { id: "22222222-2222-4222-8222-222222222222", name: "Deira" },
+    ]);
+    expect(single.ok).toBe(true);
+    if (!single.ok) throw new Error("expected bound branch");
+    expect(single.branchId).toBe("22222222-2222-4222-8222-222222222222");
+    expect(single.assumption).toMatch(/only one branch/);
+    expect(resolveWatchBranchId(B4_BRANCH_ROWS).ok).toBe(false);
+    expect(resolveWatchBranchId([]).ok).toBe(false);
+    // Malformed rows are skipped, never papered over.
+    expect(
+      resolveWatchBranchId([{ id: "not-a-uuid", name: "Deira" }, null, "Deira"]).ok,
+    ).toBe(false);
+  });
+});
+
+describe("freshWatchTitleFor (B4)", () => {
+  it("mints a deterministic distinct title that stays within the length cap", () => {
+    const first = freshWatchTitleFor("National Day watch", "agent_thread:thread:abcdef1234567890");
+    const second = freshWatchTitleFor("National Day watch", "agent_thread:thread:abcdef1234567890");
+    expect(first).toBe(second);
+    expect(first).not.toBe("National Day watch");
+    expect(first.length).toBeLessThanOrEqual(200);
+    const other = freshWatchTitleFor("National Day watch", "agent_thread:thread:0000000000000001");
+    expect(other).not.toBe(first);
+    const long = freshWatchTitleFor("w".repeat(200), "agent_thread:thread:abcdef1234567890");
+    expect(long.length).toBeLessThanOrEqual(200);
+  });
+});
+
+const B4_CHOICE_BASE = {
+  organizationId: "11111111-1111-4111-8111-111111111111",
+  actorId: "actor-1",
+  threadId: "thread-1",
+  idempotencyKey: "watch-press-key-0000000000000001",
+  permissions: ["growth_intelligence.manage"],
+  candidateProjectId: null as string | null,
+  existingLinks: {},
+};
+
+// The missing-fields create takes no candidate: same base minus that key
+// (the strict input schema rejects unrecognized keys).
+const B4_CREATE_BASE = {
+  organizationId: B4_CHOICE_BASE.organizationId,
+  actorId: B4_CHOICE_BASE.actorId,
+  threadId: B4_CHOICE_BASE.threadId,
+  idempotencyKey: B4_CHOICE_BASE.idempotencyKey,
+  permissions: B4_CHOICE_BASE.permissions,
+  existingLinks: B4_CHOICE_BASE.existingLinks,
+};
+
+function b4Prepared() {
+  const out = prepareWatchCreate(
+    { ...B4_EXPLICIT, branch: "22222222-2222-4222-8222-222222222222" },
+    { branchRows: B4_BRANCH_ROWS },
+  );
+  if (!out.ok) throw new Error("expected prepared payload");
+  return out;
+}
+
+describe("requestWatchFromChoice (B4 one-tap)", () => {
+  it("refuses without the manage grant before touching any seam", async () => {
+    const prepared = b4Prepared();
+    const watchProjects = {
+      listActive: vi.fn(async () => []),
+      createKeyed: vi.fn(async () => ({ projectId: "p1", replayed: false })),
+    };
+    const links = { setThreadLinks: vi.fn(async () => ({})) };
+    const out = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        permissions: [],
+        choice: "start_fresh",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+      },
+      { watchProjects, links },
+    );
+    expect(out.outcome).toBe("blocked");
+    if (out.outcome !== "blocked") throw new Error("expected blocked");
+    expect(out.reasonCode).toBe("WATCH_REQUIRES_MANAGE");
+    expect(out.copy).toMatch(/growth_intelligence\.manage/);
+    expect(watchProjects.listActive).not.toHaveBeenCalled();
+    expect(watchProjects.createKeyed).not.toHaveBeenCalled();
+    expect(links.setThreadLinks).not.toHaveBeenCalled();
+  });
+
+  it("cancels and views without writing anything", async () => {
+    const prepared = b4Prepared();
+    const watchProjects = {
+      listActive: vi.fn(async () => []),
+      createKeyed: vi.fn(async () => ({ projectId: "p1", replayed: false })),
+    };
+    const cancelled = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "cancel",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+      },
+      { watchProjects },
+    );
+    expect(cancelled).toEqual({ outcome: "cancelled" });
+    expect(watchProjects.listActive).not.toHaveBeenCalled();
+    expect(watchProjects.createKeyed).not.toHaveBeenCalled();
+
+    const viewed = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "view_existing",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+        candidateProjectId: "44444444-4444-4434-8434-444444444444",
+      },
+      { watchProjects },
+    );
+    expect(viewed.outcome).toBe("view_existing");
+    if (viewed.outcome !== "view_existing") throw new Error("expected view");
+    expect(viewed.projectId).toBe("44444444-4444-4434-8434-444444444444");
+    expect(viewed.link.href).toContain("/growth-intelligence");
+    expect(watchProjects.createKeyed).not.toHaveBeenCalled();
+  });
+
+  it("creates a second watch with a distinct fingerprint behind start_fresh and links the thread", async () => {
+    const prepared = b4Prepared();
+    const createKeyed = vi.fn(async () => ({ projectId: "p2", replayed: false }));
+    const setThreadLinks = vi.fn(async () => ({}));
+    const out = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "start_fresh",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+        candidateProjectId: "44444444-4444-4434-8434-444444444444",
+      },
+      { watchProjects: { listActive: async () => [], createKeyed }, links: { setThreadLinks } },
+    );
+    expect(out.outcome).toBe("created");
+    if (out.outcome !== "created") throw new Error(`expected created, got ${out.outcome}`);
+    expect(out.projectId).toBe("p2");
+    expect(out.scopeFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(out.evidenceWindowDays).toBe(30);
+    expect(out.assumptions.length).toBeGreaterThan(0);
+    // The fresh title — and therefore the fingerprint — differs from the twin's.
+    const createCalls = createKeyed.mock.calls as unknown as Array<[{ title?: string }]>;
+    expect(createCalls[0]?.[0]?.title).not.toBe(prepared.payload.title);
+    expect(setThreadLinks).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: "thread-1", projectId: "p2" }),
+    );
+  });
+
+  it("converges honestly when a twin appears between the card and the tap", async () => {
+    const prepared = b4Prepared();
+    const twinTitle = freshWatchTitleFor(
+      prepared.payload.title,
+      B4_CHOICE_BASE.idempotencyKey,
+    );
+    const twin = {
+      projectId: "p9",
+      title: twinTitle,
+      question: prepared.payload.question,
+      mode: "recurring" as const,
+      scopeFingerprint: "0".repeat(64),
+    };
+    const createKeyed = vi.fn(async () => ({ projectId: "p2", replayed: false }));
+    const out = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "start_fresh",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+        candidateProjectId: "44444444-4444-4434-8434-444444444444",
+      },
+      { watchProjects: { listActive: async () => [twin], createKeyed } },
+    );
+    expect(out.outcome).toBe("duplicate");
+    expect(createKeyed).not.toHaveBeenCalled();
+  });
+
+  it("applies in-place edits behind update_fields and links the watched project", async () => {
+    const prepared = b4Prepared();
+    const project = {
+      title: prepared.payload.title,
+      question: prepared.payload.question,
+      mode: "recurring" as const,
+      branchId: prepared.payload.branchId,
+      schedule: { cadence: "weekly" as const, localTime: "09:00", timeZone: "UTC" },
+    };
+    const updateWatch = vi.fn(async () => ({
+      projectId: "44444444-4444-4434-8434-444444444444",
+      revisionNumber: 2,
+      replayed: false,
+    }));
+    const setThreadLinks = vi.fn(async () => ({}));
+    const out = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "update_fields",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+        candidateProjectId: "44444444-4444-4434-8434-444444444444",
+        cardEdits: { frequency: "daily", endDate: "2026-12-31" },
+      },
+      {
+        watchProjects: {
+          listActive: async () => [],
+          createKeyed: async () => ({ projectId: "p2", replayed: false }),
+          readProject: async () => project,
+          readBrief: async () => BRIEF,
+          updateWatch,
+        },
+        links: { setThreadLinks },
+      },
+    );
+    expect(out.outcome).toBe("updated");
+    if (out.outcome !== "updated") throw new Error(`expected updated, got ${out.outcome}`);
+    expect(out.appliedFields).toEqual(expect.arrayContaining(["frequency", "endDate"]));
+    expect(setThreadLinks).toHaveBeenCalledWith(
+      expect.objectContaining({
+        threadId: "thread-1",
+        projectId: "44444444-4444-4434-8434-444444444444",
+      }),
+    );
+  });
+
+  it("routes widening edits to a profile proposal instead of applying them", async () => {
+    const prepared = b4Prepared();
+    const project = {
+      title: prepared.payload.title,
+      question: prepared.payload.question,
+      mode: "recurring" as const,
+      branchId: prepared.payload.branchId,
+      schedule: { cadence: "weekly" as const, localTime: "09:00", timeZone: "UTC" },
+    };
+    const updateWatch = vi.fn(async () => ({
+      projectId: "44444444-4444-4434-8434-444444444444",
+      revisionNumber: 2,
+      replayed: false,
+    }));
+    const out = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "update_fields",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+        candidateProjectId: "44444444-4444-4434-8434-444444444444",
+        cardEdits: { competitorName: "Brand-new Rival" },
+      },
+      {
+        watchProjects: {
+          listActive: async () => [],
+          createKeyed: async () => ({ projectId: "p2", replayed: false }),
+          readProject: async () => project,
+          readBrief: async () => BRIEF,
+          updateWatch,
+        },
+      },
+    );
+    expect(out.outcome).toBe("profile_scope_change");
+    expect(updateWatch).not.toHaveBeenCalled();
+  });
+
+  it("blocks the update honestly when the watch cannot be loaded", async () => {
+    const prepared = b4Prepared();
+    const updateWatch = vi.fn(async () => ({
+      projectId: "p",
+      revisionNumber: 1,
+      replayed: false,
+    }));
+    const unreadable = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "update_fields",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+        candidateProjectId: "44444444-4444-4434-8434-444444444444",
+        cardEdits: { frequency: "daily" },
+      },
+      {
+        watchProjects: {
+          listActive: async () => [],
+          createKeyed: async () => ({ projectId: "p2", replayed: false }),
+          readProject: async () => null,
+          readBrief: async () => null,
+          updateWatch,
+        },
+      },
+    );
+    expect(unreadable.outcome).toBe("update_blocked");
+    expect(updateWatch).not.toHaveBeenCalled();
+
+    const noCandidate = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "update_fields",
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+        candidateProjectId: null,
+        cardEdits: { frequency: "daily" },
+      },
+      { watchProjects: { listActive: async () => [], createKeyed: async () => ({ projectId: "p2", replayed: false }) } },
+    );
+    expect(noCandidate.outcome).toBe("update_blocked");
+  });
+});
+
+describe("matchWatchCandidate (B4 server-side candidate)", () => {
+  const SIBLINGS = [
+    {
+      projectId: "44444444-4444-4434-8434-444444444444",
+      branchId: "22222222-2222-4222-8222-222222222222",
+      title: "Lunch watch",
+      question: "Keep watching lunch prices downtown",
+      mode: "recurring",
+    },
+    {
+      projectId: "55555555-5555-4555-8555-555555555555",
+      branchId: "55555555-5555-4555-8555-555555555555",
+      title: "Dinner watch",
+      question: "Keep watching dinner prices downtown",
+      mode: "recurring",
+    },
+  ];
+
+  it("binds the unique question match, and nothing else", () => {
+    expect(matchWatchCandidate(SIBLINGS, { question: "Keep watching lunch prices downtown" })).toBe(
+      "44444444-4444-4434-8434-444444444444",
+    );
+    expect(matchWatchCandidate(SIBLINGS, { question: "  Keep watching lunch prices downtown " })).toBe(
+      "44444444-4444-4434-8434-444444444444",
+    );
+    expect(matchWatchCandidate(SIBLINGS, { question: "another question" })).toBeNull();
+  });
+
+  it("uses the branch filter to disambiguate, and refuses ambiguity", () => {
+    const dupes = [
+      ...SIBLINGS,
+      {
+        projectId: "66666666-6666-4666-8666-666666666666",
+        branchId: "66666666-6666-4666-8666-666666666666",
+        title: "Lunch watch (second branch)",
+        question: "Keep watching lunch prices downtown",
+        mode: "recurring",
+      },
+    ];
+    // Two branches ask the same question: no branch filter, no binding.
+    expect(matchWatchCandidate(dupes, { question: "Keep watching lunch prices downtown" })).toBeNull();
+    expect(
+      matchWatchCandidate(dupes, {
+        question: "Keep watching lunch prices downtown",
+        branchId: "22222222-2222-4222-8222-222222222222",
+      }),
+    ).toBe("44444444-4444-4434-8434-444444444444");
+    // Malformed rows are skipped, never matched.
+    expect(
+      matchWatchCandidate(
+        [...SIBLINGS, null, { projectId: "x" }, "lunch"],
+        { question: "Keep watching lunch prices downtown" },
+      ),
+    ).toBe("44444444-4444-4434-8434-444444444444");
+  });
+});
+
+describe("requestWatchFromChoice prepared payload (B4)", () => {
+  it("updates without a prepared payload but never fresh-creates without one", async () => {
+    const project = {
+      title: "Lunch watch",
+      question: "Keep watching lunch prices downtown",
+      mode: "recurring" as const,
+      branchId: "22222222-2222-4222-8222-222222222222",
+      schedule: { cadence: "weekly" as const, localTime: "09:00", timeZone: "UTC" },
+    };
+    const updated = await requestWatchFromChoice(
+      {
+        ...B4_CHOICE_BASE,
+        choice: "update_fields",
+        candidateProjectId: "44444444-4444-4434-8434-444444444444",
+        cardEdits: { frequency: "daily" },
+      },
+      {
+        watchProjects: {
+          readProject: async () => project,
+          readBrief: async () => BRIEF,
+          updateWatch: async () => ({
+            projectId: "44444444-4444-4434-8434-444444444444",
+            revisionNumber: 2,
+            replayed: false,
+          }),
+        },
+      },
+    );
+    expect(updated.outcome).toBe("updated");
+
+    await expect(
+      requestWatchFromChoice(
+        {
+          ...B4_CHOICE_BASE,
+          choice: "start_fresh",
+          candidateProjectId: "44444444-4444-4434-8434-444444444444",
+        },
+        { watchProjects: { listActive: async () => [] } },
+      ),
+    ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
+  });
+});
+
+describe("createPreparedWatch (B4 missing-fields one-tap)", () => {
+  it("creates behind a single submit and links thread to project", async () => {
+    const prepared = b4Prepared();
+    const createKeyed = vi.fn(async () => ({ projectId: "p1", replayed: false }));
+    const setThreadLinks = vi.fn(async () => ({}));
+    const out = await createPreparedWatch(
+      {
+        ...B4_CREATE_BASE,
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+      },
+      { watchProjects: { listActive: async () => [], createKeyed }, links: { setThreadLinks } },
+    );
+    expect(out.outcome).toBe("created");
+    if (out.outcome !== "created") throw new Error("expected created");
+    expect(out.evidenceWindowDays).toBe(30);
+    expect(setThreadLinks).toHaveBeenCalledWith(
+      expect.objectContaining({ threadId: "thread-1", projectId: "p1" }),
+    );
+  });
+
+  it("returns the duplicate card instead of forking when a twin exists", async () => {
+    const prepared = b4Prepared();
+    const twin = {
+      projectId: "p1",
+      title: prepared.payload.title,
+      question: prepared.payload.question,
+      mode: "recurring" as const,
+      scopeFingerprint: "0".repeat(64),
+    };
+    const createKeyed = vi.fn(async () => ({ projectId: "p2", replayed: false }));
+    const out = await createPreparedWatch(
+      {
+        ...B4_CREATE_BASE,
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+      },
+      { watchProjects: { listActive: async () => [twin], createKeyed } },
+    );
+    expect(out.outcome).toBe("duplicate");
+    if (out.outcome !== "duplicate") throw new Error("expected duplicate");
+    expect(out.card.kind).toBe("duplicate_watch");
+    expect(createKeyed).not.toHaveBeenCalled();
+  });
+
+  it("refuses without the manage grant before touching any seam", async () => {
+    const prepared = b4Prepared();
+    const listActive = vi.fn(async () => []);
+    const out = await createPreparedWatch(
+      {
+        ...B4_CREATE_BASE,
+        permissions: [],
+        prepared: prepared.payload,
+        assumptions: prepared.assumptions,
+      },
+      {
+        watchProjects: {
+          listActive,
+          createKeyed: async () => ({ projectId: "p2", replayed: false }),
+        },
+      },
+    );
+    expect(out.outcome).toBe("blocked");
+    expect(listActive).not.toHaveBeenCalled();
   });
 });

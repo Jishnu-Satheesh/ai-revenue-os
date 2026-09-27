@@ -1,7 +1,10 @@
 import { tasks } from "@trigger.dev/sdk";
+import { z } from "zod";
 
 import { questionnaireSpecSchema } from "@/domain/agent-router/contracts";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
+import { briefRevisionSchema } from "@/domain/growth-intelligence/brief";
+import { researchProjectScheduleSchema } from "@/domain/growth-intelligence/project";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { DomainError, toPublicError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
@@ -21,6 +24,20 @@ import {
   selectDraftOpportunity,
   type IdeaDraftOutcome,
 } from "@/modules/agent-chat/application/campaign-advise";
+import {
+  buildThreadIdempotencyKey,
+  createPreparedWatch,
+  giResearchLink,
+  matchWatchCandidate,
+  messageDigestFor,
+  prepareWatchCreate,
+  requestWatchFromChoice,
+  resolveWatchBranchId,
+  type WatchTapOutcome,
+  type WatchCandidate,
+  type WatchCardEdits,
+} from "@/modules/agent-chat/application/executors";
+import { createAuthenticatedResearchProjectRepository } from "@/modules/growth-intelligence/infrastructure/research-project-repository";
 import { createCampaignDraftService } from "@/modules/decisions/application/campaign-draft-service";
 import {
   submitAnswersBodySchema,
@@ -54,6 +71,18 @@ import {
  * when ineligible. A draft-seam failure propagates (the answers row is
  * already persisted and replay-safe, so a retry with the same keys
  * replays the answers and resumes the draft — nothing half-created).
+ *
+ * Task B4 (L3 one-tap watches): a `duplicate_watch` choice — or a
+ * `missing_fields` submit whose re-route stays `watch` — executes behind
+ * the same POST with the auto-prepared payload (card answers plus the
+ * routing note's question, branch bound against live rows, cadence and
+ * areas defaulted with assumptions stated). The response carries the
+ * `watchChoice` envelope: created/replayed receipt plus Market
+ * Intelligence link, the converged duplicate card, the viewed link, the
+ * applied update, the scope proposal, or the honest blocked copy. A
+ * watch-seam failure propagates like a draft failure. Creates and
+ * replays publish the reused `agent_thread.watch_created` event with an
+ * identifier-only payload; no new event names are minted.
  */
 
 /**
@@ -94,6 +123,151 @@ async function resolveDraftOpportunity(input: {
   return selectDraftOpportunity(data ?? [], input.now);
 }
 
+/**
+ * Server-side watch reads for the one-tap lane (Task B4). Narrow
+ * structural ports over the caller's session — RLS owns isolation, the
+ * same shape as the draft-opportunity resolver above. Every row is
+ * Zod-disposed; an unreadable row degrades to null (the executor reports
+ * the honest blocked copy), never a guess.
+ */
+const watchBranchRowSchema = z
+  .object({ id: z.string().uuid(), name: z.string().trim().min(1).max(200) })
+  .strict();
+
+async function readWatchBranchRows(
+  supabase: unknown,
+  organizationId: string,
+): Promise<Array<{ id: string; name: string }>> {
+  const reader = supabase as unknown as {
+    from(table: "branches"): {
+      select(columns: string): {
+        eq(column: string, value: string): Promise<{ data: unknown; error: unknown }>;
+      };
+    };
+  };
+  const { data, error } = await reader
+    .from("branches")
+    .select("id,name")
+    .eq("organization_id", organizationId);
+  if (error || !Array.isArray(data)) return [];
+  return data.flatMap((row) => {
+    const parsed = watchBranchRowSchema.safeParse(row);
+    return parsed.success ? [parsed.data] : [];
+  });
+}
+
+async function readWatchProjectRow(
+  supabase: unknown,
+  input: { organizationId: string; projectId: string },
+): Promise<{
+  title: string;
+  question: string;
+  mode: "one-time" | "recurring";
+  branchId: string;
+  schedule: z.infer<typeof researchProjectScheduleSchema>;
+} | null> {
+  const reader = supabase as unknown as {
+    from(table: "growth_intelligence_research_projects"): {
+      select(columns: string): {
+        eq(column: string, value: string): {
+          eq(column: string, value: string): {
+            maybeSingle(): Promise<{ data: unknown; error: unknown }>;
+          };
+        };
+      };
+    };
+  };
+  const { data, error } = await reader
+    .from("growth_intelligence_research_projects")
+    .select("title,question,mode,branch_id,schedule")
+    .eq("organization_id", input.organizationId)
+    .eq("id", input.projectId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const parsed = z
+    .object({
+      title: z.string().trim().min(1).max(200),
+      question: z.string().trim().min(1).max(2000),
+      mode: z.enum(["one-time", "recurring"]),
+      branch_id: z.string().uuid(),
+      schedule: researchProjectScheduleSchema,
+    })
+    .strict()
+    .safeParse(data);
+  if (!parsed.success) return null;
+  return {
+    title: parsed.data.title,
+    question: parsed.data.question,
+    mode: parsed.data.mode,
+    branchId: parsed.data.branch_id,
+    schedule: parsed.data.schedule,
+  };
+}
+
+async function readWatchBriefDocument(
+  supabase: unknown,
+  input: { organizationId: string; projectId: string },
+): Promise<z.infer<typeof briefRevisionSchema> | null> {
+  const reader = supabase as unknown as {
+    from(table: "growth_intelligence_brief_revisions"): {
+      select(columns: string): {
+        eq(column: string, value: string): {
+          eq(column: string, value: string): {
+            order(column: string, options?: { ascending?: boolean }): {
+              order(column: string, options?: { ascending?: boolean }): {
+                limit(count: number): {
+                  maybeSingle(): Promise<{ data: unknown; error: unknown }>;
+                };
+              };
+            };
+          };
+        };
+      };
+    };
+  };
+  const { data, error } = await reader
+    .from("growth_intelligence_brief_revisions")
+    .select("document")
+    .eq("organization_id", input.organizationId)
+    .eq("project_id", input.projectId)
+    .order("revision_number", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error || !data) return null;
+  const document = (data as { document?: unknown }).document;
+  const parsed = briefRevisionSchema.safeParse(document);
+  return parsed.success ? parsed.data : null;
+}
+
+const watchSiblingRowSchema = z
+  .object({
+    projectId: z.string().trim().min(1).max(200),
+    title: z.string().max(200).optional(),
+    question: z.string().trim().min(1).max(2000),
+    mode: z.enum(["one-time", "recurring"]),
+    branchId: z.string().trim().min(1).max(200).optional(),
+    scopeFingerprint: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+function mapWatchSiblings(rows: unknown): WatchCandidate[] {
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((row) => {
+    const parsed = watchSiblingRowSchema.safeParse(row);
+    if (!parsed.success) return [];
+    return [
+      {
+        projectId: parsed.data.projectId,
+        title: parsed.data.title ?? "",
+        question: parsed.data.question,
+        mode: parsed.data.mode,
+        scopeFingerprint: parsed.data.scopeFingerprint ?? null,
+      },
+    ];
+  });
+}
+
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ organizationId: string; threadId: string }> },
@@ -132,8 +306,9 @@ export async function POST(
     const url = new URL(request.url);
     const page = url.searchParams.get("page") ?? undefined;
 
+    const threadsRepo = createThreadRepository(agentPersistenceFor(context.supabase));
     const service = createThreadService({
-      threads: createThreadRepository(agentPersistenceFor(context.supabase)),
+      threads: threadsRepo,
       events: createEventPublisher(),
       proposeRouter: async (args) => createLightModelProvider().propose({ ...args, correlationId }),
       // Slice C M7: the answers re-route digests the real HEAVY pack,
@@ -278,6 +453,270 @@ export async function POST(
       });
     }
 
+    // Watch one-tap (Task B4, L3): the duplicate choice — or a
+    // missing-fields submit whose re-route stays watch — executes behind
+    // the single card submit with the auto-prepared payload. Grants come
+    // from the server-owned role (never client claims); the candidate
+    // resolves server-side through `matchWatchCandidate` (the card's
+    // echoed project id is never trusted); the question is the thread's
+    // latest non-answers user message (the routing note's ask). A watch
+    // failure propagates like a draft failure: the answers row is already
+    // persisted and replay-safe, so a same-key retry replays the answers
+    // and resumes the watch — nothing half-created.
+    let watchChoice: WatchTapOutcome | null = null;
+    if (spec.kind === "duplicate_watch" || (spec.kind === "missing_fields" && intent === "watch")) {
+      const rawChoice = spec.kind === "duplicate_watch" ? answers["choice"] : "create";
+      if (
+        rawChoice !== "view_existing" &&
+        rawChoice !== "update_fields" &&
+        rawChoice !== "start_fresh" &&
+        rawChoice !== "cancel" &&
+        rawChoice !== "create"
+      ) {
+        throw new DomainError("VALIDATION_ERROR", "Please check the submitted fields.");
+      }
+      if (rawChoice === "cancel") {
+        watchChoice = { outcome: "cancelled" };
+      } else {
+        const projects = createAuthenticatedResearchProjectRepository(context.supabase);
+        const listed = await threadsRepo.listMessages({
+          organizationId,
+          threadId: rawParams.threadId,
+          limit: 20,
+        });
+        const ask = [...listed.messages]
+          .reverse()
+          .find(
+            (entry) =>
+              entry.role === "user" &&
+              (entry.body ?? "").trim().length > 0 &&
+              !(entry.body ?? "").startsWith("[answers "),
+          );
+        const question = ask?.body?.trim() || null;
+        const { thread } = await service.getThread({
+          organizationId,
+          threadId: rawParams.threadId,
+        });
+        const siblingRows = await projects.listActiveProjects({ organizationId, limit: 50 });
+        // Matching runs on the raw rows (they carry branchId); the mapped
+        // candidates feed the executor's twin check, which needs less.
+        const siblings = mapWatchSiblings(siblingRows);
+        const branchAnswer = answers["branch"]?.trim() ? answers["branch"].trim() : undefined;
+        // Fresh and missing-fields creates always need the branch rows
+        // (uuid check plus single-branch auto-bind); view and update only
+        // resolve a branch when the card named one.
+        const needBranches = rawChoice !== "view_existing" || !!branchAnswer;
+        const branchRows = needBranches
+          ? await readWatchBranchRows(context.supabase, organizationId)
+          : [];
+        const branchRes = branchAnswer
+          ? resolveWatchBranchId(branchRows, branchAnswer)
+          : null;
+        const matched = question
+          ? matchWatchCandidate(siblingRows, {
+              question,
+              ...(branchRes && branchRes.ok ? { branchId: branchRes.branchId } : {}),
+            })
+          : null;
+        const matchedId =
+          matched && z.string().uuid().safeParse(matched).success ? matched : null;
+        const linked = z.string().uuid().safeParse(thread.linkedResearchProjectId ?? "").success
+          ? (thread.linkedResearchProjectId as string)
+          : null;
+        const candidate = matchedId ?? linked ?? null;
+        const existingLinks = {
+          ...(thread.linkedResearchProjectId
+            ? { projectId: thread.linkedResearchProjectId }
+            : {}),
+          ...(thread.linkedRequestId ? { requestId: thread.linkedRequestId } : {}),
+          ...(thread.linkedDraftRequestId ? { draftRequestId: thread.linkedDraftRequestId } : {}),
+          ...(thread.linkedCampaignId ? { campaignId: thread.linkedCampaignId } : {}),
+        };
+        const answerDigest = messageDigestFor({
+          threadId: rawParams.threadId,
+          messageId: message.id,
+          body: message.body ?? "",
+        });
+
+        if (rawChoice === "view_existing") {
+          watchChoice = {
+            outcome: "view_existing",
+            projectId: candidate,
+            link: giResearchLink(organizationId, candidate ? { projectId: candidate } : {}),
+          };
+        } else if (rawChoice === "update_fields") {
+          watchChoice = await requestWatchFromChoice(
+            {
+              organizationId,
+              actorId: context.user.id,
+              threadId: rawParams.threadId,
+              idempotencyKey: buildThreadIdempotencyKey(
+                rawParams.threadId,
+                `${answerDigest}:watch-answer-update`,
+              ),
+              choice: "update_fields",
+              permissions: permissionsForRole(context.membership.role),
+              candidateProjectId: candidate,
+              // Server-validated answers forwarded for executor disposal:
+              // a forged value fails the executor's Zod contract (400),
+              // never a silent mis-dispatch.
+              cardEdits: {
+                ...(answers["frequency"] ? { frequency: answers["frequency"] } : {}),
+                ...(answers["end_date"] ? { endDate: answers["end_date"] } : {}),
+                ...(branchRes && branchRes.ok ? { branchId: branchRes.branchId } : {}),
+                ...(answers["research_area"] ? { researchArea: answers["research_area"] } : {}),
+                ...(answers["competitors"] ? { competitorName: answers["competitors"] } : {}),
+              } as WatchCardEdits,
+              existingLinks,
+            },
+            {
+              watchProjects: {
+                listActive: async () => siblings,
+                createKeyed: (input) => projects.createProject(input),
+                readProject: (readInput) => readWatchProjectRow(context.supabase, readInput),
+                readBrief: (readInput) => readWatchBriefDocument(context.supabase, readInput),
+                updateWatch: (input) => projects.updateProjectSchedule(input),
+              },
+              links: {
+                setThreadLinks: (linkInput) =>
+                  service.setThreadLinks({
+                    organizationId: linkInput.organizationId,
+                    actorId: linkInput.actorId,
+                    role: context.membership.role,
+                    threadId: linkInput.threadId,
+                    ...(linkInput.projectId ? { projectId: linkInput.projectId } : {}),
+                    ...(linkInput.requestId ? { requestId: linkInput.requestId } : {}),
+                    ...(linkInput.draftRequestId
+                      ? { draftRequestId: linkInput.draftRequestId }
+                      : {}),
+                    ...(linkInput.campaignId ? { campaignId: linkInput.campaignId } : {}),
+                  }),
+              },
+            },
+          );
+        } else {
+          // `start_fresh` or a missing-fields create: full pre-fill from
+          // the card answers plus the routing note's question. Unbound
+          // fields return the named missing set — never an invented scope.
+          const prepared = prepareWatchCreate(
+            {
+              ...(question ? { question } : {}),
+              ...(answers["frequency"] ? { cadence: answers["frequency"] } : {}),
+              ...(branchAnswer ? { branch: branchAnswer } : {}),
+              ...(answers["research_area"] ? { researchArea: answers["research_area"] } : {}),
+              ...(answers["competitors"] ? { competitorName: answers["competitors"] } : {}),
+              ...(answers["end_date"] ? { endDate: answers["end_date"] } : {}),
+            },
+            { branchRows },
+          );
+          if (!prepared.ok) {
+            watchChoice = {
+              outcome: "needs_input",
+              missing: prepared.missing,
+              copy: prepared.copy,
+            };
+          } else {
+            const watchKey = buildThreadIdempotencyKey(
+              rawParams.threadId,
+              `${answerDigest}:watch-answer`,
+            );
+            const createSeams = {
+              watchProjects: {
+                listActive: async () => siblings,
+                createKeyed: (input: {
+                  organizationId: string;
+                  branchId: string;
+                  title: string;
+                  question: string;
+                  mode: "one-time" | "recurring";
+                  schedule?: z.infer<typeof researchProjectScheduleSchema>;
+                  actorId: string;
+                  idempotencyKey: string;
+                  scopeFingerprint: string;
+                }) => projects.createProject(input),
+              },
+              links: {
+                setThreadLinks: (linkInput: {
+                  organizationId: string;
+                  actorId: string;
+                  threadId: string;
+                  projectId: string;
+                  requestId?: string;
+                  draftRequestId?: string;
+                  campaignId?: string;
+                }) =>
+                  service.setThreadLinks({
+                    organizationId: linkInput.organizationId,
+                    actorId: linkInput.actorId,
+                    role: context.membership.role,
+                    threadId: linkInput.threadId,
+                    ...(linkInput.projectId ? { projectId: linkInput.projectId } : {}),
+                    ...(linkInput.requestId ? { requestId: linkInput.requestId } : {}),
+                    ...(linkInput.draftRequestId
+                      ? { draftRequestId: linkInput.draftRequestId }
+                      : {}),
+                    ...(linkInput.campaignId ? { campaignId: linkInput.campaignId } : {}),
+                  }),
+              },
+            };
+            watchChoice =
+              rawChoice === "start_fresh"
+                ? await requestWatchFromChoice(
+                    {
+                      organizationId,
+                      actorId: context.user.id,
+                      threadId: rawParams.threadId,
+                      idempotencyKey: watchKey,
+                      choice: "start_fresh",
+                      permissions: permissionsForRole(context.membership.role),
+                      prepared: prepared.payload,
+                      assumptions: prepared.assumptions,
+                      candidateProjectId: candidate,
+                      existingLinks,
+                    },
+                    createSeams,
+                  )
+                : await createPreparedWatch(
+                    {
+                      organizationId,
+                      actorId: context.user.id,
+                      threadId: rawParams.threadId,
+                      idempotencyKey: watchKey,
+                      permissions: permissionsForRole(context.membership.role),
+                      prepared: prepared.payload,
+                      assumptions: prepared.assumptions,
+                      existingLinks,
+                    },
+                    createSeams,
+                  );
+            if (watchChoice.outcome === "created" || watchChoice.outcome === "replayed") {
+              await createEventPublisher().publish({
+                organizationId,
+                eventId: crypto.randomUUID(),
+                eventName: "agent_thread.watch_created",
+                occurredAt: new Date().toISOString(),
+                actorType: "user",
+                actorId: context.user.id,
+                correlationId,
+                schemaVersion: 1,
+                payload: {
+                  threadId: rawParams.threadId,
+                  projectId: watchChoice.projectId,
+                  idempotencyKey: watchKey,
+                  outcome: watchChoice.outcome,
+                },
+              });
+            }
+          }
+        }
+      }
+      logger.info("agent_thread.watch_choice_resolved", {
+        organizationId,
+        threadId: rawParams.threadId,
+        correlationId,
+      });
+    }
+
     return agentJsonResponse(
       {
         message,
@@ -293,6 +732,7 @@ export async function POST(
         questionnaire,
         research,
         ...(ideaDraft ? { ideaDraft } : {}),
+        ...(watchChoice ? { watchChoice } : {}),
       },
       correlationId,
       replayed ? 200 : 201,

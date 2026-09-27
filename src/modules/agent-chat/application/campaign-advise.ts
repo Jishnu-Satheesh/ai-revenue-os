@@ -47,6 +47,27 @@ import {
 
 export const CAMPAIGN_DRAFT_ACTION_KEY = "campaign.governed_draft_v1";
 
+/**
+ * Evidence window default for the pick path (Task B4, L3 one-tap). The
+ * ideas card carries no window choice, so every pick resolves against the
+ * last 30 days with the assumption stated inline on the envelope — the
+ * drawer renders it beside the receipt, never silently.
+ */
+export const CAMPAIGN_EVIDENCE_WINDOW_DEFAULT_DAYS = 30 as const;
+
+export const CAMPAIGN_EVIDENCE_WINDOW_ASSUMPTION =
+  "Advice uses the last 30 days of evidence (default — the ideas card asks for no window).";
+
+export const campaignEvidenceWindowSchema = z
+  .object({
+    windowDays: z.union([z.literal(30), z.literal(60)]),
+    /** Stated when the window was defaulted; null when the caller chose it. */
+    assumption: z.string().trim().min(1).max(500).nullable(),
+  })
+  .strict();
+
+export type CampaignEvidenceWindow = z.infer<typeof campaignEvidenceWindowSchema>;
+
 // ---------------------------------------------------------------------------
 // Advice input (Zod at the boundary)
 // ---------------------------------------------------------------------------
@@ -408,6 +429,8 @@ export type AdviseCampaignOutcome =
       estimate: LabeledCampaignEstimate;
       adviceFingerprint: string;
       reasonCodes: [];
+      /** The snapshot's explicit window — never defaulted on this path. */
+      evidenceWindow: CampaignEvidenceWindow;
     }
   | {
       outcome: "brief_prefilled";
@@ -416,6 +439,7 @@ export type AdviseCampaignOutcome =
       prefill: { objective: string; audience: string };
       reasonCodes: CampaignAdviceReasonCode[];
       estimate: LabeledCampaignEstimate;
+      evidenceWindow: CampaignEvidenceWindow;
       draftRequestId?: undefined;
     };
 
@@ -469,6 +493,10 @@ export async function adviseCampaign(
       prefill: { objective: parsed.objective, audience: parsed.audience },
       reasonCodes: eligibility.reasonCodes,
       estimate,
+      evidenceWindow: {
+        windowDays: parsed.evidenceSnapshot.windowDays,
+        assumption: null,
+      },
     };
   }
 
@@ -515,6 +543,10 @@ export async function adviseCampaign(
       estimate,
       adviceFingerprint,
       reasonCodes: [],
+      evidenceWindow: {
+        windowDays: parsed.evidenceSnapshot.windowDays,
+        assumption: null,
+      },
     };
   }
 
@@ -557,6 +589,10 @@ export async function adviseCampaign(
     estimate,
     adviceFingerprint,
     reasonCodes: [],
+    evidenceWindow: {
+      windowDays: parsed.evidenceSnapshot.windowDays,
+      assumption: null,
+    },
   };
 }
 
@@ -981,6 +1017,8 @@ export type IdeaDraftOutcome =
       studioLink: ReturnType<typeof campaignBundleLink>;
       markers: CampaignMarkerReceipt[];
       reasonCodes: [];
+      /** Defaulted 30-day window with its assumption — the pick carries no window. */
+      evidenceWindow: CampaignEvidenceWindow;
     }
   | {
       outcome: "brief_prefilled";
@@ -990,6 +1028,7 @@ export type IdeaDraftOutcome =
       briefUrl: string;
       prefill: { objective: string; audience: string };
       reasonCodes: CampaignAdviceReasonCode[];
+      evidenceWindow: CampaignEvidenceWindow;
       draftRequestId?: undefined;
     };
 
@@ -1036,6 +1075,10 @@ export async function requestDraftFromIdeaPick(
       }),
       prefill,
       reasonCodes,
+      evidenceWindow: {
+        windowDays: CAMPAIGN_EVIDENCE_WINDOW_DEFAULT_DAYS,
+        assumption: CAMPAIGN_EVIDENCE_WINDOW_ASSUMPTION,
+      },
     };
   }
 
@@ -1088,6 +1131,10 @@ export async function requestDraftFromIdeaPick(
       studioLink: bundleLink,
       markers: buildCampaignMarkerReceipts("requested"),
       reasonCodes: [],
+      evidenceWindow: {
+        windowDays: CAMPAIGN_EVIDENCE_WINDOW_DEFAULT_DAYS,
+        assumption: CAMPAIGN_EVIDENCE_WINDOW_ASSUMPTION,
+      },
     };
   }
 
@@ -1137,5 +1184,9 @@ export async function requestDraftFromIdeaPick(
     studioLink,
     markers: buildCampaignMarkerReceipts(replayed ? "claimed" : "requested"),
     reasonCodes: [],
+    evidenceWindow: {
+      windowDays: CAMPAIGN_EVIDENCE_WINDOW_DEFAULT_DAYS,
+      assumption: CAMPAIGN_EVIDENCE_WINDOW_ASSUMPTION,
+    },
   };
 }

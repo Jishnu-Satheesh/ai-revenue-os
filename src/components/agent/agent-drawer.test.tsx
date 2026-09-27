@@ -1137,6 +1137,11 @@ describe("opportunity-bound handoff", () => {
       { stage: "draft-ready", state: "pending", label: "Draft ready" },
     ],
     reasonCodes: [],
+    evidenceWindow: {
+      windowDays: 30,
+      assumption:
+        "Advice uses the last 30 days of evidence (default — the ideas card asks for no window).",
+    },
   };
 
   async function pickRecommendedIdea() {
@@ -1275,6 +1280,11 @@ describe("opportunity-bound handoff", () => {
             audience: "Saturday set menu for families.",
           },
           reasonCodes: ["ADVICE_NO_OPPORTUNITY"],
+          evidenceWindow: {
+            windowDays: 30,
+            assumption:
+              "Advice uses the last 30 days of evidence (default — the ideas card asks for no window).",
+          },
         },
         correlationId: "c6",
       },
@@ -1411,134 +1421,258 @@ describe("fresh routing codes (F2)", () => {
   });
 });
 
-describe("watch lane forms", () => {
-  const BRANCH = "66666666-6666-4666-8666-666666666666";
+describe("watch one-tap (B4)", () => {
+  const PROJECT = "77777777-7777-4777-8777-777777777777";
+  const DUPLICATE_CARD: QuestionnaireSpec = {
+    kind: "duplicate_watch",
+    title: "Watch already running",
+    resumeKey: "router:watch:overview:abcdef1234567890",
+    items: [
+      {
+        key: "choice",
+        label: "A similar watch already exists. What should happen?",
+        kind: "single_select",
+        required: true,
+        options: [
+          { value: "view_existing", label: "View existing" },
+          { value: "update_fields", label: "Update fields" },
+          { value: "start_fresh", label: "Start fresh anyway" },
+          { value: "cancel", label: "Cancel" },
+        ],
+      },
+      {
+        key: "frequency",
+        label: "How often should this run?",
+        kind: "single_select",
+        required: false,
+        options: [
+          { value: "daily", label: "Daily" },
+          { value: "weekly", label: "Weekly" },
+          { value: "monthly", label: "Monthly" },
+        ],
+      },
+      { key: "branch", label: "Which branch is this for?", kind: "text", required: false },
+      {
+        key: "research_area",
+        label: "Which research area should change?",
+        kind: "text",
+        required: false,
+      },
+      {
+        key: "competitors",
+        label: "Which competitor should be added?",
+        kind: "text",
+        required: false,
+      },
+      { key: "end_date", label: "When should monitoring stop?", kind: "date", required: false },
+      {
+        key: "confirm_start_fresh",
+        label: "Start a second watch anyway?",
+        kind: "confirm",
+        required: false,
+      },
+    ],
+  };
   const watchRoute = {
     intent: "watch",
     confidence: "high",
     reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
-    questionnaire: null,
+    questionnaire: DUPLICATE_CARD,
     thread: THREAD,
     correlationId: "c3",
   };
+  const MANAGE = ["growth_intelligence.manage"];
 
-  function dispatchBody() {
+  function answersPosts() {
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
-    const call = fetchMock.mock.calls.find(([url]) => String(url).includes("/dispatch"));
-    expect(call).toBeDefined();
-    return JSON.parse(String((call?.[1] as RequestInit).body)) as Record<string, unknown>;
+    return fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes("/answers") && (init as RequestInit | undefined)?.method === "POST",
+    );
   }
 
-  it("posts a watch_create block with confirmation from the form", async () => {
-    globalThis.fetch = mockAgentFetch({ route: watchRoute }) as never;
-    const user = userEvent.setup();
-    render(
-      <Harness
-        pendingPrompt={sendPrompt()}
-        role="operator"
-        permissions={["growth_intelligence.manage"]}
-      />,
-    );
-    const thread = await screen.findByRole("log", { name: "Conversation thread" });
-    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-
-    await user.type(screen.getByLabelText("Watch question"), "Track lunch prices");
-    await user.type(screen.getByLabelText("Research area"), "downtown lunch");
-    await user.type(screen.getByLabelText("Branch id"), BRANCH);
-    await user.click(screen.getByRole("button", { name: /start watch/i }));
-
-    await waitFor(() => {
-      expect(
-        (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(([url]) =>
-          String(url).includes("/dispatch"),
-        ),
-      ).toBe(true);
-    });
-    const payload = dispatchBody();
-    expect(payload).toMatchObject({
-      action: "watch_create",
-      confirmation: { confirmed: true },
-      watchCreate: {
-        branchId: BRANCH,
-        question: "Track lunch prices",
-        mode: "one-time",
-        researchArea: "downtown lunch",
-      },
-    });
-    expect(typeof payload.idempotencyKey).toBe("string");
-  });
-
-  it("refuses a watch_create without question and branch before posting", async () => {
-    globalThis.fetch = mockAgentFetch({ route: watchRoute }) as never;
-    const user = userEvent.setup();
-    render(
-      <Harness
-        pendingPrompt={sendPrompt()}
-        role="operator"
-        permissions={["growth_intelligence.manage"]}
-      />,
-    );
-    const thread = await screen.findByRole("log", { name: "Conversation thread" });
-    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /start watch/i }));
-
-    expect(
-      await screen.findByText(/question and a research area are required/i),
-    ).toBeInTheDocument();
-    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
-    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dispatch"))).toBe(false);
-  });
-
-  it("posts a watch_update with the linked project and chosen edits", async () => {
-    const PROJECT = "77777777-7777-4777-8777-777777777777";
+  it("has no manual watch forms: the card submit is the tap, the receipt renders the envelope", async () => {
     globalThis.fetch = mockAgentFetch({
-      route: { ...watchRoute, thread: { ...THREAD, linkedResearchProjectId: PROJECT } },
-      thread: { ...THREAD, linkedResearchProjectId: PROJECT },
+      route: watchRoute,
+      answers: {
+        message: ANSWERS_MESSAGE,
+        replayed: false,
+        answers: { choice: "view_existing" },
+        resumeKey: DUPLICATE_CARD.resumeKey,
+        intent: "watch",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: null,
+        watchChoice: {
+          outcome: "view_existing",
+          projectId: PROJECT,
+          link: {
+            href: `/organizations/${ORGANIZATION}/growth-intelligence`,
+            ref: { requestId: null, projectId: PROJECT, reportId: null },
+          },
+        },
+        correlationId: "c6",
+      },
     }) as never;
     const user = userEvent.setup();
-    render(
-      <Harness
-        pendingPrompt={sendPrompt()}
-        role="operator"
-        permissions={["growth_intelligence.manage"]}
-      />,
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />);
+    expect(await screen.findByText("Watch already running")).toBeInTheDocument();
+
+    // The multi-field manual forms are gone: no question/branch inputs, no
+    // Start/Update buttons anywhere.
+    expect(screen.queryByLabelText("Watch question")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Branch id")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /start watch/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /update watch/i })).not.toBeInTheDocument();
+
+    // One tap on the duplicate choice submits the answers; the drawer never
+    // posts to dispatch itself.
+    await user.click(screen.getByText("View existing"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    await waitFor(() => expect(answersPosts().length).toBe(1));
+    const payload = JSON.parse(String((answersPosts()[0]?.[1] as RequestInit).body)) as Record<
+      string,
+      unknown
+    >;
+    expect(payload).toMatchObject({ answers: { choice: "view_existing" } });
+    expect(typeof payload.idempotencyKey).toBe("string");
+
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dispatch"))).toBe(false);
+    const receipt = await screen.findByText("Open Market Intelligence");
+    expect(receipt).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/growth-intelligence`,
     );
-    const thread = await screen.findByRole("log", { name: "Conversation thread" });
-    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-
-    // The project id falls back to the polled thread link.
-    expect(screen.getByLabelText("Watch project id")).toHaveAttribute("placeholder", PROJECT);
-    await user.click(screen.getByLabelText("Watch frequency"));
-    await user.click(await screen.findByRole("option", { name: "Weekly" }));
-    await user.type(screen.getByLabelText(/end date/i), "2026-12-31");
-    await user.click(screen.getByRole("button", { name: /update watch/i }));
-
-    await waitFor(() => {
-      expect(
-        (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.some(([url]) =>
-          String(url).includes("/dispatch"),
-        ),
-      ).toBe(true);
-    });
-    const payload = dispatchBody();
-    expect(payload).toMatchObject({
-      action: "watch_update",
-      confirmation: { confirmed: true },
-      watchUpdate: {
-        projectId: PROJECT,
-        edits: { frequency: "weekly", endDate: "2026-12-31" },
-      },
-    });
   });
 
-  it("hides the forms without the manage grant", async () => {
+  it("renders the created receipt with the stated assumptions", async () => {
+    const cadenceCard: QuestionnaireSpec = {
+      kind: "missing_fields",
+      title: "One more detail",
+      resumeKey: "router:watch:overview:abcdef1234567890",
+      items: [
+        {
+          key: "frequency",
+          label: "How often should this run?",
+          kind: "single_select",
+          required: true,
+          options: [
+            { value: "daily", label: "Daily" },
+            { value: "weekly", label: "Weekly" },
+          ],
+        },
+      ],
+    };
+    globalThis.fetch = mockAgentFetch({
+      route: { ...watchRoute, questionnaire: cadenceCard },
+      answers: {
+        message: ANSWERS_MESSAGE,
+        replayed: false,
+        answers: { frequency: "weekly" },
+        resumeKey: cadenceCard.resumeKey,
+        intent: "watch",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: null,
+        watchChoice: {
+          outcome: "created",
+          projectId: PROJECT,
+          replayed: false,
+          scopeFingerprint: "0".repeat(64),
+          assumptions: [
+            "Weekly cadence (default).",
+            "Evidence window: last 30 days (default).",
+          ],
+          evidenceWindowDays: 30,
+          link: {
+            href: `/organizations/${ORGANIZATION}/growth-intelligence`,
+            ref: { requestId: null, projectId: PROJECT, reportId: null },
+          },
+        },
+        correlationId: "c6",
+      },
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />);
+    expect(await screen.findByText("One more detail")).toBeInTheDocument();
+
+    // One tap on the single-item card submits; the receipt renders the
+    // returned assumptions verbatim.
+    await user.click(screen.getByText("Weekly"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+
+    expect(await screen.findByText(/Watch created\./)).toBeInTheDocument();
+    expect(screen.getByText("Weekly cadence (default).")).toBeInTheDocument();
+    expect(screen.getByText("Evidence window: last 30 days (default).")).toBeInTheDocument();
+    expect(screen.getByText("Open Market Intelligence")).toBeInTheDocument();
+  });
+
+  it("renders the duplicate card returned behind the tap", async () => {
+    const returned: QuestionnaireSpec = {
+      ...DUPLICATE_CARD,
+      resumeKey: "router:watch:overview:fedcba9876543210",
+    };
+    globalThis.fetch = mockAgentFetch({
+      route: watchRoute,
+      answers: {
+        message: ANSWERS_MESSAGE,
+        replayed: false,
+        answers: { choice: "start_fresh" },
+        resumeKey: DUPLICATE_CARD.resumeKey,
+        intent: "watch",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: null,
+        watchChoice: {
+          outcome: "duplicate",
+          candidates: [{ projectId: PROJECT }],
+          card: returned,
+          scopeFingerprint: "0".repeat(64),
+        },
+        correlationId: "c6",
+      },
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />);
+    expect(await screen.findByText("Watch already running")).toBeInTheDocument();
+
+    await user.click(screen.getByText("View existing"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+
+    // The converged duplicate card replaces the answered one (fresh resume
+    // key, so it is not hidden as already answered).
+    expect(await screen.findByText(/similar watch is still running/i)).toBeInTheDocument();
+    expect(screen.getAllByText("Watch already running").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("keeps the grant note without the manage grant", async () => {
     globalThis.fetch = mockAgentFetch({ route: watchRoute }) as never;
     render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={[]} />);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
 
-    expect(screen.queryByLabelText("Watch question")).not.toBeInTheDocument();
-    expect(screen.getByText(/growth_intelligence\.manage grant/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /start watch/i })).not.toBeInTheDocument();
+    // The one-tap region's own note (the card above carries its own gate
+    // reason for the Update/Second choices).
+    expect(
+      screen.getByText("Needs the growth_intelligence.manage grant — enforcement stays server-side."),
+    ).toBeInTheDocument();
+  });
+
+  it("points at the next card when a watch routes with no questionnaire", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: { ...watchRoute, questionnaire: null },
+    }) as never;
+    render(
+      <Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />,
+    );
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+
+    expect(await screen.findByText(/next card creates the watch in one tap/i)).toBeInTheDocument();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dispatch"))).toBe(false);
   });
 });
 

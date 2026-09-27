@@ -119,6 +119,13 @@ export function AgentCampaignAdvice({
               {ideaDraft.idea.recommended ? <Badge variant="secondary">Recommended</Badge> : null}
             </p>
             <p className="text-xs text-muted-foreground">{ideaDraft.idea.description}</p>
+            {/* B4: the defaulted evidence window stays inline on the
+                receipt — the stated assumption, or the plain window when
+                the caller chose it explicitly. */}
+            <p className="text-xs text-muted-foreground">
+              {ideaDraft.evidenceWindow.assumption ??
+                `Evidence window: last ${ideaDraft.evidenceWindow.windowDays} days.`}
+            </p>
           </div>
         ) : null}
 

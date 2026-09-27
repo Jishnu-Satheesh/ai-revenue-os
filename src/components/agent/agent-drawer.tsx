@@ -30,32 +30,18 @@ import type {
   AdviseCampaignSeams,
   IdeaDraftOutcome,
 } from "@/modules/agent-chat/application/campaign-advise";
+import type { WatchTapOutcome } from "@/modules/agent-chat/application/executors";
 import { AgentThreadSteps, type AgentStepPhase } from "@/components/agent/agent-thread-steps";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useAgentSidebarOffset } from "@/components/agent/agent-placement";
 import type { AgentIntent } from "@/domain/agent-router/intents";
 import type { RouterRole, QuestionnaireSpec } from "@/domain/agent-router/contracts";
-import {
-  buildDispatchPayload,
-  type DispatchAction,
-} from "@/modules/agent-chat/application/api-schemas";
 import type {
   ThreadMessageView,
   ThreadMode,
@@ -73,19 +59,7 @@ export type AgentRouteResult = {
   questionnaire: QuestionnaireSpec | null;
 };
 
-export type AgentDispatchOutcome = {
-  outcome: "dispatched" | "replayed" | "draft_requested" | "brief_prefilled";
-  eventId: string | null;
-  replayed: boolean;
-  idempotencyKey: string;
-  runId: string | null;
-  requestId: string | null;
-  projectId: string | null;
-  draftRequestId: string | null;
-  briefUrl: string | null;
-  reasonCodes: string[];
-  link: { href: string; ref: Record<string, string | null> } | null;
-};
+export type AgentWatchChoice = WatchTapOutcome;
 
 export type AgentDrawerProps = {
   organizationId: string;
@@ -370,240 +344,133 @@ function formatAnswers(answers: Record<string, unknown>): string {
     .join(" · ");
 }
 
-const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-
 /**
- * Watch lane forms (Slice C, task-2 report s9.2).
- *
- * Task B3 removed the research confirm button (research auto-runs
- * zero-click from the route response); these forms remain the manual
- * dispatch surface. Every submit IS the explicit confirmation the route
- * requires; the route rechecks the grant and Zod-disposes every field,
- * so client checks stay courtesy-only. The update form prefills the
- * project from the polled thread links; scope-widening edits (new
- * competitors, moved research area) stay refusal-side: the worker
- * routes them to `profile_scope_change` instead of applying them.
+ * Watch one-tap result (Task B4, L3). The manual dispatch forms are gone:
+ * the questionnaire card submit is the single tap, and the answers route
+ * executes behind it with the auto-prepared payload. This card renders
+ * the returned envelope — created receipt plus assumptions, the viewed
+ * link, the applied update, the scope proposal, or the honest blocked
+ * copy. It posts nothing itself; the drawer never touches dispatch.
  */
-function WatchDispatchForms({
-  defaultProjectId,
-  watchUpdateAvailable,
-  pending,
-  outcome,
-  error,
-  onDispatch,
+function WatchOneTapCard({
+  watchChoice,
+  intentIsWatch,
+  hasQuestionnaire,
+  canManageWatch,
 }: {
-  defaultProjectId: string | null;
-  watchUpdateAvailable: boolean;
-  pending: boolean;
-  outcome: AgentDispatchOutcome | null;
-  error: string | null;
-  onDispatch: (vars: {
-    action: DispatchAction;
-    idempotencyKey: string;
-    watchCreate?: {
-      branchId: string;
-      title?: string;
-      question: string;
-      mode: "one-time" | "recurring";
-      researchArea: string;
-    };
-    watchUpdate?: { projectId: string; edits: Record<string, unknown> };
-  }) => void;
+  watchChoice: AgentWatchChoice | null;
+  intentIsWatch: boolean;
+  hasQuestionnaire: boolean;
+  canManageWatch: boolean;
 }) {
-  const [question, setQuestion] = useState("");
-  const [researchArea, setResearchArea] = useState("");
-  const [mode, setMode] = useState<"one-time" | "recurring">("one-time");
-  const [branchId, setBranchId] = useState("");
-  const [title, setTitle] = useState("");
-  const [projectId, setProjectId] = useState("");
-  const [frequency, setFrequency] = useState("none");
-  const [endDate, setEndDate] = useState("");
-  const [formError, setFormError] = useState<string | null>(null);
-
-  function submitWatchCreate() {
-    if (question.trim().length < 1 || researchArea.trim().length < 1) {
-      setFormError("A question and a research area are required.");
-      return;
-    }
-    if (!UUID_PATTERN.test(branchId.trim())) {
-      setFormError("The branch id must be a uuid.");
-      return;
-    }
-    setFormError(null);
-    onDispatch({
-      action: "watch_create",
-      idempotencyKey: crypto.randomUUID(),
-      watchCreate: {
-        branchId: branchId.trim(),
-        ...(title.trim().length > 0 ? { title: title.trim() } : {}),
-        question: question.trim(),
-        mode,
-        researchArea: researchArea.trim(),
-      },
-    });
+  if (watchChoice) {
+    return <div className="flex flex-col gap-2 pt-2">{watchReceipt(watchChoice)}</div>;
   }
-
-  function submitWatchUpdate() {
-    const target = projectId.trim() || defaultProjectId || "";
-    if (!UUID_PATTERN.test(target)) {
-      setFormError("A watch project id (uuid) is required — pick it from the linked thread.");
-      return;
-    }
-    const edits: Record<string, unknown> = {};
-    if (frequency !== "none") edits.frequency = frequency;
-    if (endDate.trim().length > 0) {
-      if (!DATE_PATTERN.test(endDate.trim())) {
-        setFormError("The end date must be YYYY-MM-DD.");
-        return;
-      }
-      edits.endDate = endDate.trim();
-    }
-    if (Object.keys(edits).length === 0) {
-      setFormError("Change a field first — frequency or end date.");
-      return;
-    }
-    setFormError(null);
-    onDispatch({
-      action: "watch_update",
-      idempotencyKey: crypto.randomUUID(),
-      watchUpdate: { projectId: target, edits },
-    });
+  if (!canManageWatch) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Needs the growth_intelligence.manage grant — enforcement stays server-side.
+      </p>
+    );
   }
+  if (hasQuestionnaire) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Answer the card above — one tap creates or updates the watch.
+      </p>
+    );
+  }
+  if (intentIsWatch) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        No card yet — describe the branch and rhythm in a message and the next card creates the
+        watch in one tap.
+      </p>
+    );
+  }
+  return null;
+}
 
+function watchMarketLink(href: string) {
   return (
-    <div className="flex flex-col gap-3 pt-2">
-      <FieldGroup>
-        <Field>
-          <FieldLabel htmlFor="watch-question">Watch question</FieldLabel>
-          <Textarea
-            id="watch-question"
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder="What should this watch track?"
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="watch-area">Research area</FieldLabel>
-          <Input
-            id="watch-area"
-            value={researchArea}
-            onChange={(event) => setResearchArea(event.target.value)}
-            placeholder="e.g. downtown lunch demand"
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="watch-branch">Branch id</FieldLabel>
-          <Input
-            id="watch-branch"
-            value={branchId}
-            onChange={(event) => setBranchId(event.target.value)}
-            placeholder="Branch uuid this watch belongs to"
-          />
-        </Field>
-        <Field>
-          <FieldLabel htmlFor="watch-title">Title (optional)</FieldLabel>
-          <Input
-            id="watch-title"
-            value={title}
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="Short watch title"
-          />
-        </Field>
-        <Field>
-          <FieldLabel>Run mode</FieldLabel>
-          <ToggleGroup
-            type="single"
-            value={mode}
-            aria-label="Watch run mode"
-            onValueChange={(next) => {
-              if (next === "one-time" || next === "recurring") setMode(next);
-            }}
-          >
-            <ToggleGroupItem value="one-time" aria-label="One-time watch">
-              One-time
-            </ToggleGroupItem>
-            <ToggleGroupItem value="recurring" aria-label="Recurring watch">
-              Recurring
-            </ToggleGroupItem>
-          </ToggleGroup>
-        </Field>
-        <Button type="button" disabled={pending} onClick={submitWatchCreate}>
-          {pending ? <Spinner aria-hidden="true" /> : null}
-          Start watch
-        </Button>
-      </FieldGroup>
-
-      {watchUpdateAvailable ? (
-        <FieldGroup>
-          <Field>
-            <FieldLabel htmlFor="watch-project">Watch project id</FieldLabel>
-            <Input
-              id="watch-project"
-              value={projectId}
-              onChange={(event) => setProjectId(event.target.value)}
-              placeholder={defaultProjectId ?? "Watch project uuid"}
-            />
-          </Field>
-          <Field>
-            <FieldLabel>Frequency</FieldLabel>
-            <Select value={frequency} onValueChange={setFrequency}>
-              <SelectTrigger aria-label="Watch frequency">
-                <SelectValue placeholder="No change" />
-              </SelectTrigger>
-              <SelectContent className="dark border-white/10 bg-zinc-900 text-zinc-100">
-                <SelectItem value="none">No change</SelectItem>
-                <SelectItem value="daily">Daily</SelectItem>
-                <SelectItem value="weekly">Weekly</SelectItem>
-                <SelectItem value="monthly">Monthly</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="watch-end">End date (optional)</FieldLabel>
-            <Input
-              id="watch-end"
-              value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
-              placeholder="YYYY-MM-DD"
-            />
-          </Field>
-          <Button type="button" variant="outline" disabled={pending} onClick={submitWatchUpdate}>
-            {pending ? <Spinner aria-hidden="true" /> : null}
-            Update watch
-          </Button>
-        </FieldGroup>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          Watch field updates are unavailable for this chat — viewing the existing watch stays free.
-        </p>
-      )}
-
-      {formError ? (
-        <p role="alert" className="text-sm text-destructive">
-          {formError}
-        </p>
-      ) : null}
-      {error ? (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      ) : null}
-      {outcome ? (
-        <p className="text-sm text-muted-foreground">
-          {outcome.replayed ? "Already queued — showing the kept run." : "Watch queued."}{" "}
-          {outcome.link ? (
-            <a
-              className="font-medium text-primary underline-offset-4 hover:underline"
-              href={outcome.link.href}
-            >
-              Open Market Intelligence
-            </a>
-          ) : null}
-        </p>
-      ) : null}
-    </div>
+    <a
+      className="font-medium text-primary underline-offset-4 hover:underline"
+      href={href}
+    >
+      Open Market Intelligence
+    </a>
   );
+}
+
+function watchReceipt(choice: AgentWatchChoice) {
+  switch (choice.outcome) {
+    case "blocked":
+    case "update_blocked":
+    case "needs_input":
+      return <p className="text-sm text-muted-foreground">{choice.copy}</p>;
+    case "cancelled":
+      return <p className="text-sm text-muted-foreground">Cancelled — nothing was created.</p>;
+    case "view_existing":
+      return choice.projectId ? (
+        <p className="text-sm text-muted-foreground">
+          Existing watch. {watchMarketLink(choice.link.href)}
+        </p>
+      ) : (
+        <p className="text-sm text-muted-foreground">The existing watch was not found.</p>
+      );
+    case "created":
+    case "replayed":
+      return (
+        <>
+          <p className="text-sm text-muted-foreground">
+            {choice.replayed ? "Already queued — showing the kept watch." : "Watch created."}{" "}
+            {watchMarketLink(choice.link.href)}
+          </p>
+          {choice.assumptions.length > 0 ? (
+            <ul className="flex flex-col gap-1">
+              {choice.assumptions.map((assumption) => (
+                <li key={assumption} className="text-xs text-muted-foreground">
+                  {assumption}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      );
+    case "duplicate":
+      return (
+        <p className="text-sm text-muted-foreground">
+          A similar watch is still running — choose what to do on the card above.
+        </p>
+      );
+    case "updated":
+      return (
+        <p className="text-sm text-muted-foreground">
+          {choice.replayed && choice.appliedFields.length === 0
+            ? "Already up to date — nothing was changed."
+            : `Watch updated${choice.appliedFields.length > 0 ? ` (${choice.appliedFields.join(", ")})` : ""}.`}{" "}
+          {watchMarketLink(choice.link.href)}
+        </p>
+      );
+    case "profile_scope_change": {
+      const additions = [
+        ...choice.proposal.addedCompetitors,
+        ...choice.proposal.addedTopics,
+        ...(choice.proposal.researchArea ? [choice.proposal.researchArea] : []),
+      ];
+      return (
+        <>
+          <p className="text-sm text-muted-foreground">
+            This change widens the watch scope, so it needs a Market Profile proposal first.
+            Nothing was changed.
+          </p>
+          {additions.length > 0 ? (
+            <p className="text-xs text-muted-foreground">Proposed additions: {additions.join(", ")}.</p>
+          ) : null}
+        </>
+      );
+    }
+  }
 }
 
 /**
@@ -652,8 +519,6 @@ export function AgentDrawer({
   const [thread, setThread] = useState<ThreadSummary | null>(null);
   const [routeResult, setRouteResult] = useState<AgentRouteResult | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [dispatchOutcome, setDispatchOutcome] = useState<AgentDispatchOutcome | null>(null);
-  const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, QuestionnaireAnswers>>(
     {},
   );
@@ -671,6 +536,11 @@ export function AgentDrawer({
   // the retained pre-filled brief. Set on answers submit, cleared whenever
   // the conversation turns over.
   const [ideaDraft, setIdeaDraft] = useState<IdeaDraftOutcome | null>(null);
+  // Watch one-tap envelope from the answers route (Task B4): the created
+  // receipt plus assumptions, the viewed link, the applied update, the
+  // scope proposal, or the honest blocked copy. Same lifecycle as the
+  // draft envelope — set on answers submit, cleared on turnover.
+  const [watchChoice, setWatchChoice] = useState<AgentWatchChoice | null>(null);
   const [announcement, setAnnouncement] = useState("Conversation opened.");
   const headingRef = useRef<HTMLHeadingElement>(null);
 
@@ -910,9 +780,8 @@ export function AgentDrawer({
       setMessages((previous) => [...previous, userMessage]);
       setRouteResult(result);
       setSendError(null);
-      setDispatchOutcome(null);
-      setDispatchError(null);
       setIdeaDraft(null);
+      setWatchChoice(null);
       onViewChange("thread");
       setAnnouncement(`Routed to ${result.intent}.`);
       // The answer streams live from here: tokens render into the thread
@@ -967,6 +836,7 @@ export function AgentDrawer({
         reasonCodes: string[];
         questionnaire: QuestionnaireSpec | null;
         ideaDraft?: IdeaDraftOutcome | null;
+        watchChoice?: AgentWatchChoice | null;
       };
       return { ...submitted, resumeKey: vars.spec.resumeKey };
     },
@@ -987,6 +857,9 @@ export function AgentDrawer({
       // The pick-to-draft envelope arrives here (or stays null for other
       // cards); the advice card below renders it.
       setIdeaDraft(result.ideaDraft ?? null);
+      // The watch one-tap envelope arrives here (or stays null); the
+      // one-tap card below renders the receipt.
+      setWatchChoice(result.watchChoice ?? null);
       setSendError(null);
       setAnnouncement(`Answers saved and re-routed to ${result.intent}.`);
       // The re-route synthesizes again server-side; re-read the durable
@@ -999,58 +872,10 @@ export function AgentDrawer({
       setAnnouncement("Saving answers failed.");
     },
   });
-  // Governed dispatch (Slice B): the watch lanes take their parameters
-  // from the forms below; the dispatch route already serves them. (Task
-  // B3 removed the research confirm click — research auto-runs zero-click
-  // from the route response.) The idempotency key is minted at click time
-  // (one per user confirm) and travels in the mutation vars, so a
-  // transport retry replays the same dispatch.
-  const dispatchLane = useMutation({
-    mutationFn: async (vars: {
-      action: DispatchAction;
-      idempotencyKey: string;
-      watchCreate?: {
-        branchId: string;
-        title?: string;
-        question: string;
-        mode: "one-time" | "recurring";
-        researchArea: string;
-      };
-      watchUpdate?: { projectId: string; edits: Record<string, unknown> };
-    }) => {
-      if (!threadId) throw new Error("No active conversation. Send a message first.");
-      const payload = buildDispatchPayload({
-        action: vars.action,
-        idempotencyKey: vars.idempotencyKey,
-        ...(vars.watchCreate ? { watchCreate: vars.watchCreate } : {}),
-        ...(vars.watchUpdate ? { watchUpdate: vars.watchUpdate } : {}),
-      });
-      return (await agentPostJson(
-        `${base}/${threadId}/dispatch`,
-        payload as unknown as Record<string, unknown>,
-        correlationId,
-      )) as AgentDispatchOutcome;
-    },
-    onSuccess: (result, vars) => {
-      setDispatchOutcome(result);
-      setDispatchError(null);
-      setAnnouncement(
-        result.replayed
-          ? "Already queued — showing the kept run."
-          : vars.action === "watch_create"
-            ? "Watch queued. Track it in Market Intelligence."
-            : vars.action === "watch_update"
-              ? "Watch update queued."
-              : "Research queued. Track it in Market Intelligence.",
-      );
-    },
-    onError: (error) => {
-      setDispatchError(
-        error instanceof Error ? error.message : "Dispatch failed. Nothing was enqueued.",
-      );
-      setAnnouncement("Dispatch failed.");
-    },
-  });
+  // Task B4 removed the drawer dispatch mutation with the manual
+  // watch forms: the answers route executes the tap server-side, and the
+  // one-tap card below renders the returned envelope. The dispatch route
+  // itself stays for manual and API use.
   // Pump: adopt a fresh prompt into the queue, then run queued prompts one
   // at a time so rapid sends never mint two threads for one conversation.
   // Only ref writes, prop callbacks, and mutate calls here — no setState.
@@ -1143,6 +968,7 @@ export function AgentDrawer({
       setDismissedCards([]);
       setLastSaved(null);
       setIdeaDraft(null);
+      setWatchChoice(null);
       onViewChange("thread");
       setAnnouncement(`Reopened ${target.title}.`);
     },
@@ -1160,12 +986,11 @@ export function AgentDrawer({
     setThread(null);
     setRouteResult(null);
     setSendError(null);
-    setDispatchOutcome(null);
-    setDispatchError(null);
     setSubmittedAnswers({});
     setDismissedCards([]);
     setLastSaved(null);
     setIdeaDraft(null);
+    setWatchChoice(null);
     onViewChange("thread");
     setAnnouncement("Started a new conversation.");
   }
@@ -1182,7 +1007,11 @@ export function AgentDrawer({
           ? "done"
           : "idle";
 
-  const questionnaire = routeResult?.questionnaire ?? null;
+  // A converged duplicate envelope carries the live card: it replaces the
+  // re-route's questionnaire (fresh resume key, so it is not hidden as
+  // already answered) and stays the tap surface for view/update/fresh.
+  const questionnaire =
+    watchChoice?.outcome === "duplicate" ? watchChoice.card : (routeResult?.questionnaire ?? null);
   const cardKey = questionnaire?.resumeKey ?? null;
   const cardVisible = Boolean(
     questionnaire && cardKey && !submittedAnswers[cardKey] && !dismissedCards.includes(cardKey),
@@ -1443,21 +1272,13 @@ export function AgentDrawer({
                   Answers saved: {formatAnswers(lastSaved.answers)}
                 </p>
               ) : null}
-              {routeResult?.intent === "watch" && threadId ? (
-                canManageWatch ? (
-                  <WatchDispatchForms
-                    defaultProjectId={liveThread?.linkedResearchProjectId ?? null}
-                    watchUpdateAvailable={watchUpdateAvailable}
-                    pending={dispatchLane.isPending}
-                    outcome={dispatchOutcome}
-                    error={dispatchError}
-                    onDispatch={(vars) => dispatchLane.mutate(vars)}
-                  />
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Needs the growth_intelligence.manage grant — enforcement stays server-side.
-                  </p>
-                )
+              {(routeResult?.intent === "watch" || watchChoice) && threadId ? (
+                <WatchOneTapCard
+                  watchChoice={watchChoice}
+                  intentIsWatch={routeResult?.intent === "watch"}
+                  hasQuestionnaire={questionnaire !== null}
+                  canManageWatch={canManageWatch}
+                />
               ) : null}
               {routeResult?.intent === "campaign_advice" || ideaDraft ? (
                 <>

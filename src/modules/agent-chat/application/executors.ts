@@ -8,7 +8,10 @@ import {
   briefRevisionSchema,
   type BriefRevision,
 } from "@/domain/growth-intelligence/brief";
-import { researchProjectScheduleSchema } from "@/domain/growth-intelligence/project";
+import {
+  RESEARCH_PROJECT_CADENCES,
+  researchProjectScheduleSchema,
+} from "@/domain/growth-intelligence/project";
 import { DomainError } from "@/lib/errors";
 import {
   buildAgentContextPack,
@@ -1231,6 +1234,696 @@ export async function executeWatchUpdate(
     replayed: updated.replayed,
     appliedFields,
     scopeFingerprint,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Auto-prepared watches (Task B4: L3 one inline tap to create)
+// ---------------------------------------------------------------------------
+
+/**
+ * Evidence window default for prepared watches. The watch cards carry no
+ * window choice, so every prepared payload resolves against the last 30
+ * days with the assumption stated inline on the envelope — the drawer
+ * renders it beside the receipt, never silently.
+ */
+export const WATCH_EVIDENCE_WINDOW_DAYS = 30 as const;
+
+export const WATCH_EVIDENCE_WINDOW_ASSUMPTION =
+  "Evidence window: last 30 days (default — widen it in Market Intelligence if seasonality needs 60).";
+
+/** Pre-fill defaults: every default lands in `assumptions`, never silently. */
+export const WATCH_DEFAULT_MODE = "recurring" as const;
+export const WATCH_DEFAULT_CADENCE = "weekly" as const;
+export const WATCH_DEFAULT_LOCAL_TIME = "09:00";
+export const WATCH_DEFAULT_TIME_ZONE = "UTC";
+export const WATCH_DEFAULT_INVESTIGATION_AREAS = [
+  "demand",
+  "presence",
+  "offers",
+  "reviews",
+  "observable_performance",
+] as const;
+
+const watchPrefillExplicitSchema = z
+  .object({
+    /** The operator's ask — the routing note's question, never invented. */
+    question: z.string().trim().min(1).max(2000).optional(),
+    title: z.string().trim().min(1).max(200).optional(),
+    mode: z.enum(["one-time", "recurring"]).optional(),
+    cadence: z.enum(RESEARCH_PROJECT_CADENCES).optional(),
+    /** Branch uuid or branch name from the card; resolved against live rows. */
+    branch: z.string().trim().min(1).max(200).optional(),
+    researchArea: z.string().trim().min(1).max(160).optional(),
+    competitorName: z.string().trim().min(1).max(160).optional(),
+    endDate: calendarDateSchema.optional(),
+  })
+  .strict();
+
+const watchPrefillPackSchema = z
+  .object({
+    branchTimezone: z.string().trim().min(1).max(100).optional(),
+    competitors: z.array(watchCompetitorSchema).max(20).optional(),
+  })
+  .strict();
+
+const watchBranchRowSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string().trim().min(1).max(200),
+  })
+  .strict();
+
+/**
+ * Deterministic branch binding (no invention, ever): a uuid answer binds
+ * only a live row, a name answer binds only a unique case-insensitive
+ * match, and silence binds only when the organization holds exactly one
+ * branch — with the assumption stated. Anything else refuses, and
+ * malformed rows are skipped, never papered over.
+ */
+export function resolveWatchBranchId(
+  rows: unknown,
+  answer?: string,
+): { ok: true; branchId: string; assumption: string | null } | { ok: false } {
+  const usable = (Array.isArray(rows) ? rows : []).flatMap((row) => {
+    const parsed = watchBranchRowSchema.safeParse(row);
+    return parsed.success ? [parsed.data] : [];
+  });
+  const trimmed = answer?.trim() ?? "";
+  if (trimmed.length > 0) {
+    if (z.string().uuid().safeParse(trimmed).success) {
+      const hit = usable.find((row) => row.id.toLowerCase() === trimmed.toLowerCase());
+      return hit ? { ok: true, branchId: hit.id, assumption: null } : { ok: false };
+    }
+    const named = usable.filter(
+      (row) => row.name.trim().toLowerCase() === trimmed.toLowerCase(),
+    );
+    return named.length === 1 && named[0]
+      ? { ok: true, branchId: named[0].id, assumption: null }
+      : { ok: false };
+  }
+  if (usable.length === 1 && usable[0]) {
+    return {
+      ok: true,
+      branchId: usable[0].id,
+      assumption: `Bound automatically — only one branch in this organization (“${usable[0].name}”).`,
+    };
+  }
+  return { ok: false };
+}
+
+const preparedWatchPayloadSchema = z
+  .object({
+    branchId: z.string().uuid(),
+    title: z.string().trim().min(1).max(200),
+    question: z.string().trim().min(1).max(2000),
+    mode: z.enum(["one-time", "recurring"]),
+    schedule: researchProjectScheduleSchema.optional(),
+    researchArea: z.string().trim().min(1).max(160),
+    competitors: z.array(watchCompetitorSchema).max(20),
+    investigationAreas: z.array(z.enum(BRIEF_INVESTIGATION_AREAS)).min(1).max(5),
+  })
+  .strict();
+
+export type PreparedWatchPayload = z.infer<typeof preparedWatchPayloadSchema>;
+
+export type PrepareWatchCreateResult =
+  | {
+      ok: true;
+      payload: PreparedWatchPayload;
+      assumptions: string[];
+      evidenceWindowDays: typeof WATCH_EVIDENCE_WINDOW_DAYS;
+    }
+  | {
+      ok: false;
+      missing: Array<"question" | "branch" | "researchArea">;
+      copy: string;
+    };
+
+const PREPARE_MISSING_LABEL: Record<"question" | "branch" | "researchArea", string> = {
+  question: "the watch question",
+  branch: "the branch",
+  researchArea: "the research area",
+};
+
+/**
+ * Merges card answers (explicit, wins) with pack context into a complete
+ * watch-create payload behind the single confirm tap. Cadence, branch,
+ * areas, and competitors pre-fill from the routing note plus the pack;
+ * every default is stated in `assumptions`. The question, branch, and
+ * research area are never invented: silence or ambiguity there returns
+ * the named missing fields instead of a payload.
+ */
+export function prepareWatchCreate(
+  explicitInput: unknown,
+  contextInput: unknown,
+): PrepareWatchCreateResult {
+  const explicit = watchPrefillExplicitSchema.parse(explicitInput);
+  const context = z
+    .object({ branchRows: z.unknown(), pack: watchPrefillPackSchema.optional() })
+    .strict()
+    .parse(contextInput);
+
+  const missing: Array<"question" | "branch" | "researchArea"> = [];
+  const question = explicit.question?.trim() ? explicit.question.trim() : null;
+  if (!question) missing.push("question");
+  const branch = resolveWatchBranchId(context.branchRows, explicit.branch);
+  if (!branch.ok) missing.push("branch");
+  const researchArea = explicit.researchArea?.trim() ? explicit.researchArea.trim() : null;
+  if (!researchArea) missing.push("researchArea");
+  if (missing.length > 0 || !question || !branch.ok || !researchArea) {
+    const labels = missing.map((field) => PREPARE_MISSING_LABEL[field]).join(", ");
+    return {
+      ok: false,
+      missing,
+      copy: `Still needed: ${labels}. Send them as a message — the next card creates the watch in one tap.`,
+    };
+  }
+
+  const assumptions: string[] = [];
+  const mode = explicit.mode ?? WATCH_DEFAULT_MODE;
+  if (!explicit.mode) {
+    assumptions.push("Recurring watch (default — keeps monitoring until the end date).");
+  }
+  const cadence = explicit.cadence ?? WATCH_DEFAULT_CADENCE;
+  if (!explicit.cadence) {
+    assumptions.push("Weekly cadence (default — change it on the card or in Market Intelligence).");
+  }
+  const localTime = WATCH_DEFAULT_LOCAL_TIME;
+  assumptions.push("Runs at 09:00 branch time (default).");
+  const packTimeZone = context.pack?.branchTimezone?.trim() || null;
+  const timeZone = packTimeZone ?? WATCH_DEFAULT_TIME_ZONE;
+  if (!packTimeZone) {
+    assumptions.push("Times in UTC (default — no branch timezone on file).");
+  }
+  if (branch.assumption) assumptions.push(branch.assumption);
+
+  const competitors = [...(context.pack?.competitors ?? [])];
+  const cardCompetitor = explicit.competitorName?.trim() || null;
+  if (
+    cardCompetitor &&
+    !competitors.some((entry) => normalizeCompetitorName(entry.name) === normalizeCompetitorName(cardCompetitor))
+  ) {
+    // The operator named it — the truthful source is `operator_lead`.
+    competitors.push({ name: cardCompetitor, source: "operator_lead" });
+  }
+  if (competitors.length === 0) {
+    assumptions.push("No competitors pre-filled — add them in Market Intelligence.");
+  }
+  assumptions.push("Watching all five investigation areas (default).");
+  assumptions.push(WATCH_EVIDENCE_WINDOW_ASSUMPTION);
+
+  return {
+    ok: true,
+    payload: {
+      branchId: branch.branchId,
+      title: explicit.title?.trim() ? explicit.title.trim() : deriveWatchTitle(question),
+      question,
+      mode,
+      ...(mode === "recurring"
+        ? {
+            schedule: {
+              cadence,
+              localTime,
+              timeZone,
+              ...(explicit.endDate ? { endDate: explicit.endDate } : {}),
+            },
+          }
+        : {}),
+      researchArea,
+      competitors,
+      investigationAreas: [...WATCH_DEFAULT_INVESTIGATION_AREAS],
+    },
+    assumptions,
+    evidenceWindowDays: WATCH_EVIDENCE_WINDOW_DAYS,
+  };
+}
+
+/**
+ * Deterministic fresh title: the same submit retried replays through its
+ * idempotency key, while a new submit mints a distinct title — and
+ * therefore a distinct scope fingerprint, as the spec requires for a
+ * second watch. The salt hashes the whole key (a tail slice would repeat
+ * the lane suffix, looping every later fresh tap back to duplicate). The
+ * base truncates so the cap always holds.
+ */
+export function freshWatchTitleFor(title: string, idempotencyKey: string): string {
+  const cleanTitle = z.string().trim().min(1).max(200).parse(title);
+  const key = z.string().trim().min(1).max(200).parse(idempotencyKey);
+  const salt = messageDigestFor({ threadId: "fresh-watch", messageId: title, body: key }).slice(
+    0,
+    6,
+  );
+  const suffix = ` (fresh ${salt})`;
+  const base =
+    cleanTitle.length + suffix.length > 200
+      ? cleanTitle.slice(0, 200 - suffix.length).trimEnd()
+      : cleanTitle;
+  return `${base}${suffix}`;
+}
+
+const watchCandidateRowSchema = z
+  .object({
+    projectId: z.string().trim().min(1).max(200),
+    question: z.string().trim().min(1).max(2000),
+    branchId: z.string().trim().min(1).max(200).optional(),
+  })
+  .passthrough();
+
+/**
+ * Server-side candidate binding for the duplicate choice: the unique live
+ * project asking the same question (narrowed by branch when resolved).
+ * Exactly one binds — zero or several bind nothing, and malformed rows
+ * are skipped. The card's echoed project id is never trusted.
+ */
+export function matchWatchCandidate(siblings: unknown, filters: unknown): string | null {
+  const parsed = z
+    .object({
+      question: z.string().trim().min(1).max(2000),
+      branchId: z.string().trim().min(1).max(200).optional(),
+    })
+    .strict()
+    .parse(filters);
+  const wanted = parsed.question.trim();
+  const matches = (Array.isArray(siblings) ? siblings : []).flatMap((row) => {
+    const candidate = watchCandidateRowSchema.safeParse(row);
+    if (!candidate.success) return [];
+    if (candidate.data.question.trim() !== wanted) return [];
+    if (parsed.branchId && candidate.data.branchId !== parsed.branchId) return [];
+    return [candidate.data.projectId];
+  });
+  return matches.length === 1 && matches[0] ? matches[0] : null;
+}
+
+// ---------------------------------------------------------------------------
+// Choice to instant watch (the inverted executor, campaign mirror)
+// ---------------------------------------------------------------------------
+
+export const DUPLICATE_WATCH_CHOICE_VALUES = [
+  "view_existing",
+  "update_fields",
+  "start_fresh",
+  "cancel",
+] as const;
+
+export type DuplicateWatchChoice = (typeof DUPLICATE_WATCH_CHOICE_VALUES)[number];
+
+const watchCardEditsSchema = z
+  .object({
+    frequency: z.enum(BRIEF_FREQUENCIES).optional(),
+    endDate: calendarDateSchema.nullable().optional(),
+    branchId: z.string().uuid().optional(),
+    researchArea: z.string().trim().min(1).max(160).optional(),
+    competitorName: z.string().trim().min(1).max(160).optional(),
+  })
+  .strict();
+
+export type WatchCardEdits = z.infer<typeof watchCardEditsSchema>;
+
+const watchChoiceLinksSchema = z
+  .object({
+    projectId: z.string().trim().min(1).max(200).optional(),
+    requestId: z.string().trim().min(1).max(200).optional(),
+    draftRequestId: z.string().trim().min(1).max(200).optional(),
+    campaignId: z.string().trim().min(1).max(200).optional(),
+  })
+  .strict();
+
+const requestWatchFromChoiceInputSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    actorId: z.string().trim().min(1).max(200),
+    threadId: z.string().trim().min(1).max(200),
+    idempotencyKey: z.string().trim().min(16).max(200),
+    choice: z.enum(DUPLICATE_WATCH_CHOICE_VALUES),
+    /** Caller-derived grants, never client claims — the route recomputes these from the role. */
+    permissions: z.array(z.string().trim().min(1).max(120)).default([]),
+    /** Required for `start_fresh`; view/update/cancel never touch it. */
+    prepared: preparedWatchPayloadSchema.optional(),
+    assumptions: z.array(z.string().trim().min(1).max(500)).max(30).default([]),
+    /** Server-resolved candidate (question match or thread link), never client-carried. */
+    candidateProjectId: z.string().uuid().nullable().default(null),
+    cardEdits: watchCardEditsSchema.optional(),
+    /**
+     * Sibling link ids already on the thread. The `set_thread_links` RPC
+     * overwrites all four columns, so these ride along with the new
+     * project id — posting it alone would silently wipe the rest.
+     */
+    existingLinks: watchChoiceLinksSchema.optional(),
+  })
+  .strict();
+
+export type RequestWatchFromChoiceInput = z.input<typeof requestWatchFromChoiceInputSchema>;
+
+export type WatchChoiceSeams = {
+  watchProjects?: {
+    listActive?: WatchProjectSeams["listActive"];
+    createKeyed?: WatchProjectSeams["createKeyed"];
+    readProject?: (input: {
+      organizationId: string;
+      projectId: string;
+    }) => Promise<WatchUpdateProject | null>;
+    readBrief?: (input: {
+      organizationId: string;
+      projectId: string;
+    }) => Promise<BriefRevision | null>;
+    updateWatch?: (
+      input: Parameters<NonNullable<WatchUpdateSeams["updateWatch"]>>[0],
+    ) => Promise<{ projectId: string; revisionNumber: number | null; replayed: boolean }>;
+  };
+  links?: {
+    setThreadLinks(input: {
+      organizationId: string;
+      actorId: string;
+      threadId: string;
+      projectId: string;
+      requestId?: string;
+      draftRequestId?: string;
+      campaignId?: string;
+    }): Promise<unknown>;
+  };
+};
+
+export type WatchChoiceOutcome =
+  | { outcome: "blocked"; reasonCode: "WATCH_REQUIRES_MANAGE"; copy: string }
+  | { outcome: "cancelled" }
+  | {
+      outcome: "view_existing";
+      projectId: string | null;
+      link: ReturnType<typeof giResearchLink>;
+    }
+  | {
+      outcome: "created" | "replayed";
+      projectId: string;
+      replayed: boolean;
+      scopeFingerprint: string;
+      link: ReturnType<typeof giResearchLink>;
+      assumptions: string[];
+      evidenceWindowDays: typeof WATCH_EVIDENCE_WINDOW_DAYS;
+    }
+  | {
+      outcome: "duplicate";
+      candidates: WatchCandidate[];
+      card: QuestionnaireSpec;
+      scopeFingerprint: string;
+    }
+  | {
+      outcome: "updated";
+      projectId: string;
+      revisionNumber: number | null;
+      replayed: boolean;
+      appliedFields: string[];
+      scopeFingerprint: string;
+      link: ReturnType<typeof giResearchLink>;
+    }
+  | {
+      outcome: "profile_scope_change";
+      projectId: string;
+      widening: ScopeWidening;
+      proposal: { addedCompetitors: string[]; addedTopics: string[]; researchArea: string | null };
+    }
+  | {
+      outcome: "update_blocked";
+      projectId: string | null;
+      reasonCode: "WATCH_UPDATE_NO_CANDIDATE" | "WATCH_UPDATE_UNREADABLE" | "WATCH_UPDATE_UNAVAILABLE";
+      copy: string;
+    };
+
+/**
+ * Duplicate choice to instant watch. The choice submit calls the watch
+ * seams immediately — no form round-trip, no dispatch indirection — under
+ * a deterministic thread-linked idempotency key, so retries replay
+ * instead of double-posting. The choice itself stays human judgment:
+ * view navigates, cancel drops, fresh mints a second project with a
+ * distinct fingerprint, and update applies in-place edits (or proposes a
+ * Market Profile change when the edits widen scope). Fences hold: there
+ * is no approve seam, no publish seam, no spend seam anywhere in this
+ * lane — a tap creates or re-points a watch, nothing more.
+ */
+export async function requestWatchFromChoice(
+  input: RequestWatchFromChoiceInput,
+  seams: WatchChoiceSeams = {},
+): Promise<WatchChoiceOutcome> {
+  const parsed = requestWatchFromChoiceInputSchema.parse(input);
+  if (!parsed.permissions.includes("growth_intelligence.manage")) {
+    return {
+      outcome: "blocked",
+      reasonCode: "WATCH_REQUIRES_MANAGE",
+      copy: "Watch changes need the growth_intelligence.manage grant.",
+    };
+  }
+
+  switch (parsed.choice) {
+    case "cancel":
+      return { outcome: "cancelled" };
+    case "view_existing":
+      return {
+        outcome: "view_existing",
+        projectId: parsed.candidateProjectId,
+        link: giResearchLink(
+          parsed.organizationId,
+          parsed.candidateProjectId ? { projectId: parsed.candidateProjectId } : {},
+        ),
+      };
+    case "start_fresh": {
+      if (!parsed.prepared) {
+        throw new DomainError("VALIDATION_ERROR", "Please check the submitted fields.");
+      }
+      const listActive = seams.watchProjects?.listActive;
+      const createKeyed = seams.watchProjects?.createKeyed;
+      if (!listActive || !createKeyed) {
+        throw new DomainError("DOMAIN_ERROR", "Watch dispatch is not wired for this chat.");
+      }
+      const created = await executeWatchCreate(
+        {
+          organizationId: parsed.organizationId,
+          actorId: parsed.actorId,
+          branchId: parsed.prepared.branchId,
+          title: freshWatchTitleFor(parsed.prepared.title, parsed.idempotencyKey),
+          question: parsed.prepared.question,
+          mode: parsed.prepared.mode,
+          ...(parsed.prepared.schedule ? { schedule: parsed.prepared.schedule } : {}),
+          researchArea: parsed.prepared.researchArea,
+          competitors: parsed.prepared.competitors,
+          investigationAreas: parsed.prepared.investigationAreas,
+          idempotencyKey: parsed.idempotencyKey,
+        },
+        { listActive, createKeyed },
+      );
+      if (created.outcome === "duplicate") {
+        return created;
+      }
+      if (seams.links) {
+        const links = watchChoiceLinksSchema.parse(parsed.existingLinks ?? {});
+        await seams.links.setThreadLinks({
+          organizationId: parsed.organizationId,
+          actorId: parsed.actorId,
+          threadId: parsed.threadId,
+          projectId: created.projectId,
+          ...links,
+        });
+      }
+      return {
+        outcome: created.outcome,
+        projectId: created.projectId,
+        replayed: created.replayed,
+        scopeFingerprint: created.scopeFingerprint,
+        link: created.link,
+        assumptions: parsed.assumptions,
+        evidenceWindowDays: WATCH_EVIDENCE_WINDOW_DAYS,
+      };
+    }
+    case "update_fields": {
+      if (!parsed.candidateProjectId) {
+        return {
+          outcome: "update_blocked",
+          projectId: null,
+          reasonCode: "WATCH_UPDATE_NO_CANDIDATE",
+          copy: "No matching active watch was found — it may have been archived.",
+        };
+      }
+      const readProject = seams.watchProjects?.readProject;
+      const readBrief = seams.watchProjects?.readBrief;
+      const [project, brief] = await Promise.all([
+        readProject?.({
+          organizationId: parsed.organizationId,
+          projectId: parsed.candidateProjectId,
+        }) ?? null,
+        readBrief?.({
+          organizationId: parsed.organizationId,
+          projectId: parsed.candidateProjectId,
+        }) ?? null,
+      ]);
+      if (!project || !brief) {
+        return {
+          outcome: "update_blocked",
+          projectId: parsed.candidateProjectId,
+          reasonCode: "WATCH_UPDATE_UNREADABLE",
+          copy: "This watch could not be loaded; nothing was changed.",
+        };
+      }
+      const cardEdits = watchCardEditsSchema.parse(parsed.cardEdits ?? {});
+      const edits: WatchUpdateEdits = {
+        ...(cardEdits.frequency ? { frequency: cardEdits.frequency } : {}),
+        ...(cardEdits.endDate !== undefined ? { endDate: cardEdits.endDate } : {}),
+        ...(cardEdits.branchId ? { branchId: cardEdits.branchId } : {}),
+        ...(cardEdits.researchArea ? { researchArea: cardEdits.researchArea } : {}),
+        ...(cardEdits.competitorName
+          ? { competitors: [{ name: cardEdits.competitorName, source: "operator_lead" as const }] }
+          : {}),
+      };
+      const updateWatch = seams.watchProjects?.updateWatch;
+      const result = await executeWatchUpdate(
+        {
+          organizationId: parsed.organizationId,
+          actorId: parsed.actorId,
+          projectId: parsed.candidateProjectId,
+          project,
+          brief,
+          edits,
+          idempotencyKey: parsed.idempotencyKey,
+        },
+        updateWatch ? { updateWatch } : {},
+      );
+      if (result.outcome === "profile_scope_change") {
+        return result;
+      }
+      if (result.outcome === "update_blocked") {
+        return {
+          outcome: "update_blocked",
+          projectId: result.projectId,
+          reasonCode: result.reasonCode,
+          copy: result.copy,
+        };
+      }
+      if (seams.links) {
+        const links = watchChoiceLinksSchema.parse(parsed.existingLinks ?? {});
+        await seams.links.setThreadLinks({
+          organizationId: parsed.organizationId,
+          actorId: parsed.actorId,
+          threadId: parsed.threadId,
+          projectId: result.projectId,
+          ...links,
+        });
+      }
+      return {
+        outcome: "updated",
+        projectId: result.projectId,
+        revisionNumber: result.revisionNumber,
+        replayed: result.replayed,
+        appliedFields: result.appliedFields,
+        scopeFingerprint: result.scopeFingerprint,
+        link: giResearchLink(parsed.organizationId, { projectId: result.projectId }),
+      };
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Prepared create behind a missing-fields submit (no duplicate prelude)
+// ---------------------------------------------------------------------------
+
+const createPreparedWatchInputSchema = z
+  .object({
+    organizationId: z.string().uuid(),
+    actorId: z.string().trim().min(1).max(200),
+    threadId: z.string().trim().min(1).max(200),
+    idempotencyKey: z.string().trim().min(16).max(200),
+    /** Caller-derived grants, never client claims — the route recomputes these from the role. */
+    permissions: z.array(z.string().trim().min(1).max(120)).default([]),
+    prepared: preparedWatchPayloadSchema,
+    assumptions: z.array(z.string().trim().min(1).max(500)).max(30).default([]),
+    existingLinks: watchChoiceLinksSchema.optional(),
+  })
+  .strict();
+
+export type CreatePreparedWatchInput = z.input<typeof createPreparedWatchInputSchema>;
+
+export type CreatePreparedWatchSeams = {
+  watchProjects: Pick<NonNullable<WatchChoiceSeams["watchProjects"]>, "listActive" | "createKeyed">;
+  links?: WatchChoiceSeams["links"];
+};
+
+export type CreatePreparedWatchOutcome = Extract<
+  WatchChoiceOutcome,
+  { outcome: "blocked" | "created" | "replayed" | "duplicate" }
+>;
+
+/**
+ * The tap needs more before anything can run: pre-fill could not bind the
+ * question, branch, or research area, and none of the three is ever
+ * invented. The drawer renders the copy and the missing fields; the
+ * operator answers with a message and the next card taps through.
+ */
+export type WatchNeedsInput = {
+  outcome: "needs_input";
+  missing: Array<"question" | "branch" | "researchArea">;
+  copy: string;
+};
+
+/** Everything the answers route may return behind a watch tap. */
+export type WatchTapOutcome = WatchChoiceOutcome | WatchNeedsInput;
+
+/**
+ * Creates a prepared watch behind a single missing-fields submit. A twin
+ * (or same-fingerprint sibling) converges to the duplicate card instead
+ * of forking — the drawer's tap surface stays the duplicate choice, and
+ * the returned card carries the live candidates.
+ */
+export async function createPreparedWatch(
+  input: CreatePreparedWatchInput,
+  seams: CreatePreparedWatchSeams,
+): Promise<CreatePreparedWatchOutcome> {
+  const parsed = createPreparedWatchInputSchema.parse(input);
+  if (!parsed.permissions.includes("growth_intelligence.manage")) {
+    return {
+      outcome: "blocked",
+      reasonCode: "WATCH_REQUIRES_MANAGE",
+      copy: "Watch changes need the growth_intelligence.manage grant.",
+    };
+  }
+  const listActive = seams.watchProjects.listActive;
+  const createKeyed = seams.watchProjects.createKeyed;
+  if (!listActive || !createKeyed) {
+    throw new DomainError("DOMAIN_ERROR", "Watch dispatch is not wired for this chat.");
+  }
+  const created = await executeWatchCreate(
+    {
+      organizationId: parsed.organizationId,
+      actorId: parsed.actorId,
+      branchId: parsed.prepared.branchId,
+      title: parsed.prepared.title,
+      question: parsed.prepared.question,
+      mode: parsed.prepared.mode,
+      ...(parsed.prepared.schedule ? { schedule: parsed.prepared.schedule } : {}),
+      researchArea: parsed.prepared.researchArea,
+      competitors: parsed.prepared.competitors,
+      investigationAreas: parsed.prepared.investigationAreas,
+      idempotencyKey: parsed.idempotencyKey,
+    },
+    { listActive, createKeyed },
+  );
+  if (created.outcome === "duplicate") {
+    return created;
+  }
+  if (seams.links) {
+    const links = watchChoiceLinksSchema.parse(parsed.existingLinks ?? {});
+    await seams.links.setThreadLinks({
+      organizationId: parsed.organizationId,
+      actorId: parsed.actorId,
+      threadId: parsed.threadId,
+      projectId: created.projectId,
+      ...links,
+    });
+  }
+  return {
+    outcome: created.outcome,
+    projectId: created.projectId,
+    replayed: created.replayed,
+    scopeFingerprint: created.scopeFingerprint,
+    link: created.link,
+    assumptions: parsed.assumptions,
+    evidenceWindowDays: WATCH_EVIDENCE_WINDOW_DAYS,
   };
 }
 

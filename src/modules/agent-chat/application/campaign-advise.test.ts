@@ -6,6 +6,8 @@ import {
   buildCampaignMarkerReceipts,
   buildIdeasSynthesisPrompt,
   buildPrefilledBriefUrl,
+  CAMPAIGN_EVIDENCE_WINDOW_ASSUMPTION,
+  CAMPAIGN_EVIDENCE_WINDOW_DEFAULT_DAYS,
   campaignBundleLink,
   campaignIdeasCandidateSchema,
   checkCampaignAdviceEligibility,
@@ -807,5 +809,91 @@ describe("draft-opportunity resolution (fix round: production binding)", () => {
         NOW,
       ).outcome,
     ).toBe("bound");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task B4: auto-prepared drafts behind one tap
+// ---------------------------------------------------------------------------
+
+describe("campaign evidence window default (B4 pre-fill)", () => {
+  it("pins the pick-path window at 30 days with the assumption stated inline", () => {
+    expect(CAMPAIGN_EVIDENCE_WINDOW_DEFAULT_DAYS).toBe(30);
+    expect(CAMPAIGN_EVIDENCE_WINDOW_ASSUMPTION).toMatch(/last 30 days/);
+  });
+
+  it("carries the defaulted window on the pick-to-draft envelope", async () => {
+    const out = await requestDraftFromIdeaPick(ideaPickInput(), seams());
+    expect(out.outcome).toBe("draft_requested");
+    if (out.outcome !== "draft_requested") throw new Error("expected draft_requested");
+    expect(out.evidenceWindow).toEqual({
+      windowDays: 30,
+      assumption: CAMPAIGN_EVIDENCE_WINDOW_ASSUMPTION,
+    });
+  });
+
+  it("carries the defaulted window on the pick-to-brief fallback too", async () => {
+    const seam = seams();
+    const out = await requestDraftFromIdeaPick(
+      { ...ideaPickInput(), permissions: [], opportunity: null },
+      seam,
+    );
+    expect(out.outcome).toBe("brief_prefilled");
+    if (out.outcome !== "brief_prefilled") throw new Error("expected brief_prefilled");
+    expect(out.evidenceWindow).toEqual({
+      windowDays: 30,
+      assumption: CAMPAIGN_EVIDENCE_WINDOW_ASSUMPTION,
+    });
+    expect(seam.drafts.requestDraft).not.toHaveBeenCalled();
+  });
+
+  it("keeps the explicit snapshot window on the advise path with no assumption", async () => {
+    const thirty = await adviseCampaign(eligibleInput(), seams());
+    expect(thirty.outcome).toBe("draft_requested");
+    if (thirty.outcome !== "draft_requested") throw new Error("expected draft_requested");
+    expect(thirty.evidenceWindow).toEqual({ windowDays: 30, assumption: null });
+
+    const sixty = await adviseCampaign(
+      {
+        ...eligibleInput(),
+        evidenceSnapshot: { ...eligibleInput().evidenceSnapshot, windowDays: 60 as const },
+      },
+      seams(),
+    );
+    expect(sixty.outcome).toBe("draft_requested");
+    if (sixty.outcome !== "draft_requested") throw new Error("expected draft_requested");
+    expect(sixty.evidenceWindow).toEqual({ windowDays: 60, assumption: null });
+  });
+});
+
+describe("campaign one-tap invariants (B4)", () => {
+  it("keeps exactly one recommended idea on the card", () => {
+    const spec = buildCampaignIdeasSpec(IDEAS_INPUT);
+    const options = spec.items[0]?.options ?? [];
+    expect(options).toHaveLength(3);
+    expect(options.filter((option) => option.recommended)).toHaveLength(1);
+    // The recommended flag echoes through the pick into the draft outcome.
+    expect(IDEA_PICK.recommended).toBe(true);
+  });
+
+  it("echoes the recommended flag on the draft outcome", async () => {
+    const out = await requestDraftFromIdeaPick(ideaPickInput(), seams());
+    expect(out.outcome).toBe("draft_requested");
+    if (out.outcome !== "draft_requested") throw new Error("expected draft_requested");
+    expect(out.idea.recommended).toBe(true);
+  });
+
+  it("falls back to the prefilled brief on ambiguous opportunity without touching seams", async () => {
+    const seam = seams();
+    const out = await requestDraftFromIdeaPick(
+      { ...ideaPickInput(), opportunity: null, opportunityAmbiguous: true },
+      seam,
+    );
+    expect(out.outcome).toBe("brief_prefilled");
+    if (out.outcome !== "brief_prefilled") throw new Error("expected brief_prefilled");
+    expect(out.reasonCodes).toEqual(["ADVICE_OPPORTUNITY_AMBIGUOUS"]);
+    expect(out.briefUrl).toContain("ADVICE_OPPORTUNITY_AMBIGUOUS");
+    expect(seam.drafts.requestDraft).not.toHaveBeenCalled();
+    expect(seam.links.setThreadLinks).not.toHaveBeenCalled();
   });
 });
