@@ -759,6 +759,57 @@ describe("routeLatest synthesize step", () => {
     expect(out.answer?.replayed).toBe(false);
   });
 
+  it("degrades an unavailable turn read to synthesize-once instead of failing the submit", async () => {
+    // Lane-gate reality (fix round 2): the peer answers-route mocks predate
+    // the G3 pre-append read and carry no `listMessages` — those submits
+    // must 201 via one synthesis, never 500 on the missing read. A throwing
+    // reader lands in the same catch, so the missing method pins both.
+    const threads = mockThreads({
+      listMessages: undefined as unknown as ReturnType<typeof vi.fn>,
+    });
+    const synthesize = vi.fn(async () => ({
+      body: "Stored context says hello.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    }));
+    const service = routeService(threads, synthesize);
+    const out = await service.submitAnswers({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      spec: {
+        kind: "missing_fields" as const,
+        title: "One more detail",
+        resumeKey: "router:watch:overview:abcdef1234567890",
+        items: [
+          {
+            key: "frequency",
+            label: "How often?",
+            kind: "single_select" as const,
+            required: true,
+            options: [
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+            ],
+          },
+        ],
+      },
+      answers: { frequency: "weekly" },
+      idempotencyKey: "answers-key-0000000000000005",
+      page: "overview",
+    });
+    expect(out.answer?.draft.body).toMatch(/stored context/i);
+    expect(synthesize).toHaveBeenCalledTimes(1);
+    const assistantCalls = threads.__appendMessageKeyed.mock.calls.filter(
+      (call) => (call[0] as { role: string }).role === "assistant",
+    );
+    expect(assistantCalls).toHaveLength(1);
+    expect(out.answer?.message?.role).toBe("assistant");
+    expect(out.answer?.replayed).toBe(false);
+  });
+
   it("returns the kept row on idempotent answers replay", async () => {
     const threads = mockThreads();
     const synthesize = vi.fn(async () => ({

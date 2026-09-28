@@ -1190,12 +1190,26 @@ export function createThreadService(deps: ThreadServiceDeps) {
       // G3 honest skip: read the turn before appending, so the re-route
       // below reuses the turn's existing assistant row (when the initial
       // route already synthesized one) instead of appending a second.
-      const history = await deps.threads.listMessages({
-        organizationId: input.organizationId,
-        threadId: input.threadId,
-        limit: 50,
-      });
-      const keptTurnRow = findTurnAssistantRow(history.messages);
+      // The read never fails the submit: an unavailable history (a throwing
+      // reader, or a caller mock that predates this read) degrades to "no
+      // reusable row", and the re-route synthesizes once as before.
+      let keptTurnRow: ThreadMessageView | null = null;
+      try {
+        const history = await deps.threads.listMessages({
+          organizationId: input.organizationId,
+          threadId: input.threadId,
+          limit: 50,
+        });
+        keptTurnRow = findTurnAssistantRow(history.messages);
+      } catch (error) {
+        logger.warn("agent_thread.turn_read_degraded", {
+          organizationId: input.organizationId,
+          threadId: input.threadId,
+          ...(deps.correlationId ? { correlationId: deps.correlationId } : {}),
+          errorCode: error instanceof Error ? error.name : "unknown",
+        });
+        keptTurnRow = null;
+      }
       const appended = await deps.threads.appendMessageKeyed({
         organizationId: input.organizationId,
         actorId: input.actorId,
