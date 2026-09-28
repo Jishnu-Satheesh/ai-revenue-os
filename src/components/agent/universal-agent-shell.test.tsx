@@ -86,6 +86,23 @@ function mockAgentFetch(
     if (target.includes("/messages") && method === "GET") {
       return Response.json({ messages: [USER_MESSAGE], nextCursor: null, correlationId: "c5" });
     }
+    // G1: the drawer surfaces a stream-open failure, so the shell mock
+    // serves a valid end-only stream — only the send pipeline is asserted.
+    if (target.includes("/stream") && method === "GET") {
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              'event: end\ndata: {"messageId":"88888888-8888-4888-8888-888888888888","replayed":true,"fallback":false,"reason":null,"draft":{},"correlationId":"99999999-9999-4999-8999-999999999999"}\n\n',
+            ),
+          );
+          controller.close();
+        },
+      });
+      return new Response(body, {
+        headers: { "Content-Type": "text/event-stream", "x-correlation-id": "cs" },
+      });
+    }
     if (target.includes("/agent/threads") && method === "GET") {
       return Response.json({ threads: [THREAD], nextCursor: null, correlationId: "c4" });
     }

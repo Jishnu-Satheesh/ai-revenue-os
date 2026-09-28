@@ -271,6 +271,17 @@ const agentStreamEndSchema = z.object({
 export const AGENT_STREAM_DROP_NOTE =
   "The live answer stopped here — showing what arrived so far.";
 
+/** Honest copy when the live answer stream never opens (G1). */
+export const AGENT_STREAM_OPEN_ERROR =
+  "The live answer could not start. Your message was stored — the reply will appear when the conversation reloads.";
+
+/**
+ * Honest copy when a post-send durable read fails (G1: messages refresh or
+ * thread poll). Call-agnostic — whichever turn call fails lands here.
+ */
+export const AGENT_REFRESH_ERROR =
+  "Could not refresh the conversation. Your messages are stored — try reopening the thread.";
+
 type AgentStreamPhase = "connecting" | "live" | "dropped";
 type AgentLiveStream = { key: number; phase: AgentStreamPhase; text: string };
 
@@ -1053,8 +1064,11 @@ export function AgentDrawer({
         );
       });
     } catch {
-      // The send already succeeded; a failed refresh keeps the local rows
-      // and the next reopen replays the durable read.
+      // G1: a failed refresh is a visible failure, never a silent keep of
+      // the local rows — the steps below turn terminal through sendError
+      // instead of sticking on Thinking. Local rows stay mounted.
+      setSendError(AGENT_REFRESH_ERROR);
+      setAnnouncement("Could not refresh the conversation.");
     }
   }
 
@@ -1175,15 +1189,17 @@ export function AgentDrawer({
       });
     } catch {
       if (controller.signal.aborted || streamKeyRef.current !== key) return;
-      // The stream never opened (auth, tenancy, validation, transport):
-      // partial text keeps its honest note, otherwise fall back to the
-      // durable read — the routed turn's row still renders.
+      // G1: the stream never opened (auth, tenancy, validation, transport).
+      // Partial text keeps its honest note, but the turn still lands in the
+      // error state — the routed turn must never stick on Thinking.
       streamAbortRef.current = null;
       setLiveStream((previous) => {
         if (!previous || previous.key !== key) return previous;
         if (previous.text === "") return null;
         return { ...previous, phase: "dropped" };
       });
+      setSendError(AGENT_STREAM_OPEN_ERROR);
+      setAnnouncement("The live answer could not start. Your message was stored.");
       void refreshMessages(args.threadId);
     }
   }
@@ -1244,9 +1260,44 @@ export function AgentDrawer({
         },
       };
     },
-    onSuccess: ({ thread: row, userMessage, result }) => {
+    onMutate: (vars) => {
+      // G1 honest send: the user's bubble renders on mutate, before the
+      // server round-trip lands. The optimistic row carries the nonce client
+      // key, so the confirm below replaces exactly one row, never doubling.
+      const optimisticId = `optimistic:${vars.nonce}`;
+      const optimisticMessage: ThreadMessageView = {
+        id: optimisticId,
+        threadId: vars.threadId ?? `pending-thread:${vars.nonce}`,
+        role: "user",
+        body: vars.text,
+        questionnaireAnswers: null,
+        markerReceipts: null,
+        citations: null,
+        createdAt: new Date().toISOString(),
+      };
+      setSendError(null);
+      setMessages((previous) =>
+        previous.some((message) => message.id === optimisticId)
+          ? previous
+          : [...previous, optimisticMessage],
+      );
+      onViewChange("thread");
+      return { optimisticId };
+    },
+    onSuccess: ({ thread: row, userMessage, result }, vars, context) => {
       setThread(row);
-      setMessages((previous) => [...previous, userMessage]);
+      // Reconcile by the nonce client key: the optimistic row is replaced
+      // by the durable row, and a durable row already present (e.g. landed
+      // via a refresh first) is never appended twice.
+      const optimisticId =
+        (context as { optimisticId?: string } | undefined)?.optimisticId ??
+        `optimistic:${vars.nonce}`;
+      setMessages((previous) => {
+        const withoutOptimistic = previous.filter((message) => message.id !== optimisticId);
+        return withoutOptimistic.some((message) => message.id === userMessage.id)
+          ? withoutOptimistic
+          : [...withoutOptimistic, userMessage];
+      });
       setRouteResult(result);
       setSendError(null);
       setIdeaDraft(null);
@@ -1263,6 +1314,8 @@ export function AgentDrawer({
       void queryClient.invalidateQueries({ queryKey: ["agent-threads", organizationId] });
     },
     onError: (error) => {
+      // The optimistic bubble stays mounted: the typed text remains visible
+      // beside the failure instead of vanishing with the failed send.
       setSendError(error instanceof Error ? error.message : "Sending failed. Nothing was stored.");
       onViewChange("thread");
       setAnnouncement("Sending failed.");
@@ -1530,17 +1583,23 @@ export function AgentDrawer({
   // A connecting or live stream keeps the run in-flight: steps stay
   // in-progress until the `end` swap or the drop note settles the turn.
   const streamActive = liveStream !== null && liveStream.phase !== "dropped";
-  // The durable swap is the finish line: once an assistant row exists the
-  // final bubble has landed, so every step row goes terminal even when the
-  // checkpoint poll still reads `running` (the stuck-spinner fix). A
-  // `running` thread with no assistant row yet is genuinely in flight, so
-  // it keeps the single narrating row until the row lands.
+  // G1 honest send: EVERY post-send failure lands in the error state —
+  // send, stream open, and answers via sendError; messages refresh via
+  // sendError; the checkpoint poll derived below (self-healing on the next
+  // green tick). Failure outranks routing so no turn sticks on Thinking and
+  // every spinner stops.
+  const pollError = threadPoll.isError ? AGENT_REFRESH_ERROR : null;
+  const turnFailure = sendError ?? pollError;
+  // The durable swap stays the finish line: once an assistant row exists
+  // the final bubble has landed, so steps go terminal even while the poll
+  // still reads `running`; a `running` thread with no assistant row yet is
+  // genuinely in flight and keeps the single narrating row.
   const turnSettled = messages.some((message) => message.role === "assistant");
   const phase: AgentStepPhase =
-    send.isPending || streamActive
-      ? "routing"
-      : sendError
-        ? "error"
+    turnFailure
+      ? "error"
+      : send.isPending || streamActive
+        ? "routing"
         : routeResult || liveThread
           ? liveThread?.status === "running" && !turnSettled
             ? "routing"
@@ -1623,7 +1682,9 @@ export function AgentDrawer({
             <span className="truncate text-sm">{liveThread?.title ?? "New conversation"}</span>
           </span>
           <span className="flex items-center gap-2">
-            {send.isPending || streamActive ? <Spinner aria-hidden="true" /> : null}
+            {!turnFailure && (send.isPending || streamActive) ? (
+              <Spinner aria-hidden="true" />
+            ) : null}
             <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
           </span>
         </Button>
@@ -1722,9 +1783,9 @@ export function AgentDrawer({
               aria-label="Conversation thread"
               className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto pt-2"
             >
-              {sendError ? (
+              {turnFailure ? (
                 <p role="alert" className="text-sm text-destructive">
-                  {sendError}
+                  {turnFailure}
                 </p>
               ) : null}
               {reopen.isPending ? (
@@ -1799,13 +1860,13 @@ export function AgentDrawer({
                 />
               ) : null}
               {!reopen.isPending &&
-              (send.isPending || streamActive || routeResult || liveThread || sendError) ? (
+              (send.isPending || streamActive || routeResult || liveThread || turnFailure) ? (
                 <AgentThreadSteps
                   phase={phase}
                   intent={routeResult?.intent ?? null}
                   reasonCodes={routeResult?.reasonCodes ?? []}
                   thread={liveThread}
-                  error={sendError}
+                  error={turnFailure}
                   growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
                 />
               ) : null}

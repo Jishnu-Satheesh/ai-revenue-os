@@ -72,6 +72,10 @@ type FetchPlan = {
   userMessageBody?: string;
   /** Leave the GET messages read hanging (reopen skeleton coverage). */
   messagesHang?: boolean;
+  /** Fail the GET messages read (G1: messages-refresh 404 coverage). */
+  messagesError?: { status: number; message: string };
+  /** Fail the single-thread checkpoint poll (G1: thread-poll coverage). */
+  threadError?: { status: number; message: string };
   /**
    * Task 3 SSE frames for the GET stream endpoint, delivered one chunk at
    * a time with a macrotask between chunks so token joins are exercised
@@ -81,6 +85,8 @@ type FetchPlan = {
    * durable read, like the pre-streaming pipeline.
    */
   stream?: string[] | "fetch-hang";
+  /** Fail the stream open with an HTTP error (G1: stream-open coverage). */
+  streamFailure?: { status: number; message: string };
 };
 
 function asRouteFailure(value: unknown): { status: number; message: string } | null {
@@ -149,6 +155,12 @@ function mockAgentFetch(plan: FetchPlan = {}) {
     }
     if (target.includes("/messages") && method === "GET") {
       if (plan.messagesHang) return new Promise(() => {});
+      if (plan.messagesError) {
+        return Response.json(
+          { error: { message: plan.messagesError.message, correlationId: "cerr" } },
+          { status: plan.messagesError.status },
+        );
+      }
       return Response.json({
         messages: plan.messages ?? [USER_MESSAGE],
         nextCursor: null,
@@ -159,6 +171,12 @@ function mockAgentFetch(plan: FetchPlan = {}) {
     // send and reads token/done/end frames incrementally.
     if (target.includes("/stream") && method === "GET") {
       if (plan.stream === "fetch-hang") return new Promise<Response>(() => {});
+      if (plan.streamFailure) {
+        return Response.json(
+          { error: { message: plan.streamFailure.message, correlationId: "cerr" } },
+          { status: plan.streamFailure.status },
+        );
+      }
       if (!plan.stream) throw new Error(`unmocked fetch ${method} ${target}`);
       const frames = plan.stream;
       const body = new ReadableStream<Uint8Array>({
@@ -178,6 +196,12 @@ function mockAgentFetch(plan: FetchPlan = {}) {
     // Slice C M9: the checkpoint poll reads the single thread row, never
     // the collection. Matched before the list branch below.
     if (method === "GET" && /\/agent\/threads\/[^/?]+(\?.*)?$/.test(target)) {
+      if (plan.threadError) {
+        return Response.json(
+          { error: { message: plan.threadError.message, correlationId: "cerr" } },
+          { status: plan.threadError.status },
+        );
+      }
       return Response.json({
         thread: plan.thread ?? THREAD,
         correlationId: "c7",
@@ -193,6 +217,14 @@ function mockAgentFetch(plan: FetchPlan = {}) {
     throw new Error(`unmocked fetch ${method} ${target}`);
   });
 }
+
+/**
+ * G1: one valid end-only stream — the turn settles through the durable swap
+ * with no tokens. Tests that are not about stream failure use this so only
+ * their intended call site can fail.
+ */
+const END_ONLY_STREAM =
+  'event: end\ndata: {"messageId":"88888888-8888-4888-8888-888888888888","replayed":true,"fallback":false,"reason":null,"draft":{},"correlationId":"99999999-9999-4999-8999-999999999999"}\n\n';
 
 function Harness({
   view: initialView = "thread",
@@ -357,6 +389,9 @@ describe("send pipeline", () => {
   });
 
   it("lands in the thread view with the user message and routed intent", async () => {
+    // G1: the stream succeeds (end-only), so the turn settles through the
+    // durable swap instead of the stream-open error state.
+    globalThis.fetch = mockAgentFetch({ stream: [END_ONLY_STREAM] }) as never;
     render(<Harness pendingPrompt={sendPrompt()} />);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     const userMessage = within(thread).getByText("What do we know?");
@@ -1528,6 +1563,7 @@ describe("watch one-tap (B4)", () => {
   it("has no manual watch forms: the card submit is the tap, the receipt renders the envelope", async () => {
     globalThis.fetch = mockAgentFetch({
       route: watchRoute,
+      stream: [END_ONLY_STREAM],
       answers: {
         message: ANSWERS_MESSAGE,
         replayed: false,
@@ -2292,6 +2328,7 @@ describe("watch manual fallback (FINAL fix for I-1)", () => {
   it("renders the fallback and dispatches when the one-tap answers submit fails", async () => {
     globalThis.fetch = mockAgentFetchWithDispatch({
       route: watchRoute,
+      stream: [END_ONLY_STREAM],
       answers: { status: 500, message: "tap broke" },
     }) as never;
     const user = userEvent.setup();
@@ -2367,6 +2404,7 @@ describe("watch manual fallback (FINAL fix for I-1)", () => {
   it("keeps the one-tap receipt primary with no fallback when one-tap works", async () => {
     globalThis.fetch = mockAgentFetch({
       route: watchRoute,
+      stream: [END_ONLY_STREAM],
       answers: {
         message: ANSWERS_MESSAGE,
         replayed: false,
@@ -2674,5 +2712,163 @@ describe("movable drawer (F5)", () => {
     fireEvent.pointerMove(window, { clientX: 5000, clientY: 400 });
     fireEvent.pointerUp(window);
     expect(panelOf(section).style.width).toBe("468px");
+  });
+});
+
+describe("optimistic send (G1)", () => {
+  it("shows the user bubble while the route POST still hangs", async () => {
+    globalThis.fetch = mockAgentFetch({ route: "hang" }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    // The bubble renders on mutate, before the server round-trip lands.
+    expect(await within(thread).findByText("What do we know?")).toBeInTheDocument();
+    expect(within(thread).getAllByText("What do we know?")).toHaveLength(1);
+    expect(await screen.findByText(/thinking/i)).toBeInTheDocument();
+  });
+
+  it("replaces the optimistic bubble on confirm, never duplicating it", async () => {
+    globalThis.fetch = mockAgentFetch({ stream: [END_ONLY_STREAM] }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("What do we know?")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(thread).getByText("Understood: Memory answer")).toBeInTheDocument();
+    });
+    expect(within(thread).getAllByText("What do we know?")).toHaveLength(1);
+  });
+
+  it("keeps the typed bubble when the send fails", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: { status: 500, message: "Router exploded." },
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/router exploded/i);
+    const thread = screen.getByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+  });
+});
+
+describe("honest send failures (G1)", () => {
+  function tokenFrame(text: string): string {
+    return `event: token\ndata: ${JSON.stringify({ text })}\n\n`;
+  }
+  const DONE_FRAME = "event: done\ndata: [DONE]\n\n";
+  function endFrame(payload: Record<string, unknown>): string {
+    return `event: end\ndata: ${JSON.stringify(payload)}\n\n`;
+  }
+  const ASSISTANT: ThreadMessageView = {
+    id: "88888888-8888-4888-8888-888888888888",
+    threadId: THREAD.id,
+    role: "assistant",
+    body: "Durable answer with citations.",
+    questionnaireAnswers: null,
+    markerReceipts: null,
+    citations: null,
+    createdAt: "2026-09-25T10:00:03.000Z",
+  };
+
+  async function expectTerminalError(thread: HTMLElement) {
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    const steps = thread.querySelector('[aria-label="Agent run steps"]') as HTMLElement;
+    expect(steps).not.toBeNull();
+    const stepQueries = within(steps);
+    expect(stepQueries.queryByText(/thinking/i)).toBeNull();
+    expect(stepQueries.queryByText(/exploring/i)).toBeNull();
+    expect(steps.querySelector('[data-slot="spinner"]')).toBeNull();
+  }
+
+  it("routes a stream-open failure into the error state with terminal steps", async () => {
+    globalThis.fetch = mockAgentFetch({
+      streamFailure: { status: 500, message: "Stream exploded." },
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("What do we know?")).toBeInTheDocument();
+    await expectTerminalError(thread);
+    expect(screen.getByRole("alert")).toHaveTextContent(/live answer could not start/i);
+  });
+
+  it("routes a messages-refresh 404 into the error state without duplicating the bubble", async () => {
+    globalThis.fetch = mockAgentFetch({
+      stream: [
+        tokenFrame("Hello, "),
+        DONE_FRAME,
+        endFrame({
+          messageId: ASSISTANT.id,
+          replayed: true,
+          fallback: false,
+          reason: null,
+          draft: { body: "Hello, world.", citations: [], limitations: [], estimates: [] },
+          correlationId: "99999999-9999-4999-8999-999999999999",
+        }),
+      ],
+      messagesError: { status: 404, message: "Thread messages not found." },
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("What do we know?")).toBeInTheDocument();
+    await expectTerminalError(thread);
+    expect(screen.getByRole("alert")).toHaveTextContent(/could not refresh the conversation/i);
+    expect(within(thread).getAllByText("What do we know?")).toHaveLength(1);
+  });
+
+  it("routes a thread-poll failure into the error state while keeping durable rows", async () => {
+    globalThis.fetch = mockAgentFetch({
+      stream: [
+        tokenFrame("Hello, "),
+        DONE_FRAME,
+        endFrame({
+          messageId: ASSISTANT.id,
+          replayed: true,
+          fallback: false,
+          reason: null,
+          draft: { body: "Hello, world.", citations: [], limitations: [], estimates: [] },
+          correlationId: "99999999-9999-4999-8999-999999999999",
+        }),
+      ],
+      messages: [USER_MESSAGE, ASSISTANT],
+      threadError: { status: 500, message: "Poll exploded." },
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    await expectTerminalError(thread);
+  });
+
+  it("routes an answers failure into the error state and keeps the card retryable", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: {
+        intent: "research_once",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: UPGRADE,
+        thread: THREAD,
+        correlationId: "c3",
+      },
+      stream: [
+        tokenFrame("Hello, "),
+        DONE_FRAME,
+        endFrame({
+          messageId: ASSISTANT.id,
+          replayed: true,
+          fallback: false,
+          reason: null,
+          draft: { body: "Hello, world.", citations: [], limitations: [], estimates: [] },
+          correlationId: "99999999-9999-4999-8999-999999999999",
+        }),
+      ],
+      messages: [USER_MESSAGE, ASSISTANT],
+      answers: { status: 403, message: "Viewers cannot change this chat." },
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
+    await user.click(screen.getByText("Yes"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/viewers cannot change/i);
+    const thread = screen.getByRole("log", { name: "Conversation thread" });
+    await expectTerminalError(thread);
+    expect(screen.getByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
+    expect(screen.queryByText(/answers saved:/i)).not.toBeInTheDocument();
   });
 });
