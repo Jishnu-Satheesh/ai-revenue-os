@@ -71,25 +71,27 @@ export function AgentThreadSteps({
     intent === "campaign_advice" ||
     thread?.linkedDraftRequestId != null ||
     thread?.linkedCampaignId != null;
-  // A bare `running` status names the lane while the run is in flight, but
-  // it never claims a finished research row on its own — done rows need a
-  // real research signal (intent, DeepThink mode, or a linked project).
+  // A bare `running` status never names a lane: the active row stays honest
+  // (`Thinking…`) until a real lane signal arrives (intent, DeepThink mode,
+  // or a linked project). It also never claims a finished research row on
+  // its own — done rows need the same real research signal.
   const researchLane =
     intent === "research_once" ||
     intent === "watch" ||
     thread?.mode === "deepthink" ||
     thread?.linkedResearchProjectId != null;
-  const researchSignals = researchLane || thread?.status === "running";
 
   // One thing at a time: the single in-progress row names the lane that
-  // owns the turn — the draft lane, the research lane, the memory check, or
-  // the bare classify before the route answers. Never two spinners.
+  // owns the turn — the draft lane, the research lane (real signal only),
+  // the memory check, or the bare classify before the route answers. A bare
+  // `running` poll with no lane signal stays `Thinking…`, never
+  // `Researching…`. Never two spinners.
   const activeLabel =
     phase !== "routing"
       ? null
       : draftSignals
         ? "Preparing draft…"
-        : researchSignals
+        : researchLane
           ? "Researching…"
           : intent === "answer_memory"
             ? "Checking organization memory…"

@@ -1033,6 +1033,9 @@ describe("thread checkpoint polling", () => {
     render(<Harness view="thread" threadId={THREAD.id} />);
     const steps = await screen.findByLabelText("Agent run steps");
     expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(1);
+    // Bare `running` with no lane signal stays honest: Thinking, never Researching.
+    expect(within(steps).getByText("Thinking…")).toBeInTheDocument();
+    expect(within(steps).queryByText("Researching…")).toBeNull();
     expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
   });
 

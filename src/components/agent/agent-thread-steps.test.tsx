@@ -124,6 +124,24 @@ describe("narrating steps (F4)", () => {
     expect(within(done).queryByText(/research complete/i)).toBeNull();
   });
 
+  it("stays honest on bare running: Thinking, never Researching", () => {
+    const running: ThreadSummary = { ...THREAD, status: "running" };
+    render(<AgentThreadSteps phase="routing" thread={running} />);
+    const region = stepsRegion();
+    expect(statusMarkers()).toHaveLength(1);
+    expect(within(region).getByText("Thinking…")).toBeInTheDocument();
+    expect(within(region).queryByText("Researching…")).toBeNull();
+  });
+
+  it("keeps the memory lane reachable while the thread still reads running", () => {
+    const running: ThreadSummary = { ...THREAD, status: "running" };
+    render(<AgentThreadSteps phase="routing" intent="answer_memory" thread={running} />);
+    const region = stepsRegion();
+    expect(statusMarkers()).toHaveLength(1);
+    expect(within(region).getByText(/checking organization memory/i)).toBeInTheDocument();
+    expect(within(region).queryByText("Researching…")).toBeNull();
+  });
+
   it("styles done rows as side-line rows", () => {
     render(<AgentThreadSteps phase="done" intent="answer_memory" />);
     const done = stepsRegion();
