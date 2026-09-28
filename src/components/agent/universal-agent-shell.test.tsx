@@ -247,8 +247,10 @@ describe("shell", () => {
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: /answer mode/i })).not.toBeInTheDocument();
     });
-    // With the short resting bar, the drawer docks close but detached.
-    expect(screen.getByLabelText("AI agent conversation").className).toMatch(/bottom-22/);
+    // With the short resting bar, the drawer docks close but detached:
+    // in-flow directly above the bar with a small bottom margin (the flow
+    // follows the bar height on its own, no fixed offset needed).
+    expect(screen.getByLabelText("AI agent conversation").className).toMatch(/(^|\s)mb-2(\s|$)/);
     expect(screen.queryByRole("button", { name: /what do we know/i })).not.toBeInTheDocument();
   });
 
@@ -260,6 +262,35 @@ describe("shell", () => {
     expect(await screen.findByText("Thread history")).toBeInTheDocument();
     expect(screen.queryByRole("tab")).toBeNull();
     expect(await screen.findByRole("button", { name: /open new chat/i })).toBeInTheDocument();
+  });
+
+  it("mounts the shell-owned drawer in-flow with the bar so one drag moves both with zero offset", async () => {
+    const user = userEvent.setup();
+    renderShell({ role: "operator", permissions: [] });
+    await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
+    const section = await screen.findByLabelText("AI agent conversation");
+
+    // G5: the shell container already carries the fixed position, the
+    // sidebar offset, the bottom gap, and the unit translate3d. The drawer
+    // section must add none of those itself — a second fixed position
+    // inside the transformed container re-anchors to the container (live:
+    // constant 128px center shift from the doubled sidebar offset, jump on
+    // drag, drawer stranded half off-screen) while the bar stays in-flow.
+    expect(section.className).not.toMatch(/(^|\s)fixed(\s|$)/);
+    expect(section.className).not.toMatch(/bottom-22|bottom-32/);
+    expect(section.className).not.toMatch(/left-/);
+
+    const handle = screen.getByTestId("agent-drawer-drag-handle");
+    fireEvent.pointerDown(handle, { button: 0, clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(window, { clientX: 550, clientY: 470 });
+    fireEvent.pointerUp(window);
+    // Still in-flow after the drag: only the shared container owns a transform.
+    expect(section.className).not.toMatch(/(^|\s)fixed(\s|$)/);
+    expect(section.style.transform).toBe("");
+    const unit = screen
+      .getByPlaceholderText(/ask anything/i)
+      .closest("div.fixed") as HTMLElement;
+    expect(unit.style.transform).toBe("translate3d(50px, -30px, 0)");
   });
 
   it("keeps drawer size and position in shell session memory across close and reopen", async () => {

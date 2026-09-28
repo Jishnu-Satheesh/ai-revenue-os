@@ -1743,11 +1743,26 @@ export function AgentDrawer({
           if (event.key === "Escape") onToggleCollapsed();
         }}
         style={unitStyle}
-        className={cn("dark fixed right-0 flex justify-center px-4", bottomOffset, sidebarOffset)}
+        className={
+          disableUnitTransform
+            ? // Shell-mounted (G5): in-flow directly above the bar in the
+              // shared column, so the container's single translate3d moves
+              // both with zero offset. A second `fixed` position here would
+              // re-anchor to the transformed container (live: the doubled
+              // sidebar offset shifted the drawer 128px off the bar and
+              // stranded it half off-screen). mb-2 keeps the attached-but-
+              // not gap; flow follows the bar height on its own.
+              "dark mb-2 flex w-full justify-center"
+            : cn(
+                "dark fixed right-0 flex justify-center px-4",
+                bottomOffset,
+                sidebarOffset,
+              )
+        }
       >
         <div
           style={panelStyle}
-          className="relative flex h-[34rem] max-h-[calc(100dvh-12rem)] w-[min(44rem,100%)] flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-lg"
+          className="relative flex h-[34rem] max-h-[calc(100dvh-12rem)] w-[min(44rem,100%)] shrink-0 flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-lg"
         >
           <h2 ref={headingRef} tabIndex={-1} className="sr-only">
             AI agent conversation

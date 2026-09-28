@@ -2678,6 +2678,21 @@ describe("movable drawer (F5)", () => {
     expect(panelOf(section).style.height).toBe("574px");
   });
 
+  it("never lets the section flex container squeeze a resized panel", () => {
+    render(<Harness />);
+    const section = screen.getByLabelText("AI agent conversation");
+    const edge = screen.getByTestId("agent-drawer-resize-e");
+    fireEvent.pointerDown(edge, { button: 0, clientX: 800, clientY: 400 });
+    fireEvent.pointerMove(window, { clientX: 900, clientY: 400 });
+    fireEvent.pointerUp(window);
+    expect(panelOf(section).style.width).toBe("804px");
+    // G5: the panel is a flex item of the centering section. Without
+    // shrink-0 a real browser squeezes an explicitly widened panel back
+    // toward the section content width (live: +120px stalled at +32px on a
+    // 1024px viewport), so the east handle reads dead.
+    expect(panelOf(section).className).toMatch(/(^|\s)shrink-0(\s|$)/);
+  });
+
   it("collapses to the strip when a resize would drop height below 12rem", () => {
     render(<Harness />);
     expect(screen.getByLabelText("AI agent conversation")).toBeInTheDocument();
