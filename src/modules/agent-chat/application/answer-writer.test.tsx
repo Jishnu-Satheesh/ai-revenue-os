@@ -644,10 +644,10 @@ describe("routeLatest synthesize step", () => {
 });
 
 describe("AgentResponseMessage", () => {
-  it("renders the answer with citation chips, limitations, and labeled estimates", async () => {
+  it("renders the answer body with markers and labeled estimates, never Sources or Limitations sections (F2 voice)", async () => {
     const pack = await testPack();
     const draft: AnswerDraft = {
-      body: "Weekday demand looks soft in the stored window.",
+      body: "Weekday demand looks soft in the stored window, though economics data isn't ready yet so cost claims stay out.",
       citations: [{ claim: "Confirmed trading name.", sourceId: "f1", digest: pack.digest }],
       limitations: ["Economics data not ready; cost claims stay withheld."],
       estimates: [
@@ -659,13 +659,17 @@ describe("AgentResponseMessage", () => {
         },
       ],
     };
+    const encoded = encodeAnswerBody(draft);
+    // The durable row still carries structured data for history + Task 3.
+    expect(encoded).toMatch(/Sources/);
+    expect(encoded).toMatch(/Limitations/);
     render(
       <AgentResponseMessage
         message={{
           id: "a1",
           threadId: "t1",
           role: "assistant",
-          body: encodeAnswerBody(draft),
+          body: encoded,
           questionnaireAnswers: null,
           markerReceipts: null,
           citations: null,
@@ -674,8 +678,15 @@ describe("AgentResponseMessage", () => {
       />,
     );
     expect(screen.getByText(/weekday demand looks soft/i)).toBeInTheDocument();
-    expect(screen.getByText(/confirmed trading name/i)).toBeInTheDocument();
-    expect(screen.getByText(/economics data not ready/i)).toBeInTheDocument();
+    expect(screen.getByText(/economics data isn't ready yet/i)).toBeInTheDocument();
+    // Citation marker stays; Sources + Limitations sections never render.
+    expect(
+      screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
+    expect(screen.queryByText("Sources")).toBeNull();
+    expect(screen.queryByText("Limitations")).toBeNull();
     expect(screen.getByText("Estimate")).toBeInTheDocument();
     expect(screen.getByText(/\+5% visits \/ week/)).toBeInTheDocument();
     expect(screen.getByText(/weekday covers, last 30 days/)).toBeInTheDocument();
@@ -762,5 +773,108 @@ describe("answer-writer finding D (natural body, no double fallback)", () => {
     expect(draft.citations.map((citation) => citation.claim)).toContain("Confirmed trading name.");
     // New bodies round-trip byte-identical: the legacy strip is a no-op.
     expect(parseAnswerBody(encodeAnswerBody(draft)).body).toBe(draft.body);
+  });
+});
+
+describe("answer-writer chatbot voice (F2)", () => {
+  it("keeps stored context, gaps, and research status as prompt context, never body text", async () => {
+    const pack = await testPack();
+    const { system } = buildSynthesisPrompt(pack, "note", "quick");
+    expect(system).toMatch(/prompt context, never body text/i);
+    expect(system).toMatch(/never mention packs, digests, lanes/i);
+  });
+
+  it("asks for a warm brief voice with gaps voiced inline as one natural sentence", async () => {
+    const pack = await testPack();
+    const { system } = buildSynthesisPrompt(pack, "note", "quick");
+    expect(system).toMatch(/warm brief/i);
+    expect(system).toMatch(/one natural sentence/i);
+  });
+
+  it("still returns structured citations + limitations while the body voices gaps (structured data in, prose out)", async () => {
+    const pack = await testPack();
+    const draft = await writeAnswer(
+      {
+        pack,
+        routingNote: "page=overview\nintent=answer_memory\nconfidence=high",
+        threadId: "t1",
+        mode: "quick",
+      },
+      {
+        synthesize: async () => ({
+          body: "Weekday demand looks soft, though economics data isn't ready yet so cost claims stay out.",
+          citations: [{ claim: "Confirmed trading name.", sourceId: "f1" }],
+          limitations: ["Economics data not ready; cost claims stay withheld."],
+          estimates: [],
+        }),
+      },
+    );
+    // Body voices the gap inline as a sentence.
+    expect(draft.body).toMatch(/economics data isn't ready yet/i);
+    // Structured data still travels encoded in the row.
+    expect(draft.citations.map((citation) => citation.sourceId)).toEqual(["f1"]);
+    expect(draft.limitations.join(" ")).toMatch(/economics/i);
+    const encoded = encodeAnswerBody(draft);
+    expect(encoded).toMatch(/Sources/);
+    expect(encoded).toMatch(/Limitations/);
+  });
+
+  it("voices every fallback case in one warm sentence with no scaffold", async () => {
+    const pack = await testPack();
+    const refused = { ...pack, refused: true };
+    const cases = [
+      {
+        pack: null,
+        reason: "No context pack was bound to this answer.",
+        match: /stays general/i,
+      },
+      {
+        pack: refused,
+        reason: "test reason",
+        match: /too large|no stored evidence/i,
+      },
+      { pack, reason: "test reason", match: /stored organization context/i },
+    ] as const;
+    for (const entry of cases) {
+      const draft = buildFallbackAnswer(entry.pack, entry.reason);
+      expect(draft.body).toMatch(entry.match);
+      expect(draft.body).not.toMatch(/Answer from stored organization context/);
+      expect(draft.body).not.toMatch(/What the stored context supports/);
+      expect(draft.body).not.toMatch(/Check Limitations for gaps/);
+      expect(draft.body).not.toMatch(/^Sources$/m);
+      expect(draft.body).not.toMatch(/^Limitations$/m);
+      expect(draft.body).not.toContain("- Confirmed trading name.");
+    }
+  });
+
+  it("voices model-unset distinctly from stored-context gaps", async () => {
+    const pack = await testPack();
+    const draft = buildFallbackAnswer(
+      pack,
+      "Answer synthesis is not configured; using stored context only.",
+    );
+    expect(draft.body).toMatch(/isn't set up yet|not configured/i);
+    expect(draft.body).toMatch(/stored organization context/i);
+    expect(draft.body).not.toMatch(/Answer from stored organization context/);
+  });
+
+  it("voices model failure distinctly", async () => {
+    const pack = await testPack();
+    const draft = buildFallbackAnswer(
+      pack,
+      "Answer synthesis failed; using stored context only.",
+    );
+    expect(draft.body).toMatch(/couldn't reach the answer model/i);
+    expect(draft.body).toMatch(/stored organization context/i);
+  });
+
+  it("voices invalid candidates distinctly", async () => {
+    const pack = await testPack();
+    const draft = buildFallbackAnswer(
+      pack,
+      "The drafted answer failed validation; using stored context only.",
+    );
+    expect(draft.body).toMatch(/didn't hold together/i);
+    expect(draft.body).toMatch(/stored organization context/i);
   });
 });

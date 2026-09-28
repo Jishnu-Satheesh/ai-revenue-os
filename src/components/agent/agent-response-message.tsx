@@ -101,24 +101,25 @@ function splitParagraph(
 
 /**
  * Poll-rendered assistant answer (Slice A) with a live-streaming preview
- * (streaming synthesis Task 4), in modern chatbot style (finding D).
- * Renders from the durable row body — citations, limitations, and labeled
- * estimates are encoded sections (the fenced RPC carries body text only),
- * parsed back here, so reopened history shows exactly what the live turn
- * showed. The body renders as natural paragraphs (blank-line separated);
- * legacy stored-context header blocks are stripped at the parse boundary,
- * never rendered. Each citation owns a numbered `[n]` superscript beside
- * the sentence it grounds (appended at the end when the claim has no
- * verbatim match), with the claim + source in a hover/focus Tooltip; the
- * Sources list sits outside and below the synthesis card, Limitations
- * compact beneath it, and Estimates keep their inputs and assumptions on
- * the same surface. While the Task 3 stream is open there is no durable
- * row yet, so the caller passes `message={null}` with the joined `token`
- * preview as `liveBody` in the same bubble shell — the `end` swap replaces
- * it with the durable render (or a draft-only row when `end.messageId` is
- * null), and a dropped stream keeps its partial text beside `liveNote`.
- * Plain text only: no markdown renderer exists in this tree, and none is
- * added — bodies render with preserved whitespace and never as HTML.
+ * (streaming synthesis Task 4), in modern chatbot style (finding D, F2
+ * voice). Renders from the durable row body — citations, limitations, and
+ * labeled estimates stay encoded in the row (the fenced RPC carries body
+ * text only), parsed back here, so reopened history shows exactly what the
+ * live turn showed. The body renders as natural paragraphs (blank-line
+ * separated) with gaps voiced inline as sentences; legacy stored-context
+ * header blocks are stripped at the parse boundary, never rendered. Each
+ * citation owns a numbered `[n]` superscript beside the sentence it grounds
+ * (appended at the end when the claim has no verbatim match), with the
+ * claim + source in a hover/focus Tooltip; Sources and Limitations sections
+ * are never rendered (Task 3 owns the single sources line), and Estimates
+ * keep their inputs and assumptions on the same surface. While the Task 3
+ * stream is open there is no durable row yet, so the caller passes
+ * `message={null}` with the joined `token` preview as `liveBody` in the
+ * same bubble shell — the `end` swap replaces it with the durable render
+ * (or a draft-only row when `end.messageId` is null), and a dropped stream
+ * keeps its partial text beside `liveNote`. Plain text only: no markdown
+ * renderer exists in this tree, and none is added — bodies render with
+ * preserved whitespace and never as HTML.
  */
 export function AgentResponseMessage({
   message,
@@ -204,38 +205,6 @@ export function AgentResponseMessage({
               ))}
             </CardContent>
           </Card>
-          {parsed.citations.length > 0 ? (
-            <div className="flex flex-col gap-1.5 px-1">
-              <p className="text-xs font-medium text-muted-foreground">Sources</p>
-              <ul className="flex flex-col gap-1.5" aria-label="Answer sources">
-                {parsed.citations.map((citation, citationIndex) => (
-                  <li
-                    key={`${citation.sourceId}:${citation.digest}`}
-                    className="flex flex-wrap items-baseline gap-1.5 text-xs"
-                  >
-                    <span aria-hidden="true" className="font-semibold text-muted-foreground">
-                      [{citationIndex + 1}]
-                    </span>
-                    <Badge variant="outline">{citation.sourceId}</Badge>
-                    <span className="text-muted-foreground">{citation.claim}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {parsed.limitations.length > 0 ? (
-            <div className="flex flex-col gap-1.5 px-1">
-              <p className="text-xs font-medium text-muted-foreground">Limitations</p>
-              <ul
-                className="flex list-disc flex-col gap-1 pl-5 text-xs text-muted-foreground"
-                aria-label="Answer limitations"
-              >
-                {parsed.limitations.map((limitation) => (
-                  <li key={limitation}>{limitation}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
           {parsed.estimates.length > 0 ? (
             <div className="flex flex-col gap-1.5 px-1">
               <p className="text-xs font-medium text-muted-foreground">Estimates</p>

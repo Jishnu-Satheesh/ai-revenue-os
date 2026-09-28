@@ -1836,7 +1836,7 @@ describe("live answer stream", () => {
     expect(streamCalls()).toHaveLength(1);
   });
 
-  it("renders the end draft with sections when messageId is null", async () => {
+  it("renders the end draft body with markers when messageId is null, never Sources or Limitations sections (F2)", async () => {
     const draft = {
       body: "Viewer answer.",
       citations: [{ claim: "Confirmed trading name.", sourceId: "ledger", digest: "abc123" }],
@@ -1849,8 +1849,14 @@ describe("live answer stream", () => {
     render(<Harness pendingPrompt={sendPrompt()} role="viewer" />);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(await within(thread).findByText("Viewer answer.")).toBeInTheDocument();
-    expect(within(thread).getByText(/confirmed trading name/i)).toBeInTheDocument();
-    expect(within(thread).getByText(/coverage is partial/i)).toBeInTheDocument();
+    // F2 voice: gaps stay voiced inline + encoded; sections never render.
+    // The citation marker stays (unplaced claim appends after the paragraph).
+    expect(
+      within(thread).getByRole("button", { name: /source 1: confirmed trading name/i }),
+    ).toBeInTheDocument();
+    expect(within(thread).queryByText("Sources")).toBeNull();
+    expect(within(thread).queryByText("Limitations")).toBeNull();
+    expect(within(thread).queryByText(/coverage is partial/i)).toBeNull();
     expect(within(thread).queryByText(/stopped here/i)).toBeNull();
   });
 
@@ -1944,7 +1950,14 @@ describe("answer rendering (finding D)", () => {
     // No stored-context fallback header block, no scaffold, no repeated fact.
     expect(screen.queryByText(/answer from stored organization context/i)).toBeNull();
     expect(screen.queryByText(/what the stored context supports/i)).toBeNull();
-    expect(screen.getAllByText(/confirmed trading name/i)).toHaveLength(1);
+    // F2 voice: the fact lives in the citation marker (aria-label + tooltip),
+    // never as visible duplicate text and never as a Sources section.
+    expect(screen.queryByText("Confirmed trading name.")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
     // One natural paragraph in the synthesis card — the body is not doubled.
     const card = container.querySelector('[data-slot="card"]') as HTMLElement;
     expect(card.querySelectorAll("p")).toHaveLength(1);
@@ -1983,21 +1996,87 @@ describe("answer rendering (finding D)", () => {
     expect(tooltip).toHaveTextContent("f1");
   });
 
-  it("keeps Sources outside and below the synthesis card, Limitations beneath", () => {
-    const { container } = render(
-      <AgentResponseMessage message={assistantMessage(naturalEncoded())} />,
-    );
-    const card = container.querySelector('[data-slot="card"]') as HTMLElement;
-    const sources = screen.getByRole("list", { name: "Answer sources" });
-    const limitations = screen.getByRole("list", { name: "Answer limitations" });
-    // Outside the box, never inside it.
-    expect(card.contains(sources)).toBe(false);
-    expect(card.contains(limitations)).toBe(false);
-    // Below the box, in order: synthesis, then sources, then limitations.
-    expect(card.compareDocumentPosition(sources) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  it("omits Sources and Limitations sections (F2 voice; Task 3 owns the single sources line)", () => {
+    render(<AgentResponseMessage message={assistantMessage(naturalEncoded())} />);
+    // F2 deletes both sections from the render; structured data stays
+    // encoded in the row (see the F2 block below). Task 3 reintroduces a
+    // single sources line + one tooltip.
+    expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
+    expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
+    expect(screen.queryByText("Sources")).toBeNull();
+    expect(screen.queryByText("Limitations")).toBeNull();
+    // Citation markers stay byte-identical for Task 3.
     expect(
-      sources.compareDocumentPosition(limitations) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+      screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
+    ).toBeInTheDocument();
+  });
+
+  describe("chatbot voice, no internal leakage (F2)", () => {
+    function voicedEncoded(): string {
+      return encodeAnswerBody({
+        body: "Weekday demand looks soft, though economics data isn't ready yet so cost claims stay out.",
+        citations: [{ claim: "Confirmed trading name.", sourceId: "f1", digest: DIGEST }],
+        limitations: ["Economics data not ready; cost claims stay withheld."],
+        estimates: [],
+      });
+    }
+
+    function estimatedEncoded(): string {
+      return encodeAnswerBody({
+        body: "Visits may lift next week.",
+        citations: [{ claim: "Confirmed trading name.", sourceId: "f1", digest: DIGEST }],
+        limitations: ["Economics data not ready."],
+        estimates: [
+          {
+            label: "Estimate",
+            value: "+5% visits / week",
+            inputs: ["weekday covers, last 30 days"],
+            assumptions: ["no price change during the window"],
+          },
+        ],
+      });
+    }
+
+    it("renders no Sources or Limitations sections, no scaffold, with the gap voiced inline", () => {
+      render(<AgentResponseMessage message={assistantMessage(voicedEncoded())} />);
+      // Body voices the gap inline as a sentence.
+      expect(screen.getByText(/economics data isn't ready yet/i)).toBeInTheDocument();
+      // Sections are absent from the DOM.
+      expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
+      expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
+      expect(screen.queryByText("Sources")).toBeNull();
+      expect(screen.queryByText("Limitations")).toBeNull();
+      // No scaffold or header strings leak into the render.
+      expect(screen.queryByText(/answer from stored organization context/i)).toBeNull();
+      expect(screen.queryByText(/what the stored context supports/i)).toBeNull();
+      expect(screen.queryByText(/check limitations for gaps/i)).toBeNull();
+    });
+
+    it("keeps the row's structured data encoded while the sections stay unrendered", () => {
+      const encoded = voicedEncoded();
+      // The durable row still carries both sections for Task 3 + history.
+      expect(encoded).toMatch(/Sources/);
+      expect(encoded).toMatch(/Limitations/);
+      render(<AgentResponseMessage message={assistantMessage(encoded)} />);
+      expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
+      expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
+      // Citation markers and estimates stay byte-identical for Task 3.
+      expect(
+        screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps Estimates and citation markers while Sources + Limitations stay gone", () => {
+      render(<AgentResponseMessage message={assistantMessage(estimatedEncoded())} />);
+      expect(screen.getByText("Estimate")).toBeInTheDocument();
+      expect(screen.getByText(/\+5% visits \/ week/)).toBeInTheDocument();
+      expect(screen.getByText(/weekday covers, last 30 days/)).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("Sources")).toBeNull();
+      expect(screen.queryByText("Limitations")).toBeNull();
+    });
   });
 });
 
