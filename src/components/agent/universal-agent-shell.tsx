@@ -1,23 +1,42 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
-import { motion, useReducedMotion } from "framer-motion";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { usePathname } from "next/navigation";
-import { HistoryIcon, MicIcon, PlusIcon, SendIcon } from "lucide-react";
+import {
+  AudioWaveformIcon,
+  BrainIcon,
+  ChevronDownIcon,
+  HistoryIcon,
+  PlusIcon,
+  SendIcon,
+  ZapIcon,
+} from "lucide-react";
 
 import {
   AgentDrawer,
-  type AgentDrawerTab,
+  type AgentDrawerView,
   type PendingPrompt,
 } from "@/components/agent/agent-drawer";
+import {
+  AGENT_DRAWER_DEFAULT_GEOMETRY,
+  useAgentSidebarOffset,
+  type AgentDrawerGeometry,
+} from "@/components/agent/agent-placement";
 import type {
   CampaignAdviceContext,
   CampaignAdviceOpportunity,
 } from "@/components/agent/agent-campaign-advice";
 import type { AdviseCampaignSeams } from "@/modules/agent-chat/application/campaign-advise";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Textarea } from "@/components/ui/textarea";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { RouterRole } from "@/domain/agent-router/contracts";
@@ -89,13 +108,21 @@ const SUGGESTIONS = [
   "What evidence is still missing?",
 ] as const;
 
+const MODE_META: Record<ThreadMode, { label: string }> = {
+  quick: { label: "Quick answer" },
+  deepthink: { label: "DeepThink" },
+};
+
 /**
  * Floating universal agent shell (spec section 5.1). Dark bottom-centered
- * panel with a glowing animated border (static glow under
- * prefers-reduced-motion), Ask anything input, inert + / Voice buttons with
- * tooltips, a Quick/DeepThink mode pill, and a send button. Enter sends,
- * Shift+Enter adds a newline. Sending opens the drawer and focuses it.
- * Renders only on the 5 allowed pages — otherwise null.
+ * panel with a glow ring that circulates around the text area (static glow
+ * under prefers-reduced-motion), Ask anything input, a mode menu with
+ * exactly two modes (Quick answer default, DeepThink), inert + / Voice
+ * buttons with tooltips, and a gradient send button. The bar rests as a
+ * single input line; focusing it expands the control row and reveals the
+ * detached suggestion chips above the bar. Sending collapses everything
+ * back, opens the drawer, and focuses it. Enter sends, Shift+Enter adds a
+ * newline. Renders only on the 5 allowed pages — otherwise null.
  */
 export function UniversalAgentShell({
   organizationId,
@@ -109,23 +136,33 @@ export function UniversalAgentShell({
   watchUpdateAvailable = true,
 }: UniversalAgentShellProps) {
   const reduceMotion = useReducedMotion();
+  const sidebarOffset = useAgentSidebarOffset();
   const inputId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<ThreadMode>("quick");
+  const [expanded, setExpanded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [activeTab, setActiveTab] = useState<AgentDrawerTab>("response");
+  const [view, setView] = useState<AgentDrawerView>("thread");
   const [threadId, setThreadId] = useState<string | null>(null);
   const [pendingPrompt, setPendingPrompt] = useState<PendingPrompt | null>(null);
   const [nonce, setNonce] = useState(0);
+  // F5 movable-drawer unit: position + size live here (session memory only)
+  // so a drag or resize survives drawer close/reopen while the shell stays
+  // mounted. Full reload resets to defaults — no localStorage, no DB write.
+  const [drawerGeometry, setDrawerGeometry] = useState<AgentDrawerGeometry>(
+    AGENT_DRAWER_DEFAULT_GEOMETRY,
+  );
 
   if (!isAgentShellPage(page)) return null;
 
   const canManage = permissions.includes("growth_intelligence.manage");
   const isViewer = role === "viewer";
   const canSend = input.trim().length > 0 && !isViewer;
+  const chipsVisible = expanded && !drawerOpen && input.trim() === "";
+  const motionMs = reduceMotion ? 0 : 220;
 
   function handleSend() {
     if (isViewer) return;
@@ -135,163 +172,41 @@ export function UniversalAgentShell({
     setNonce(next);
     setPendingPrompt({ text: body, nonce: next });
     setInput("");
+    setExpanded(false);
     setCollapsed(false);
-    setActiveTab("steps");
+    setView("thread");
     setDrawerOpen(true);
   }
 
   function openHistory() {
     setCollapsed(false);
-    setActiveTab("history");
+    setView("history");
     setDrawerOpen(true);
   }
 
   return (
     <TooltipProvider>
-      <div className="fixed inset-x-0 bottom-4 flex justify-center px-4">
-        <motion.div
-          initial={false}
-          animate={
-            reduceMotion
-              ? { boxShadow: "0 0 24px rgba(139, 92, 246, 0.25)" }
-              : {
-                  boxShadow: [
-                    "0 0 12px rgba(139, 92, 246, 0.20)",
-                    "0 0 28px rgba(139, 92, 246, 0.45)",
-                    "0 0 12px rgba(139, 92, 246, 0.20)",
-                  ],
-                }
-          }
-          transition={
-            reduceMotion ? undefined : { duration: 4, repeat: Infinity, ease: "easeInOut" }
-          }
-          className="w-[min(44rem,100%)] rounded-2xl border border-white/10 bg-zinc-950 text-zinc-50 shadow-2xl"
-        >
-          <div className="flex flex-col gap-1 p-2">
-            <label htmlFor={inputId} className="sr-only">
-              Ask anything
-            </label>
-            <Textarea
-              ref={textareaRef}
-              id={inputId}
-              rows={1}
-              value={input}
-              placeholder="Ask anything…"
-              aria-label="Ask anything"
-              onChange={(event) => setInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  handleSend();
-                }
-              }}
-              className="min-h-10 resize-none border-0 bg-transparent text-zinc-50 placeholder:text-zinc-500 focus-visible:ring-0"
-            />
-            <div className="flex items-center gap-2">
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-sm"
-                      disabled
-                      aria-label="Add attachments (coming soon)"
-                      title="Attachments coming soon"
-                      className="text-zinc-400"
-                    >
-                      <PlusIcon aria-hidden="true" />
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Attachments coming soon</TooltipContent>
-              </Tooltip>
-
-              <ToggleGroup
-                type="single"
-                size="sm"
-                value={mode}
-                aria-label="Answer mode"
-                onValueChange={(value) => {
-                  if (value === "quick" || value === "deepthink") setMode(value);
-                }}
+      <div
+        className={cn("fixed right-0 bottom-4 flex justify-center px-4", sidebarOffset)}
+        style={
+          drawerGeometry.x !== 0 || drawerGeometry.y !== 0
+            ? {
+                transform: `translate3d(${drawerGeometry.x}px, ${drawerGeometry.y}px, 0)`,
+              }
+            : undefined
+        }
+      >
+        <div className="w-[min(44rem,100%)]">
+          <AnimatePresence initial={false}>
+            {chipsVisible ? (
+              <motion.div
+                key="agent-suggestions"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                transition={{ duration: motionMs / 1000 }}
+                className="mb-2 flex flex-wrap justify-center gap-2"
               >
-                <ToggleGroupItem value="quick" aria-label="Quick mode">
-                  Quick
-                </ToggleGroupItem>
-                <ToggleGroupItem
-                  value="deepthink"
-                  aria-label={
-                    canManage
-                      ? "DeepThink mode"
-                      : "DeepThink mode (needs the growth_intelligence.manage grant)"
-                  }
-                  title={
-                    canManage
-                      ? undefined
-                      : "DeepThink needs the growth_intelligence.manage grant — enforcement stays server-side."
-                  }
-                  disabled={!canManage}
-                >
-                  DeepThink
-                </ToggleGroupItem>
-              </ToggleGroup>
-
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span className="inline-flex">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled
-                      aria-label="Voice input (coming soon)"
-                      title="Voice coming soon"
-                      className="text-zinc-400"
-                    >
-                      <MicIcon data-icon="inline-start" aria-hidden="true" />
-                      Voice
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Voice coming soon</TooltipContent>
-              </Tooltip>
-
-              <span className="flex-1" />
-
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={openHistory}
-                aria-label="Open conversation history"
-                title="Conversation history"
-                className="text-zinc-400 hover:text-zinc-100"
-              >
-                <HistoryIcon aria-hidden="true" />
-              </Button>
-              <Button
-                type="button"
-                size="icon"
-                onClick={handleSend}
-                disabled={!canSend}
-                aria-label="Send message"
-                title={
-                  isViewer
-                    ? "Viewers cannot change this chat — ask an operator to send."
-                    : "Send"
-                }
-              >
-                <SendIcon aria-hidden="true" />
-              </Button>
-            </div>
-            {isViewer ? (
-              <p className="px-1 text-sm text-zinc-400">
-                Viewers cannot change this chat — ask an operator to send.
-              </p>
-            ) : null}
-            {!drawerOpen && input.trim() === "" ? (
-              <div className="flex flex-wrap gap-2 px-1 pt-1 pb-1">
                 {SUGGESTIONS.map((suggestion) => (
                   <Button
                     key={suggestion}
@@ -302,40 +217,220 @@ export function UniversalAgentShell({
                       setInput(suggestion);
                       textareaRef.current?.focus();
                     }}
-                    className={cn("border-white/10 bg-transparent text-zinc-300")}
+                    className={cn(
+                      "border-white/10 bg-zinc-950 text-zinc-300 hover:bg-white/10 hover:text-white",
+                    )}
                   >
                     {suggestion}
                   </Button>
                 ))}
-              </div>
+              </motion.div>
             ) : null}
-          </div>
-        </motion.div>
-      </div>
+          </AnimatePresence>
+          {drawerOpen ? (
+            <AgentDrawer
+              organizationId={organizationId}
+              page={page}
+              threadId={threadId}
+              pendingPrompt={pendingPrompt}
+              mode={mode}
+              role={role}
+              permissions={permissions}
+              actorId={actorId}
+              opportunity={opportunity}
+              advice={advice}
+              campaignSeams={campaignSeams}
+              watchUpdateAvailable={watchUpdateAvailable}
+              view={view}
+              onViewChange={setView}
+              collapsed={collapsed}
+              onToggleCollapsed={() => setCollapsed((previous) => !previous)}
+              onClose={() => setDrawerOpen(false)}
+              onThreadChange={setThreadId}
+              onPromptConsumed={() => setPendingPrompt(null)}
+              bottomOffset={expanded ? "bottom-32" : "bottom-22"}
+              geometry={drawerGeometry}
+              onGeometryChange={setDrawerGeometry}
+            />
+          ) : null}
+          <div
+            className={cn(
+              "agent-glow-ring rounded-[1.75rem] p-[2px]",
+              reduceMotion ? null : "agent-glow-ring-animated",
+            )}
+          >
+            <div className="rounded-[calc(1.75rem-2px)] bg-zinc-950 text-zinc-50 shadow-2xl">
+              <div className="flex flex-col gap-1 p-2">
+                <label htmlFor={inputId} className="sr-only">
+                  Ask anything
+                </label>
+                <Textarea
+                  ref={textareaRef}
+                  id={inputId}
+                  rows={1}
+                  value={input}
+                  placeholder="Ask anything…"
+                  aria-label="Ask anything"
+                  onFocus={() => setExpanded(true)}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      handleSend();
+                    }
+                  }}
+                  className="min-h-10 cursor-text resize-none border-0 bg-transparent text-zinc-50 caret-zinc-50 placeholder:text-zinc-500 focus-visible:ring-0"
+                />
+                <AnimatePresence initial={false}>
+                  {expanded ? (
+                    <motion.div
+                      key="agent-controls"
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: motionMs / 1000, ease: "easeInOut" }}
+                      className="overflow-hidden"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon-sm"
+                                disabled
+                                aria-label="Add attachments (coming soon)"
+                                title="Attachments coming soon"
+                                className="rounded-full border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-100"
+                              >
+                                <PlusIcon aria-hidden="true" />
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Attachments coming soon</TooltipContent>
+                        </Tooltip>
 
-      {drawerOpen ? (
-        <AgentDrawer
-          organizationId={organizationId}
-          page={page}
-          threadId={threadId}
-          pendingPrompt={pendingPrompt}
-          mode={mode}
-          role={role}
-          permissions={permissions}
-          actorId={actorId}
-          opportunity={opportunity}
-          advice={advice}
-          campaignSeams={campaignSeams}
-          watchUpdateAvailable={watchUpdateAvailable}
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
-          collapsed={collapsed}
-          onToggleCollapsed={() => setCollapsed((previous) => !previous)}
-          onClose={() => setDrawerOpen(false)}
-          onThreadChange={setThreadId}
-          onPromptConsumed={() => setPendingPrompt(null)}
-        />
-      ) : null}
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              aria-label={`Answer mode: ${MODE_META[mode].label}`}
+                              className="rounded-full border-white/10 bg-white/5 text-zinc-200 hover:bg-white/10 hover:text-white aria-expanded:bg-white/10 aria-expanded:text-white"
+                            >
+                              {mode === "quick" ? (
+                                <ZapIcon data-icon="inline-start" aria-hidden="true" />
+                              ) : (
+                                <BrainIcon data-icon="inline-start" aria-hidden="true" />
+                              )}
+                              {MODE_META[mode].label}
+                              <ChevronDownIcon data-icon="inline-end" aria-hidden="true" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent
+                            align="start"
+                            className="w-auto rounded-2xl border-white/10 bg-zinc-900 p-2 text-zinc-100 ring-white/10"
+                          >
+                            <DropdownMenuRadioGroup
+                              value={mode}
+                              onValueChange={(value) => {
+                                if (value === "quick" || value === "deepthink") setMode(value);
+                              }}
+                            >
+                              <DropdownMenuRadioItem
+                                value="quick"
+                                aria-label="Quick answer mode"
+                                className="rounded-xl whitespace-nowrap focus:bg-white/10 focus:text-zinc-50"
+                              >
+                                <ZapIcon data-icon="inline-start" aria-hidden="true" />
+                                Quick answer
+                              </DropdownMenuRadioItem>
+                              <DropdownMenuRadioItem
+                                value="deepthink"
+                                aria-label={
+                                  canManage
+                                    ? "DeepThink mode"
+                                    : "DeepThink mode (needs the growth_intelligence.manage grant)"
+                                }
+                                title={
+                                  canManage
+                                    ? undefined
+                                    : "DeepThink needs the growth_intelligence.manage grant — enforcement stays server-side."
+                                }
+                                disabled={!canManage}
+                                className="rounded-xl whitespace-nowrap focus:bg-white/10 focus:text-zinc-50"
+                              >
+                                <BrainIcon data-icon="inline-start" aria-hidden="true" />
+                                DeepThink
+                              </DropdownMenuRadioItem>
+                            </DropdownMenuRadioGroup>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex">
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                disabled
+                                aria-label="Voice input (coming soon)"
+                                title="Voice coming soon"
+                                className="rounded-full border-white/10 bg-white/5 text-zinc-300"
+                              >
+                                <AudioWaveformIcon data-icon="inline-start" aria-hidden="true" />
+                                Voice
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          <TooltipContent>Voice coming soon</TooltipContent>
+                        </Tooltip>
+
+                        <span className="flex-1" />
+
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-sm"
+                          onClick={openHistory}
+                          aria-label="Open conversation history"
+                          title="Conversation history"
+                          className="text-zinc-400 hover:bg-white/10 hover:text-zinc-100"
+                        >
+                          <HistoryIcon aria-hidden="true" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          onClick={handleSend}
+                          disabled={!canSend}
+                          aria-label="Send message"
+                          title={
+                            isViewer
+                              ? "Viewers cannot change this chat — ask an operator to send."
+                              : "Send"
+                          }
+                          className="size-10 rounded-full bg-gradient-to-br from-fuchsia-500 via-purple-500 to-orange-400 text-white hover:opacity-90"
+                        >
+                          <SendIcon aria-hidden="true" />
+                        </Button>
+                      </div>
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+                {isViewer ? (
+                  <p className="px-1 text-sm text-zinc-400">
+                    Viewers cannot change this chat — ask an operator to send.
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </TooltipProvider>
   );
 }

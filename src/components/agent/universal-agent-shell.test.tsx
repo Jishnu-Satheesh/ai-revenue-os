@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { SidebarProvider } from "@/components/ui/sidebar";
@@ -243,6 +243,35 @@ describe("shell", () => {
     expect(await screen.findByText("Thread history")).toBeInTheDocument();
     expect(screen.queryByRole("tab")).toBeNull();
     expect(await screen.findByRole("button", { name: /open new chat/i })).toBeInTheDocument();
+  });
+
+  it("keeps drawer size and position in shell session memory across close and reopen", async () => {
+    const user = userEvent.setup();
+    renderShell({ role: "operator", permissions: [] });
+    await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
+    const section = await screen.findByLabelText("AI agent conversation");
+
+    // Resize east from the 704px default and drag the unit as one.
+    const edge = await screen.findByTestId("agent-drawer-resize-e");
+    fireEvent.pointerDown(edge, { button: 0, clientX: 800, clientY: 400 });
+    fireEvent.pointerMove(window, { clientX: 900, clientY: 400 });
+    fireEvent.pointerUp(window);
+    expect((section.firstElementChild as HTMLElement).style.width).toBe("804px");
+    const handle = screen.getByTestId("agent-drawer-drag-handle");
+    fireEvent.pointerDown(handle, { button: 0, clientX: 500, clientY: 500 });
+    fireEvent.pointerMove(window, { clientX: 550, clientY: 470 });
+    fireEvent.pointerUp(window);
+    expect(section.style.transform).toBe("translate3d(50px, -30px, 0)");
+
+    // Close unmounts the drawer; a fresh send remounts it on the same
+    // shell-owned geometry — session memory, reset only on reload.
+    await user.click(screen.getByRole("button", { name: /close conversation/i }));
+    expect(screen.queryByLabelText("AI agent conversation")).toBeNull();
+    await user.type(screen.getByPlaceholderText(/ask anything/i), "And then?{enter}");
+
+    const reopened = await screen.findByLabelText("AI agent conversation");
+    expect((reopened.firstElementChild as HTMLElement).style.width).toBe("804px");
+    expect(reopened.style.transform).toBe("translate3d(50px, -30px, 0)");
   });
 });
 

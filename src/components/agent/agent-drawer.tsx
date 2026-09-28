@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
   ChevronDownIcon,
   ChevronRightIcon,
+  GripVerticalIcon,
   HistoryIcon,
   PlusIcon,
   SparklesIcon,
@@ -50,7 +51,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import { useAgentSidebarOffset } from "@/components/agent/agent-placement";
+import { useSidebar } from "@/components/ui/sidebar";
+import {
+  AGENT_DRAWER_DEFAULT_GEOMETRY,
+  AGENT_DRAWER_DEFAULT_HEIGHT_PX,
+  AGENT_DRAWER_DEFAULT_WIDTH_PX,
+  clampDrawerHeight,
+  clampDrawerOffset,
+  clampDrawerWidth,
+  shouldCollapseDrawerHeight,
+  useAgentSidebarOffset,
+  type AgentDrawerGeometry,
+} from "@/components/agent/agent-placement";
 import type { AgentIntent } from "@/domain/agent-router/intents";
 import type { RouterRole, QuestionnaireSpec } from "@/domain/agent-router/contracts";
 import {
@@ -127,6 +139,13 @@ export type AgentDrawerProps = {
    * closer offset (the common post-send state).
    */
   bottomOffset?: "bottom-22" | "bottom-32";
+  /**
+   * Movable-drawer geometry (F5, spec section 5.2). Owned by the shell in
+   * session memory — passed down so the bar and the drawer move as one
+   * unit. Absent → the drawer keeps its own fallback (direct mounts, tests).
+   */
+  geometry?: AgentDrawerGeometry;
+  onGeometryChange?: (next: AgentDrawerGeometry) => void;
 };
 
 type ThreadsResponse = { threads: ThreadSummary[]; nextCursor: string | null };
@@ -772,10 +791,162 @@ export function AgentDrawer({
   onThreadChange,
   onPromptConsumed,
   bottomOffset = "bottom-22",
+  geometry: geometryProp,
+  onGeometryChange,
 }: AgentDrawerProps) {
   const queryClient = useQueryClient();
   const sidebarOffset = useAgentSidebarOffset();
+  const { isMobile } = useSidebar();
   const base = `/api/organizations/${organizationId}/agent/threads`;
+
+  /**
+   * Movable-drawer unit (F5). The shell owns this state while mounted so a
+   * drag or resize survives drawer close/reopen within the session; a full
+   * reload resets to the CSS defaults. Controlled when the shell passes
+   * geometry + onGeometryChange, uncontrolled fallback otherwise.
+   */
+  const [fallbackGeometry, setFallbackGeometry] =
+    useState<AgentDrawerGeometry>(AGENT_DRAWER_DEFAULT_GEOMETRY);
+  const geometry = geometryProp ?? fallbackGeometry;
+  // Pointer handlers resolve geometry through this mirror so a drag
+  // spanning several moves never acts on a stale closure. Synced in an
+  // effect — refs stay out of the render path.
+  const geometryRef = useRef(geometry);
+  useEffect(() => {
+    geometryRef.current = geometry;
+  }, [geometry]);
+  const setGeometry = onGeometryChange ?? setFallbackGeometry;
+
+  /**
+   * Pointer-drag plumbing (no new library): each handle records its start
+   * on pointerdown and listens on window until pointerup/cancel, so fast
+   * drags that leave the handle still track. Deltas clamp to the viewport;
+   * a south resize ending below 12rem docks the strip instead of shrinking.
+   */
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const collapsedOnceRef = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+      dragCleanupRef.current = null;
+    };
+  }, []);
+
+  function trackPointer(
+    onMove: (event: PointerEvent) => void,
+    onUp?: () => void,
+  ): void {
+    dragCleanupRef.current?.();
+    const handleMove = (event: PointerEvent): void => onMove(event);
+    const handleUp = (): void => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+      dragCleanupRef.current = null;
+      onUp?.();
+    };
+    dragCleanupRef.current = handleUp;
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+  }
+
+  function beginUnitDrag(event: ReactPointerEvent): void {
+    if (isMobile || event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const baseX = geometryRef.current.x;
+    const baseY = geometryRef.current.y;
+    trackPointer((move) => {
+      const next = clampDrawerOffset(
+        baseX + (move.clientX - startX),
+        baseY + (move.clientY - startY),
+        window.innerWidth,
+        window.innerHeight,
+      );
+      setGeometry({ ...geometryRef.current, ...next });
+    });
+  }
+
+  function nudgeUnit(dx: number, dy: number): void {
+    if (isMobile) return;
+    const next = clampDrawerOffset(
+      geometryRef.current.x + dx,
+      geometryRef.current.y + dy,
+      window.innerWidth,
+      window.innerHeight,
+    );
+    setGeometry({ ...geometryRef.current, ...next });
+  }
+
+  type ResizeAxis = "e" | "s" | "se";
+
+  function beginResize(axis: ResizeAxis, event: ReactPointerEvent): void {
+    if (isMobile || event.button !== 0) return;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const startWidth = geometryRef.current.width ?? AGENT_DRAWER_DEFAULT_WIDTH_PX;
+    const startHeight = geometryRef.current.height ?? AGENT_DRAWER_DEFAULT_HEIGHT_PX;
+    collapsedOnceRef.current = false;
+    trackPointer((move) => {
+      // One merged write per move: separate width/height writes would race
+      // on the corner axis, the second clobbering the first.
+      const next: AgentDrawerGeometry = { ...geometryRef.current };
+      if (axis === "e" || axis === "se") {
+        next.width = clampDrawerWidth(startWidth + (move.clientX - startX), window.innerWidth);
+      }
+      if (axis === "s" || axis === "se") {
+        const rawHeight = startHeight + (move.clientY - startY);
+        if (shouldCollapseDrawerHeight(rawHeight)) {
+          // Sub-threshold: dock the existing strip instead of shrinking.
+          // Width is untouched — width never collapses.
+          if (!collapsedOnceRef.current) {
+            collapsedOnceRef.current = true;
+            onToggleCollapsed();
+          }
+          return;
+        }
+        next.height = clampDrawerHeight(rawHeight, window.innerHeight);
+      }
+      setGeometry(next);
+    });
+  }
+
+  function nudgeSize(axis: ResizeAxis, dx: number, dy: number): void {
+    if (isMobile) return;
+    const current = geometryRef.current;
+    const next: AgentDrawerGeometry = { ...current };
+    if (axis === "e" || axis === "se") {
+      next.width = clampDrawerWidth(
+        (current.width ?? AGENT_DRAWER_DEFAULT_WIDTH_PX) + dx,
+        window.innerWidth,
+      );
+    }
+    if (axis === "s" || axis === "se") {
+      const rawHeight = (current.height ?? AGENT_DRAWER_DEFAULT_HEIGHT_PX) + dy;
+      if (shouldCollapseDrawerHeight(rawHeight)) {
+        onToggleCollapsed();
+        return;
+      }
+      next.height = clampDrawerHeight(rawHeight, window.innerHeight);
+    }
+    setGeometry(next);
+  }
+
+  const unitStyle: CSSProperties | undefined =
+    geometry.x !== 0 || geometry.y !== 0
+      ? { transform: `translate3d(${geometry.x}px, ${geometry.y}px, 0)` }
+      : undefined;
+  const panelStyle: CSSProperties | undefined =
+    geometry.width == null && geometry.height == null
+      ? undefined
+      : {
+          ...(geometry.width != null
+            ? { width: `${geometry.width}px`, maxWidth: "calc(100dvw - 2rem)" }
+            : {}),
+          ...(geometry.height != null ? { height: `${geometry.height}px` } : {}),
+        };
 
   // One correlation id per drawer session: every send, poll, reopen, and
   // downstream handoff fetch carries it, so one conversation is one trail.
@@ -1448,9 +1619,13 @@ export function AgentDrawer({
         onKeyDown={(event) => {
           if (event.key === "Escape") onToggleCollapsed();
         }}
+        style={unitStyle}
         className={cn("dark fixed right-0 flex justify-center px-4", bottomOffset, sidebarOffset)}
       >
-        <div className="flex h-[34rem] max-h-[calc(100dvh-12rem)] w-[min(44rem,100%)] flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-lg">
+        <div
+          style={panelStyle}
+          className="relative flex h-[34rem] max-h-[calc(100dvh-12rem)] w-[min(44rem,100%)] flex-col gap-3 overflow-hidden rounded-2xl border border-border bg-popover p-4 text-popover-foreground shadow-lg"
+        >
           <h2 ref={headingRef} tabIndex={-1} className="sr-only">
             AI agent conversation
           </h2>
@@ -1459,6 +1634,29 @@ export function AgentDrawer({
           </p>
 
           <div className="flex items-center gap-2">
+            {isMobile ? null : (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                data-testid="agent-drawer-drag-handle"
+                onPointerDown={beginUnitDrag}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 64 : 16;
+                  if (event.key === "ArrowLeft") nudgeUnit(-step, 0);
+                  else if (event.key === "ArrowRight") nudgeUnit(step, 0);
+                  else if (event.key === "ArrowUp") nudgeUnit(0, -step);
+                  else if (event.key === "ArrowDown") nudgeUnit(0, step);
+                  else return;
+                  event.preventDefault();
+                }}
+                aria-label="Move conversation"
+                title="Drag to move"
+                className="shrink-0 cursor-grab touch-none text-zinc-400 select-none hover:text-zinc-100 active:cursor-grabbing"
+              >
+                <GripVerticalIcon aria-hidden="true" />
+              </Button>
+            )}
             {view === "thread" ? (
               <Button
                 type="button"
@@ -1750,6 +1948,57 @@ export function AgentDrawer({
                 </p>
               ) : null}
             </div>
+          )}
+          {isMobile ? null : (
+            <>
+              <button
+                type="button"
+                data-testid="agent-drawer-resize-e"
+                onPointerDown={(event) => beginResize("e", event)}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 64 : 16;
+                  if (event.key === "ArrowLeft") nudgeSize("e", -step, 0);
+                  else if (event.key === "ArrowRight") nudgeSize("e", step, 0);
+                  else return;
+                  event.preventDefault();
+                }}
+                aria-label="Resize conversation width"
+                title="Drag to resize width"
+                className="absolute top-0 right-0 h-full w-2 cursor-ew-resize touch-none focus-visible:outline-2 focus-visible:outline-ring"
+              />
+              <button
+                type="button"
+                data-testid="agent-drawer-resize-s"
+                onPointerDown={(event) => beginResize("s", event)}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 64 : 16;
+                  if (event.key === "ArrowUp") nudgeSize("s", 0, -step);
+                  else if (event.key === "ArrowDown") nudgeSize("s", 0, step);
+                  else return;
+                  event.preventDefault();
+                }}
+                aria-label="Resize conversation height"
+                title="Drag to resize height"
+                className="absolute bottom-0 left-0 h-2 w-full cursor-ns-resize touch-none focus-visible:outline-2 focus-visible:outline-ring"
+              />
+              <button
+                type="button"
+                data-testid="agent-drawer-resize-se"
+                onPointerDown={(event) => beginResize("se", event)}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 64 : 16;
+                  if (event.key === "ArrowLeft") nudgeSize("se", -step, 0);
+                  else if (event.key === "ArrowRight") nudgeSize("se", step, 0);
+                  else if (event.key === "ArrowUp") nudgeSize("se", 0, -step);
+                  else if (event.key === "ArrowDown") nudgeSize("se", 0, step);
+                  else return;
+                  event.preventDefault();
+                }}
+                aria-label="Resize conversation"
+                title="Drag to resize"
+                className="absolute right-0 bottom-0 size-4 cursor-nwse-resize touch-none focus-visible:outline-2 focus-visible:outline-ring"
+              />
+            </>
           )}
         </div>
       </section>
