@@ -735,6 +735,56 @@ describe("questionnaire cards", () => {
     expect(onSubmit).toHaveBeenCalledWith({ clarify: "track competitor prices" });
   });
 
+  it("waits without spinning only while a clarify card is on screen", async () => {
+    const user = userEvent.setup();
+    globalThis.fetch = mockAgentFetch({
+      route: {
+        intent: "answer_memory",
+        confidence: "low",
+        reasonCodes: ["MODEL_LOW_CONFIDENCE"],
+        questionnaire: CLARIFY,
+        thread: THREAD,
+        correlationId: "c3",
+      },
+      stream: [END_ONLY_STREAM],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    // Genuine clarify card visible: the settled steps wait with no spinner.
+    expect(await screen.findByText("Can you say a little more?")).toBeInTheDocument();
+    const steps = screen.getByLabelText("Agent run steps");
+    expect(within(steps).getByText(/waiting for your answer/i)).toBeInTheDocument();
+    expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(0);
+    expect(steps.querySelector('[data-slot="spinner"]')).toBeNull();
+
+    // Dismissing the card ends the wait with it.
+    await user.click(screen.getByRole("button", { name: /cancel this step/i }));
+    await waitFor(() =>
+      expect(
+        within(screen.getByLabelText("Agent run steps")).queryByText(/waiting for your answer/i),
+      ).toBeNull(),
+    );
+    expect(screen.queryByText("Can you say a little more?")).toBeNull();
+
+    // A visible non-clarify card never waits: card on screen, no awaiting row.
+    cleanup();
+    globalThis.fetch = mockAgentFetch({
+      route: {
+        intent: "campaign_advice",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: EVIDENCE_WINDOW,
+        thread: THREAD,
+        correlationId: "c3",
+      },
+      stream: [END_ONLY_STREAM],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("Evidence window needed")).toBeInTheDocument();
+    expect(
+      within(screen.getByLabelText("Agent run steps")).queryByText(/waiting for your answer/i),
+    ).toBeNull();
+  });
+
   it("branches duplicate-watch fields only after update_fields is chosen", async () => {
     const onSubmit = vi.fn();
     const user = userEvent.setup();

@@ -1867,6 +1867,7 @@ export function AgentDrawer({
                   reasonCodes={routeResult?.reasonCodes ?? []}
                   thread={liveThread}
                   error={turnFailure}
+                  awaitingUser={cardVisible && questionnaire?.kind === "clarify"}
                   growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
                 />
               ) : null}
