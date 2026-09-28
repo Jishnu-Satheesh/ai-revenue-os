@@ -2045,3 +2045,222 @@ describe("research auto-run (B3)", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dispatch"))).toBe(false);
   });
 });
+
+describe("watch manual fallback (FINAL fix for I-1)", () => {
+  const MANAGE = ["growth_intelligence.manage"];
+  const PROJECT = "77777777-7777-4777-8777-777777777777";
+  const BRANCH = "55555555-5555-4555-8555-555555555555";
+  const cadenceCard: QuestionnaireSpec = {
+    kind: "missing_fields",
+    title: "One more detail",
+    resumeKey: "router:watch:overview:abcdef1234567890",
+    items: [
+      {
+        key: "frequency",
+        label: "How often should this run?",
+        kind: "single_select",
+        required: true,
+        options: [
+          { value: "daily", label: "Daily" },
+          { value: "weekly", label: "Weekly" },
+        ],
+      },
+    ],
+  };
+  const watchRoute = {
+    intent: "watch",
+    confidence: "high",
+    reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+    questionnaire: cadenceCard,
+    thread: THREAD,
+    correlationId: "c3",
+  };
+  const DISPATCH_RECEIPT = {
+    outcome: "dispatched",
+    eventId: "evt-1",
+    replayed: false,
+    idempotencyKey: "33333333-3333-4333-8333-333333333333",
+    runId: null,
+    requestId: "66666666-6666-4666-8666-666666666666",
+    projectId: PROJECT,
+    draftRequestId: null,
+    briefUrl: null,
+    reasonCodes: [],
+    link: {
+      href: `/organizations/${ORGANIZATION}/growth-intelligence`,
+      ref: { requestId: "66666666-6666-4666-8666-666666666666", projectId: PROJECT, reportId: null },
+    },
+  };
+
+  function mockAgentFetchWithDispatch(
+    plan: Parameters<typeof mockAgentFetch>[0],
+    dispatchBody: unknown = DISPATCH_RECEIPT,
+  ) {
+    const base = mockAgentFetch(plan);
+    return vi.fn(async (url: unknown, init?: RequestInit) => {
+      if (String(url).includes("/dispatch") && (init?.method ?? "GET") === "POST") {
+        return Response.json(dispatchBody);
+      }
+      return base(url, init);
+    });
+  }
+
+  function dispatchPosts() {
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    return fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes("/dispatch") && (init as RequestInit | undefined)?.method === "POST",
+    );
+  }
+
+  it("renders the fallback and dispatches when the one-tap answers submit fails", async () => {
+    globalThis.fetch = mockAgentFetchWithDispatch({
+      route: watchRoute,
+      answers: { status: 500, message: "tap broke" },
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />);
+    expect(await screen.findByText("One more detail")).toBeInTheDocument();
+    // A fresh tappable card suppresses the fallback: one-tap stays primary.
+    expect(screen.queryByText("Manual watch fallback")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Weekly"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+
+    // The errored tap arms the fallback; the card and its alert stay.
+    expect(await screen.findByText("Manual watch fallback")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("tap broke");
+    expect(screen.getByLabelText("Watch question")).toBeInTheDocument();
+
+    // The restored forms post to dispatch and render the queued receipt.
+    fireEvent.change(screen.getByLabelText("Watch question"), {
+      target: { value: "Track lunch demand" },
+    });
+    fireEvent.change(screen.getByLabelText("Research area"), {
+      target: { value: "downtown lunch demand" },
+    });
+    fireEvent.change(screen.getByLabelText("Branch id"), { target: { value: BRANCH } });
+    await user.click(screen.getByRole("button", { name: /start watch/i }));
+
+    const receiptLink = await screen.findByRole("link", { name: "Open Market Intelligence" });
+    expect(receiptLink).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/growth-intelligence`,
+    );
+    expect(receiptLink.parentElement).toHaveTextContent(/Watch queued\./);
+    expect(dispatchPosts()).toHaveLength(1);
+    const payload = JSON.parse(String((dispatchPosts()[0]?.[1] as RequestInit).body)) as Record<
+      string,
+      unknown
+    >;
+    expect(payload).toMatchObject({
+      action: "watch_create",
+      watchCreate: { branchId: BRANCH, question: "Track lunch demand" },
+    });
+  });
+
+  it("renders the fallback when the tap re-routes away from watch", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: watchRoute,
+      answers: {
+        message: ANSWERS_MESSAGE,
+        replayed: false,
+        answers: { frequency: "weekly" },
+        resumeKey: cadenceCard.resumeKey,
+        intent: "answer_memory",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: null,
+        correlationId: "c6",
+      },
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />);
+    expect(await screen.findByText("One more detail")).toBeInTheDocument();
+
+    await user.click(screen.getByText("Weekly"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+
+    // The B5 live failure: the tap lands on answer_memory and the one-tap
+    // region unmounts — the latched fallback is the remaining watch path.
+    expect(await screen.findByText("Manual watch fallback")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start watch/i })).toBeInTheDocument();
+    expect(screen.queryByText(/next card creates the watch in one tap/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps the one-tap receipt primary with no fallback when one-tap works", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: watchRoute,
+      answers: {
+        message: ANSWERS_MESSAGE,
+        replayed: false,
+        answers: { frequency: "weekly" },
+        resumeKey: cadenceCard.resumeKey,
+        intent: "watch",
+        confidence: "high",
+        reasonCodes: ["MODEL_PROPOSAL_ACCEPTED"],
+        questionnaire: null,
+        watchChoice: {
+          outcome: "created",
+          projectId: PROJECT,
+          replayed: false,
+          scopeFingerprint: "0".repeat(64),
+          assumptions: ["Weekly cadence (default)."],
+          evidenceWindowDays: 30,
+          link: {
+            href: `/organizations/${ORGANIZATION}/growth-intelligence`,
+            ref: { requestId: null, projectId: PROJECT, reportId: null },
+          },
+        },
+        correlationId: "c6",
+      },
+    }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />);
+    expect(await screen.findByText("One more detail")).toBeInTheDocument();
+    expect(screen.queryByText("Manual watch fallback")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Weekly"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+
+    // The receipt renders and the fallback never displaces it.
+    expect(await screen.findByText(/Watch created\./)).toBeInTheDocument();
+    expect(screen.queryByText("Manual watch fallback")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Watch question")).not.toBeInTheDocument();
+  });
+
+  it("renders the fallback beside the hint on a card-less watch turn", async () => {
+    globalThis.fetch = mockAgentFetchWithDispatch({
+      route: { ...watchRoute, questionnaire: null },
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+
+    // One-tap is unavailable (no card), so both the hint and the fallback
+    // show — and the fallback posts nothing by itself.
+    expect(await screen.findByText(/next card creates the watch in one tap/i)).toBeInTheDocument();
+    expect(screen.getByText("Manual watch fallback")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /start watch/i })).toBeInTheDocument();
+    expect(dispatchPosts()).toHaveLength(0);
+  });
+
+  it("stays gated on growth_intelligence.manage", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: { ...watchRoute, questionnaire: null },
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={[]} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+
+    // The fallback condition holds (card-less watch turn) but the grant
+    // does not: the grant note stays the only surface.
+    expect(
+      await screen.findByText(
+        "Needs the growth_intelligence.manage grant — enforcement stays server-side.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Manual watch fallback")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /start watch/i })).not.toBeInTheDocument();
+  });
+});
