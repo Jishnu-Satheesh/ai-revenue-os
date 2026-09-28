@@ -329,16 +329,20 @@ describe("drawer chrome", () => {
 });
 
 describe("send pipeline", () => {
-  it("shows the thinking Marker with status role, spinner, and shimmer while sending", async () => {
+  it("shows one narrating Marker with status role, spinner, and shimmer while sending", async () => {
     globalThis.fetch = mockAgentFetch({ route: "hang" }) as never;
     render(<Harness pendingPrompt={sendPrompt()} />);
 
     const marker = await screen.findByText(/thinking/i);
     expect(marker.closest('[role="status"]')).not.toBeNull();
     expect(marker.className).toMatch(/animate-pulse/);
-    // The in-progress loader owns role="status" + Spinner; the exploring
-    // row beside it states the phase with no second live region.
-    expect(await screen.findByText(/exploring/i)).toBeInTheDocument();
+    // One thing at a time: the single in-progress row owns role="status" +
+    // Spinner, so no second exploring row ever renders beside it.
+    const steps = screen.getByLabelText("Agent run steps");
+    expect(
+      steps.querySelectorAll('[data-slot="marker"][role="status"]'),
+    ).toHaveLength(1);
+    expect(within(steps).queryByText(/exploring/i)).toBeNull();
     expect(screen.queryByText(/this run/i)).toBeNull();
     // The send pipeline posts thread + message + route; the
     // thread-checkpoint poll adds a no-store GET alongside, so only the
@@ -357,14 +361,15 @@ describe("send pipeline", () => {
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     const userMessage = within(thread).getByText("What do we know?");
     expect(userMessage).toBeInTheDocument();
-    // Steps stay always visible inline: the routed intent renders in the
+    // Steps stay always visible inline: the narrated intent renders in the
     // icon-led Marker list with no Steps collapse trigger anywhere.
-    expect(within(thread).getByText("Memory answer")).toBeInTheDocument();
+    expect(within(thread).getByText("Understood: Memory answer")).toBeInTheDocument();
+    expect(within(thread).getByText("Checked organization memory")).toBeInTheDocument();
     expect(within(thread).queryByRole("button", { name: /^steps$/i })).toBeNull();
     expect(within(thread).queryByText(/this run/i)).toBeNull();
-    // The routed intent shows only inside the icon-led Marker list — the
-    // Routed-to row sits in the steps region under an icon-led Marker.
-    const routed = within(thread).getByText(/^routed to$/i);
+    // The narrated intent shows only inside the icon-led Marker list — the
+    // Understood row sits in the steps region under an icon-led Marker.
+    const routed = within(thread).getByText(/^understood: memory answer$/i);
     expect(routed.closest('[aria-label="Agent run steps"]')).not.toBeNull();
     expect(
       routed.closest('[data-slot="marker"]')?.querySelector('[data-slot="marker-icon"]'),
@@ -973,7 +978,7 @@ describe("thread checkpoint polling", () => {
     // The polled thread row carries the research link: steps stay always
     // visible inline, so the link renders with no new message sent and no
     // Steps trigger in the DOM.
-    const link = await screen.findByRole("link", { name: /linked research/i });
+    const link = await screen.findByRole("link", { name: /research complete/i });
     expect(link).toBeInTheDocument();
     expect(link.getAttribute("href")).toContain("/growth-intelligence");
     expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
@@ -1020,6 +1025,15 @@ describe("thread checkpoint polling", () => {
       ).toBe(true);
     });
     expect(screen.getByText(/switched to deepthink/i)).toBeInTheDocument();
+  });
+
+  it("keeps one narrating row for a reopened running thread with no answer yet", async () => {
+    const running: ThreadSummary = { ...THREAD, status: "running" };
+    globalThis.fetch = mockAgentFetch({ thread: running, messages: [] }) as never;
+    render(<Harness view="thread" threadId={THREAD.id} />);
+    const steps = await screen.findByLabelText("Agent run steps");
+    expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
   });
 
   it("polls one row per tick, never the thread collection", async () => {
@@ -1779,6 +1793,27 @@ describe("live answer stream", () => {
     expect(within(thread).queryByText(/stopped here/i)).toBeNull();
   });
 
+  it("flips every step terminal on the durable swap, even while the poll still reads running", async () => {
+    const running: ThreadSummary = { ...THREAD, status: "running" };
+    globalThis.fetch = mockAgentFetch({
+      stream: fullStream(),
+      messages: [USER_MESSAGE, ASSISTANT],
+      thread: running,
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    const steps = within(thread).getByLabelText("Agent run steps");
+    await waitFor(() => {
+      expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(0);
+    });
+    expect(steps.querySelector('[data-slot="spinner"]')).toBeNull();
+    const stepQueries = within(steps);
+    expect(stepQueries.queryByText("Thinking…")).toBeNull();
+    expect(stepQueries.queryByText(/exploring/i)).toBeNull();
+    expect(stepQueries.getByText("Understood: Memory answer")).toBeInTheDocument();
+  });
+
   it("shows a skeleton while the stream connects", async () => {
     globalThis.fetch = mockAgentFetch({ stream: "fetch-hang" }) as never;
     render(<Harness pendingPrompt={sendPrompt()} />);
@@ -1819,7 +1854,7 @@ describe("live answer stream", () => {
     // visual fallback is silent, so the live region stays silent too.
     expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
     expect(screen.queryByText(/live answer stopped/i)).toBeNull();
-    expect(screen.getByText(/routed to answer_memory/i)).toBeInTheDocument();
+    expect(screen.getByText(/understood: memory answer/i)).toBeInTheDocument();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(streamCalls()).toHaveLength(1);
   });

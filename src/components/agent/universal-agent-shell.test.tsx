@@ -222,9 +222,9 @@ describe("shell", () => {
     expect(calls[2]).toMatch(/\/route\?page=overview$/);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-    // Steps stay always visible inline: the routed intent renders with no
+    // Steps stay always visible inline: the narrated intent renders with no
     // Steps collapse trigger anywhere.
-    expect(within(thread).getByText("Memory answer")).toBeInTheDocument();
+    expect(within(thread).getByText("Understood: Memory answer")).toBeInTheDocument();
     expect(within(thread).queryByRole("button", { name: /^steps$/i })).toBeNull();
     // Send returns the bar to its resting single-line state with chips hidden.
     await waitFor(() => {

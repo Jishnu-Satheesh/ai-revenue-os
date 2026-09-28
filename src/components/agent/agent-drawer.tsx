@@ -1340,13 +1340,21 @@ export function AgentDrawer({
   // A connecting or live stream keeps the run in-flight: steps stay
   // in-progress until the `end` swap or the drop note settles the turn.
   const streamActive = liveStream !== null && liveStream.phase !== "dropped";
+  // The durable swap is the finish line: once an assistant row exists the
+  // final bubble has landed, so every step row goes terminal even when the
+  // checkpoint poll still reads `running` (the stuck-spinner fix). A
+  // `running` thread with no assistant row yet is genuinely in flight, so
+  // it keeps the single narrating row until the row lands.
+  const turnSettled = messages.some((message) => message.role === "assistant");
   const phase: AgentStepPhase =
     send.isPending || streamActive
       ? "routing"
       : sendError
         ? "error"
         : routeResult || liveThread
-          ? "done"
+          ? liveThread?.status === "running" && !turnSettled
+            ? "routing"
+            : "done"
           : "idle";
 
   // A converged duplicate envelope carries the live card: it replaces the
