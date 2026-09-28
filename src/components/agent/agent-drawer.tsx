@@ -1495,7 +1495,7 @@ export function AgentDrawer({
             <div
               role="log"
               aria-label="Conversation thread"
-              className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto"
+              className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto pt-2"
             >
               {sendError ? (
                 <p role="alert" className="text-sm text-destructive">

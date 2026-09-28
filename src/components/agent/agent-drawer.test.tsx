@@ -285,6 +285,15 @@ describe("drawer chrome", () => {
     expect(thread.className).not.toMatch(/overflow-x-auto/);
   });
 
+  it("clears the first message bubble below the header", async () => {
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+    // Top clearance inside the scrollport: the first bubble starts below
+    // the container edge, never tucked under the header row.
+    expect(thread.className).toMatch(/(^|\s)pt-2(\s|$)/);
+  });
+
   it("collapses to a status strip on Escape and expands on click", async () => {
     globalThis.fetch = mockAgentFetch({ route: "hang" }) as never;
     const user = userEvent.setup();
