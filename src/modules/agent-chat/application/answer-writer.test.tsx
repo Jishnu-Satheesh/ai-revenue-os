@@ -644,7 +644,7 @@ describe("routeLatest synthesize step", () => {
 });
 
 describe("AgentResponseMessage", () => {
-  it("renders the answer body with markers and labeled estimates, never Sources or Limitations sections (F2 voice)", async () => {
+  it("renders the answer body with the single sources line and labeled estimates, never section lists (F2 voice, F3)", async () => {
     const pack = await testPack();
     const draft: AnswerDraft = {
       body: "Weekday demand looks soft in the stored window, though economics data isn't ready yet so cost claims stay out.",
@@ -679,13 +679,13 @@ describe("AgentResponseMessage", () => {
     );
     expect(screen.getByText(/weekday demand looks soft/i)).toBeInTheDocument();
     expect(screen.getByText(/economics data isn't ready yet/i)).toBeInTheDocument();
-    // Citation marker stays; Sources + Limitations sections never render.
-    expect(
-      screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
-    ).toBeInTheDocument();
+    // F3 single sources line; Sources + Limitations section lists never render.
+    expect(screen.queryByRole("button", { name: /source 1:/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /sources: 1 cited source/i })).toHaveTextContent(
+      "Sources: [1]",
+    );
     expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
     expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
-    expect(screen.queryByText("Sources")).toBeNull();
     expect(screen.queryByText("Limitations")).toBeNull();
     expect(screen.getByText("Estimate")).toBeInTheDocument();
     expect(screen.getByText(/\+5% visits \/ week/)).toBeInTheDocument();

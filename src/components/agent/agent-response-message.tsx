@@ -1,7 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
-
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -33,70 +31,41 @@ export type AgentResponseMessageProps = {
 };
 
 /**
- * Numbered citation superscript (finding D): `[n]` opens a Tooltip carrying
- * the claim + source on hover and on keyboard focus.
+ * Single compact sources line (F3): one `Sources: [1]` / `Sources: [1+]`
+ * trigger below the synthesis bubble owning the ONE hover/focus Tooltip
+ * with the ordered claim+source list. Replaces the per-number `[n]`
+ * marker tooltips — the body renders as clean paragraphs.
  */
-function CitationMarker({ index, citation }: { index: number; citation: AnswerCitation }) {
+function SourcesLine({ citations }: { citations: readonly AnswerCitation[] }) {
+  if (citations.length === 0) return null;
+  const count = citations.length;
+  const visible = count === 1 ? "Sources: [1]" : "Sources: [1+]";
+  const ariaLabel = count === 1 ? "Sources: 1 cited source" : `Sources: ${count} cited sources`;
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label={`Source ${index}: ${citation.claim}`}
-          className="cursor-pointer align-super text-[11px] font-semibold text-primary hover:underline focus-visible:underline"
+          aria-label={ariaLabel}
+          className="cursor-pointer self-start px-1 text-left text-xs text-muted-foreground hover:underline focus-visible:underline"
         >
-          [{index}]
+          {visible}
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" className="max-w-xs">
-        <span className="flex flex-col gap-1">
-          <span>
-            [{index}] {citation.claim}
-          </span>
-          <span className="opacity-80">{citation.sourceId}</span>
-        </span>
+        <ol aria-label="Cited sources" className="flex flex-col gap-1.5">
+          {citations.map((citation, index) => (
+            <li key={`${citation.sourceId}:${index}`} className="flex flex-col gap-0.5">
+              <span>
+                [{index + 1}] {citation.claim}
+              </span>
+              <span className="opacity-80">{citation.sourceId}</span>
+            </li>
+          ))}
+        </ol>
       </TooltipContent>
     </Tooltip>
   );
-}
-
-/**
- * Splits one paragraph around the first occurrence of each not-yet-placed
- * citation claim (case-insensitive), so the `[n]` marker lands beside the
- * sentence it grounds. Claims with no verbatim match return unplaced and
- * are appended after the final paragraph — every citation keeps a marker.
- */
-function splitParagraph(
-  paragraph: string,
-  citations: readonly AnswerCitation[],
-  placed: Set<number>,
-  renderMarker: (citationIndex: number) => ReactNode,
-): { nodes: ReactNode[]; key: string } {
-  const lower = paragraph.toLowerCase();
-  const hits: Array<{ index: number; start: number; end: number }> = [];
-  const used: Array<{ start: number; end: number }> = [];
-  citations.forEach((citation, citationIndex) => {
-    if (placed.has(citationIndex)) return;
-    const needle = citation.claim.trim().toLowerCase();
-    if (needle.length === 0) return;
-    const start = lower.indexOf(needle);
-    if (start === -1) return;
-    const end = start + needle.length;
-    if (used.some((range) => start < range.end && end > range.start)) return;
-    used.push({ start, end });
-    hits.push({ index: citationIndex, start, end });
-  });
-  hits.sort((a, b) => a.start - b.start);
-  const nodes: ReactNode[] = [];
-  let cursor = 0;
-  for (const hit of hits) {
-    placed.add(hit.index);
-    nodes.push(paragraph.slice(cursor, hit.end));
-    nodes.push(renderMarker(hit.index));
-    cursor = hit.end;
-  }
-  nodes.push(paragraph.slice(cursor));
-  return { nodes, key: paragraph };
 }
 
 /**
@@ -107,13 +76,12 @@ function splitParagraph(
  * text only), parsed back here, so reopened history shows exactly what the
  * live turn showed. The body renders as natural paragraphs (blank-line
  * separated) with gaps voiced inline as sentences; legacy stored-context
- * header blocks are stripped at the parse boundary, never rendered. Each
- * citation owns a numbered `[n]` superscript beside the sentence it grounds
- * (appended at the end when the claim has no verbatim match), with the
- * claim + source in a hover/focus Tooltip; Sources and Limitations sections
- * are never rendered (Task 3 owns the single sources line), and Estimates
- * keep their inputs and assumptions on the same surface. While the Task 3
- * stream is open there is no durable row yet, so the caller passes
+ * header blocks are stripped at the parse boundary, never rendered. One
+ * compact `Sources: [1]` / `Sources: [1+]` line sits outside and below the
+ * bubble owning the single hover/focus Tooltip with the ordered
+ * claim+source list; Sources and Limitations section lists are never
+ * rendered, and Estimates keep their inputs and assumptions on the same
+ * surface. While the Task 3 stream is open there is no durable row yet, so the caller passes
  * `message={null}` with the joined `token` preview as `liveBody` in the
  * same bubble shell — the `end` swap replaces it with the durable render
  * (or a draft-only row when `end.messageId` is null), and a dropped stream
@@ -170,41 +138,23 @@ export function AgentResponseMessage({
           .split(/\n\s*\n/)
           .map((part) => part.trim())
           .filter((part) => part.length > 0);
-  const placed = new Set<number>();
-  const renderMarker = (citationIndex: number): ReactNode => (
-    <CitationMarker
-      key={`cite-${citationIndex}`}
-      index={citationIndex + 1}
-      citation={parsed.citations[citationIndex] as AnswerCitation}
-    />
-  );
-  const paragraphNodes = rawParagraphs.map((paragraph) =>
-    splitParagraph(paragraph, parsed.citations, placed, renderMarker),
-  );
-  const unplaced = parsed.citations
-    .map((citation, citationIndex) => ({ citation, citationIndex }))
-    .filter(({ citationIndex }) => !placed.has(citationIndex));
   return (
     <TooltipProvider>
       <div className="flex justify-start">
         <div className="flex max-w-[90%] flex-col gap-2">
           <Card>
             <CardContent className="flex flex-col gap-3 text-sm">
-              {paragraphNodes.map((paragraph, index) => (
+              {rawParagraphs.map((paragraph, index) => (
                 <p
-                  key={`${index}:${paragraph.key.slice(0, 24)}`}
+                  key={`${index}:${paragraph.slice(0, 24)}`}
                   className="break-words whitespace-pre-wrap"
                 >
-                  {paragraph.nodes.map((node, nodeIndex) => (
-                    <span key={nodeIndex}>{node}</span>
-                  ))}
-                  {index === paragraphNodes.length - 1 && unplaced.length > 0 ? (
-                    <span> {unplaced.map(({ citationIndex }) => renderMarker(citationIndex))}</span>
-                  ) : null}
+                  {paragraph}
                 </p>
               ))}
             </CardContent>
           </Card>
+          <SourcesLine citations={parsed.citations} />
           {parsed.estimates.length > 0 ? (
             <div className="flex flex-col gap-1.5 px-1">
               <p className="text-xs font-medium text-muted-foreground">Estimates</p>

@@ -1836,7 +1836,7 @@ describe("live answer stream", () => {
     expect(streamCalls()).toHaveLength(1);
   });
 
-  it("renders the end draft body with markers when messageId is null, never Sources or Limitations sections (F2)", async () => {
+  it("renders the end draft body with the single sources line when messageId is null, never sections (F3)", async () => {
     const draft = {
       body: "Viewer answer.",
       citations: [{ claim: "Confirmed trading name.", sourceId: "ledger", digest: "abc123" }],
@@ -1849,12 +1849,14 @@ describe("live answer stream", () => {
     render(<Harness pendingPrompt={sendPrompt()} role="viewer" />);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(await within(thread).findByText("Viewer answer.")).toBeInTheDocument();
-    // F2 voice: gaps stay voiced inline + encoded; sections never render.
-    // The citation marker stays (unplaced claim appends after the paragraph).
+    // F3: one compact sources line below the bubble replaces per-number
+    // markers; Sources/Limitations sections never render.
     expect(
-      within(thread).getByRole("button", { name: /source 1: confirmed trading name/i }),
-    ).toBeInTheDocument();
-    expect(within(thread).queryByText("Sources")).toBeNull();
+      within(thread).getByRole("button", { name: /sources: 1 cited source/i }),
+    ).toHaveTextContent("Sources: [1]");
+    expect(within(thread).queryByRole("button", { name: /source 1:/i })).toBeNull();
+    expect(within(thread).queryByRole("list", { name: "Answer sources" })).toBeNull();
+    expect(within(thread).queryByRole("list", { name: "Answer limitations" })).toBeNull();
     expect(within(thread).queryByText("Limitations")).toBeNull();
     expect(within(thread).queryByText(/coverage is partial/i)).toBeNull();
     expect(within(thread).queryByText(/stopped here/i)).toBeNull();
@@ -1950,12 +1952,13 @@ describe("answer rendering (finding D)", () => {
     // No stored-context fallback header block, no scaffold, no repeated fact.
     expect(screen.queryByText(/answer from stored organization context/i)).toBeNull();
     expect(screen.queryByText(/what the stored context supports/i)).toBeNull();
-    // F2 voice: the fact lives in the citation marker (aria-label + tooltip),
-    // never as visible duplicate text and never as a Sources section.
+    // F3: the fact lives in the single sources-line tooltip, never as
+    // visible duplicate text and never as a Sources section list.
     expect(screen.queryByText("Confirmed trading name.")).toBeNull();
-    expect(
-      screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /source 1:/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /sources: 1 cited source/i })).toHaveTextContent(
+      "Sources: [1]",
+    );
     expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
     expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
     // One natural paragraph in the synthesis card — the body is not doubled.
@@ -1974,41 +1977,74 @@ describe("answer rendering (finding D)", () => {
     expect(paragraphs[1]).toHaveTextContent("Second paragraph carries the detail.");
   });
 
-  it("numbers citations with tooltip claim + source on hover", async () => {
+  it("renders Sources: [1] for one citation with no per-number markers", () => {
+    render(<AgentResponseMessage message={assistantMessage(legacyEncoded())} />);
+    expect(screen.getByRole("button", { name: /sources: 1 cited source/i })).toHaveTextContent(
+      "Sources: [1]",
+    );
+    expect(screen.queryByRole("button", { name: /source 1:/i })).toBeNull();
+  });
+
+  it("renders Sources: [1+] for many citations with no per-number markers", () => {
+    render(<AgentResponseMessage message={assistantMessage(naturalEncoded())} />);
+    expect(screen.getByRole("button", { name: /sources: 2 cited sources/i })).toHaveTextContent(
+      "Sources: [1+]",
+    );
+    expect(screen.queryByRole("button", { name: /source 1:/i })).toBeNull();
+    expect(screen.queryByRole("button", { name: /source 2:/i })).toBeNull();
+  });
+
+  it("lists claims + sources in citation order inside the one tooltip on hover", async () => {
     const user = userEvent.setup();
     render(<AgentResponseMessage message={assistantMessage(naturalEncoded())} />);
-    const first = screen.getByRole("button", { name: /source 1: confirmed trading name/i });
-    const second = screen.getByRole("button", { name: /source 2: weekday covers/i });
-    expect(first).toHaveTextContent("[1]");
-    expect(second).toHaveTextContent("[2]");
+    await user.hover(screen.getByRole("button", { name: /sources: 2 cited sources/i }));
 
-    await user.hover(first);
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("Confirmed trading name.");
+    expect(tooltip).toHaveTextContent("[1] Confirmed trading name.");
     expect(tooltip).toHaveTextContent("f1");
+    expect(tooltip).toHaveTextContent("[2] Weekday covers held steady.");
+    expect(tooltip).toHaveTextContent("ledger");
+    // Ordered: the first claim sits before the second in the tooltip.
+    const text = tooltip.textContent ?? "";
+    expect(text.indexOf("Confirmed trading name.")).toBeLessThan(
+      text.indexOf("Weekday covers held steady."),
+    );
   });
 
-  it("opens the source tooltip by keyboard focus", async () => {
+  it("opens the single sources tooltip by keyboard focus", async () => {
     render(<AgentResponseMessage message={assistantMessage(naturalEncoded())} />);
-    fireEvent.focus(screen.getByRole("button", { name: /source 1: confirmed trading name/i }));
+    fireEvent.focus(screen.getByRole("button", { name: /sources: 2 cited sources/i }));
     const tooltip = await screen.findByRole("tooltip");
-    expect(tooltip).toHaveTextContent("Confirmed trading name.");
+    expect(tooltip).toHaveTextContent("[1] Confirmed trading name.");
     expect(tooltip).toHaveTextContent("f1");
+    expect(tooltip).toHaveTextContent("[2] Weekday covers held steady.");
+    expect(tooltip).toHaveTextContent("ledger");
   });
 
-  it("omits Sources and Limitations sections (F2 voice; Task 3 owns the single sources line)", () => {
+  it("sits outside and below the synthesis bubble (F3 DOM order)", () => {
+    const { container } = render(
+      <AgentResponseMessage message={assistantMessage(naturalEncoded())} />,
+    );
+    const card = container.querySelector('[data-slot="card"]') as HTMLElement;
+    const trigger = screen.getByRole("button", { name: /sources: 2 cited sources/i });
+    expect(card).toBeInTheDocument();
+    // The bubble precedes the sources line in the DOM: outside + below.
+    expect(card.compareDocumentPosition(trigger)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(trigger.closest('[data-slot="card"]')).toBeNull();
+  });
+
+  it("omits Sources and Limitations section lists (F3 owns the single sources line)", () => {
     render(<AgentResponseMessage message={assistantMessage(naturalEncoded())} />);
-    // F2 deletes both sections from the render; structured data stays
-    // encoded in the row (see the F2 block below). Task 3 reintroduces a
-    // single sources line + one tooltip.
+    // Sections stay deleted; structured data stays encoded in the row (see
+    // the F2 block below). F3 renders one compact line + one tooltip.
     expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
     expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
-    expect(screen.queryByText("Sources")).toBeNull();
     expect(screen.queryByText("Limitations")).toBeNull();
-    // Citation markers stay byte-identical for Task 3.
-    expect(
-      screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
-    ).toBeInTheDocument();
+    // No per-number markers remain; the single line owns the tooltip.
+    expect(screen.queryByRole("button", { name: /source 1:/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /sources: 2 cited sources/i })).toHaveTextContent(
+      "Sources: [1+]",
+    );
   });
 
   describe("chatbot voice, no internal leakage (F2)", () => {
@@ -2037,44 +2073,50 @@ describe("answer rendering (finding D)", () => {
       });
     }
 
-    it("renders no Sources or Limitations sections, no scaffold, with the gap voiced inline", () => {
+    it("renders no Sources or Limitations section lists, no scaffold, with the gap voiced inline", () => {
       render(<AgentResponseMessage message={assistantMessage(voicedEncoded())} />);
       // Body voices the gap inline as a sentence.
       expect(screen.getByText(/economics data isn't ready yet/i)).toBeInTheDocument();
-      // Sections are absent from the DOM.
+      // Section lists are absent from the DOM; the single F3 sources line
+      // below the bubble is the only Sources surface.
       expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
       expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
-      expect(screen.queryByText("Sources")).toBeNull();
       expect(screen.queryByText("Limitations")).toBeNull();
+      expect(screen.getByRole("button", { name: /sources: 1 cited source/i })).toHaveTextContent(
+        "Sources: [1]",
+      );
       // No scaffold or header strings leak into the render.
       expect(screen.queryByText(/answer from stored organization context/i)).toBeNull();
       expect(screen.queryByText(/what the stored context supports/i)).toBeNull();
       expect(screen.queryByText(/check limitations for gaps/i)).toBeNull();
     });
 
-    it("keeps the row's structured data encoded while the sections stay unrendered", () => {
+    it("keeps the row's structured data encoded while the section lists stay unrendered", () => {
       const encoded = voicedEncoded();
-      // The durable row still carries both sections for Task 3 + history.
+      // The durable row still carries both sections for history.
       expect(encoded).toMatch(/Sources/);
       expect(encoded).toMatch(/Limitations/);
       render(<AgentResponseMessage message={assistantMessage(encoded)} />);
       expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
       expect(screen.queryByRole("list", { name: "Answer limitations" })).toBeNull();
-      // Citation markers and estimates stay byte-identical for Task 3.
-      expect(
-        screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
-      ).toBeInTheDocument();
+      // F3: no per-number markers; the single line owns the tooltip.
+      expect(screen.queryByRole("button", { name: /source 1:/i })).toBeNull();
+      expect(screen.getByRole("button", { name: /sources: 1 cited source/i })).toHaveTextContent(
+        "Sources: [1]",
+      );
     });
 
-    it("keeps Estimates and citation markers while Sources + Limitations stay gone", () => {
+    it("keeps Estimates with inputs + assumptions on the surface while section lists stay gone", () => {
       render(<AgentResponseMessage message={assistantMessage(estimatedEncoded())} />);
       expect(screen.getByText("Estimate")).toBeInTheDocument();
       expect(screen.getByText(/\+5% visits \/ week/)).toBeInTheDocument();
       expect(screen.getByText(/weekday covers, last 30 days/)).toBeInTheDocument();
-      expect(
-        screen.getByRole("button", { name: /source 1: confirmed trading name/i }),
-      ).toBeInTheDocument();
-      expect(screen.queryByText("Sources")).toBeNull();
+      expect(screen.getByText(/no price change during the window/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /source 1:/i })).toBeNull();
+      expect(screen.getByRole("button", { name: /sources: 1 cited source/i })).toHaveTextContent(
+        "Sources: [1]",
+      );
+      expect(screen.queryByRole("list", { name: "Answer sources" })).toBeNull();
       expect(screen.queryByText("Limitations")).toBeNull();
     });
   });
