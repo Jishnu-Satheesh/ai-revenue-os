@@ -149,4 +149,18 @@ describe("narrating steps (F4)", () => {
     const row = understood.closest('[data-slot="marker"]') as HTMLElement;
     expect(row.className).toMatch(/border-l-2/);
   });
+
+  it("renders a genuine clarify wait with no spinner and no status role", () => {
+    render(<AgentThreadSteps phase="done" intent="answer_memory" awaitingUser />);
+    const done = stepsRegion();
+    expect(statusMarkers()).toHaveLength(0);
+    expect(done.querySelector('[data-slot="spinner"]')).toBeNull();
+    expect(within(done).getByText(/waiting for your answer/i)).toBeInTheDocument();
+    expect(within(done).getByText("Understood: Memory answer")).toBeInTheDocument();
+  });
+
+  it("renders no awaiting row when the turn is not waiting on the user", () => {
+    render(<AgentThreadSteps phase="done" intent="answer_memory" />);
+    expect(within(stepsRegion()).queryByText(/waiting for your answer/i)).toBeNull();
+  });
 });

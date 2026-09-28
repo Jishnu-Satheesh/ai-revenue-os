@@ -20,6 +20,12 @@ export type AgentThreadStepsProps = {
   thread?: ThreadSummary | null;
   /** Honest failure copy when the pipeline fails. */
   error?: string | null;
+  /**
+   * Genuine clarify card on screen: the turn settled and now waits on the
+   * user, not the pipeline. Renders an awaiting row with no spinner and no
+   * status role — never a second in-progress row.
+   */
+  awaitingUser?: boolean;
   /** Base path for the Growth Intelligence research tab link. */
   growthIntelligenceHref?: string;
   className?: string;
@@ -49,7 +55,11 @@ const DONE_ROW_CLASS = "border-l-2 border-emerald-500/40 pl-2";
  * finished research run becomes `Research complete` with the Growth
  * Intelligence link, and a finished draft becomes `Draft ready`. No research
  * area is ever named — the thread carries none, so the active row reads the
- * plain `Researching…` rather than inventing one. The Growth Intelligence
+ * plain `Researching…` rather than inventing one. A genuine clarify card
+ * (model-judged low-confidence ambiguous only) leaves the turn settled and
+ * waiting on the user: `awaitingUser` renders one muted awaiting row with
+ * no spinner and no status role, so the steps never spin as if working
+ * while the question sits with the user. The Growth Intelligence
  * link renders a real focusable anchor via <Marker asChild> wrapping a real
  * <a> child. Decorative icons stay aria-hidden; icon-only Markers carry an
  * aria-label.
@@ -60,6 +70,7 @@ export function AgentThreadSteps({
   reasonCodes = [],
   thread = null,
   error = null,
+  awaitingUser = false,
   growthIntelligenceHref,
   className,
 }: AgentThreadStepsProps) {
@@ -178,6 +189,14 @@ export function AgentThreadSteps({
           </MarkerIcon>
           <MarkerContent>
             {error ?? "The run stopped before routing finished. Nothing was spent or changed."}
+          </MarkerContent>
+        </Marker>
+      ) : null}
+
+      {phase === "done" && awaitingUser ? (
+        <Marker>
+          <MarkerContent className="text-muted-foreground">
+            Waiting for your answer — nothing is running.
           </MarkerContent>
         </Marker>
       ) : null}

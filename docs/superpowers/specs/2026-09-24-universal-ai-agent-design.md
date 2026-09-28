@@ -90,7 +90,7 @@ Purpose: a small light model sits between the user message and real workflows. I
 - Input (Zod strict): message text (trimmed, length-capped), page key, thread history digest, deterministic context digest (section 9), active-watch candidates (safe ids + scope fingerprints only, no customer data), caller role/permissions.
 - Output (Zod strict): intent enum (`answer_memory` | `research_once` | `watch` | `campaign_advice` | `profile_scope_change`), confidence (`high`/`medium`/`low`), missing-fields list (max 3, from a closed vocabulary: frequency, branch, research_area, competitors, end_date, evidence_window), routing note (full context for the executor), questionnaire spec (nullable: items + resume key), safe reason codes. Low confidence → ask, never guess. Medium confidence → act with the assumption stated inline in the routing note. Business-critical policy never lives only in the prompt; intent→executor mapping is deterministic code.
 - Questionnaire triggers: (a) Quick message needing research → zero-click auto-escalation for manage-holders, no card (the `deepthink_upgrade` nudge is deprecated; old rows still parse); (b) vague message → 1–3-field clarify card; (c) `watch` with similar active scope → duplicate-watch card (section 10); (d) `campaign_advice` missing evidence window → window picker card. Answers merge into the routing note; validation failures return to the invalid item with `QuestionnaireError`.
-- Model: light/cheap provider via existing `src/ai` abstraction (`AI_DEFAULT_MODEL` override `AI_ROUTER_MODEL` if set). Time-bounded, token-capped; failure → fail-closed to `answer_memory` with honest limitation note. No credentials, no customer PII beyond the note, no raw provider payloads retained.
+- Model: light/cheap provider via existing `src/ai` abstraction (`AI_DEFAULT_MODEL` override `AI_ROUTER_MODEL` if set). Time-bounded, token-capped; failure → fail-closed to `answer_memory` with honest limitation note and no questionnaire; no DeepThink-retry item on any clarify card (B2 auto-escalates manage-holders zero-click). No credentials, no customer PII beyond the note, no raw provider payloads retained.
 - Logging: intent + confidence + reasons + correlation id; runIds loggable, bodies never logged.
 
 ## 9. HEAVY organization context pack (deterministic, read-only)
@@ -150,7 +150,7 @@ Built per message by deterministic readers only; digested into the router note a
 
 ## 13. Error handling
 
-- Router failure/low confidence → `answer_memory` with honest limitation + offer to retry as DeepThink.
+- Router failure → `answer_memory` with honest limitation note and no questionnaire; low confidence → single-field clarify card with no retry item (B2 auto-escalates). Genuine clarify waits render an awaiting row with no spinner.
 - Research blocked/failed → degraded synthesis + blocked Markers + GI link + retry affordance (permission-gated, idempotent).
 - Duplicate idempotency-key body mismatch → conflict error with View-existing link, no second project.
 - Lease expiry/orphans → sweeper + `expire_stale_*` path marks `failed/WORKER_ORPHANED`; terminal parent never reopens; fresh uploads/messages spawn fresh requests.

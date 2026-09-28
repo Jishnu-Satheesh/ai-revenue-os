@@ -168,7 +168,7 @@ describe("agent thread route endpoint", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.intent).toBe("answer_memory");
-    expect(body.questionnaire.kind).toBe("clarify");
+    expect(body.questionnaire).toBeNull();
   });
 
   it("refuses an empty thread with 422", async () => {

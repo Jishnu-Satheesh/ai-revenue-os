@@ -549,13 +549,6 @@ const CLARIFY: QuestionnaireSpec = {
       required: true,
       helpText: "One sentence is enough to route this correctly.",
     },
-    {
-      key: "retry_deepthink",
-      label: "Retry as DeepThink?",
-      kind: "confirm",
-      required: false,
-      helpText: "Runs one bounded research task with honest progress.",
-    },
   ],
 };
 
@@ -728,23 +721,18 @@ describe("questionnaire cards", () => {
     expect(screen.queryByText(/confirm to continue/i)).not.toBeVisible();
   });
 
-  it("walks clarify text then optional confirm to a full payload", async () => {
+  it("submits a single-field clarify card with no retry item", async () => {
     const onSubmit = vi.fn();
     const user = userEvent.setup();
     render(<AgentQuestionnaireCard spec={CLARIFY} onSubmit={onSubmit} />);
-    expect(screen.getByText(/question 1 of 2/i)).toBeInTheDocument();
+    // One required text item renders Submit immediately; the dead
+    // DeepThink-retry confirm is gone (B2 auto-escalates instead).
+    expect(screen.queryByText(/retry as deepthink/i)).toBeNull();
 
     await user.type(screen.getByRole("textbox"), "track competitor prices");
-    await user.click(screen.getByRole("button", { name: /next/i }));
-    expect(await screen.findByText(/question 2 of 2/i)).toBeInTheDocument();
-
-    // The optional confirm is explicitly skipped, which submits the card.
-    await user.click(screen.getByRole("button", { name: /skip/i }));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit).toHaveBeenCalledWith({
-      clarify: "track competitor prices",
-      retry_deepthink: false,
-    });
+    expect(onSubmit).toHaveBeenCalledWith({ clarify: "track competitor prices" });
   });
 
   it("branches duplicate-watch fields only after update_fields is chosen", async () => {

@@ -124,6 +124,13 @@ function routingNote(args: {
    * medium path; every other note stays byte-identical to before.
    */
   assumption?: string;
+  /**
+   * Router-down honesty (G2): the fail-closed memory answer states its
+   * limitation inline. Present only on the fail-closed path; every other
+   * note stays byte-identical to before. Deterministic platform copy —
+   * never tenant or model text.
+   */
+  limitation?: string;
 }): string {
   const lines = [
     `page=${args.page}`,
@@ -138,6 +145,9 @@ function routingNote(args: {
   if (args.assumption) {
     lines.push(`assumption=${args.assumption}`);
   }
+  if (args.limitation) {
+    lines.push(`limitation=${args.limitation}`);
+  }
   return lines.join("\n");
 }
 
@@ -148,6 +158,15 @@ function routingNote(args: {
  */
 const MEDIUM_ESCALATION_ASSUMPTION =
   "medium-confidence research read; acting as one bounded DeepThink task";
+
+/**
+ * The one inline limitation the service may state (G2). The fail-closed
+ * memory answer carries no questionnaire, so this deterministic platform
+ * copy — never tenant or model text — is the honest note downstream
+ * answers render. It names the outage without claiming read-only scope
+ * the card no longer asks about.
+ */
+const FAIL_CLOSED_LIMITATION = "routing unavailable; memory-only answer";
 
 function finish(args: {
   intent: AgentIntent;
@@ -160,6 +179,7 @@ function finish(args: {
   historyDigest?: string;
   watchIds: string[];
   assumption?: string;
+  limitation?: string;
 }): RouterOutput {
   const questionnaire =
     args.questionnaire === null ? null : questionnaireSpecSchema.parse(args.questionnaire);
@@ -177,6 +197,7 @@ function finish(args: {
       missingFields: args.missingFields,
       reasonCodes: args.reasonCodes,
       ...(args.assumption ? { assumption: args.assumption } : {}),
+      ...(args.limitation ? { limitation: args.limitation } : {}),
     }),
     questionnaire,
     reasonCodes: args.reasonCodes,
@@ -207,36 +228,21 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
   };
 
   let proposal: RouterProposal;
+  // Fail-closed (G2, autonomy doctrine): a memory answer with NO
+  // questionnaire and an honest limitation note. The router is down, so
+  // asking the user to rephrase would be self-contradictory — and the
+  // manual DeepThink-retry item is dead because B2 auto-escalates
+  // manage-holders zero-click. The memory answer plus the note is the
+  // whole surface.
   const failClosed = (): RouterOutput =>
     finish({
       ...shared,
       intent: "answer_memory",
       confidence: "low",
       missingFields: [],
-      questionnaire: {
-        kind: "clarify",
-        title: "Say that another way?",
-        resumeKey: resumeKey("answer_memory", parsed.page, parsed.contextDigest),
-        items: [
-          {
-            key: "clarify",
-            label: "What would you like to know?",
-            kind: "text",
-            required: true,
-            helpText: "Routing is unavailable right now, so answers stay read-only.",
-          },
-          // Spec section 13 (ruling T3b): every fail-closed answer carries
-          // an explicit DeepThink-retry offer, never just a dead end.
-          {
-            key: "retry_deepthink",
-            label: "Retry as DeepThink?",
-            kind: "confirm",
-            required: false,
-            helpText: "Runs one bounded research task with honest progress.",
-          },
-        ],
-      },
+      questionnaire: null,
       reasonCodes: ["PROVIDER_FAIL_CLOSED"],
+      limitation: FAIL_CLOSED_LIMITATION,
     });
   if (parsed.model.kind === "stub") {
     proposal = { intent: parsed.model.intent, confidence: parsed.model.confidence, missing: parsed.model.missing };
@@ -291,7 +297,9 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
     }
   }
 
-  // Low confidence: ask, never guess.
+  // Low confidence: ask, never guess. The genuine clarify card is one
+  // text field only — no DeepThink-retry item (dead since B2
+  // auto-escalates manage-holders zero-click).
   if (proposal.confidence === "low" && proposal.intent !== "answer_memory") {
     return finish({
       ...shared,
@@ -309,15 +317,6 @@ export function routeAgentMessage(input: RouterInput, deps: RouterDeps = {}): Ro
             kind: "text",
             required: true,
             helpText: "One sentence is enough to route this correctly.",
-          },
-          // Spec section 13 (ruling T3b): the low-confidence fallback also
-          // offers the DeepThink retry, so an unsure read is recoverable.
-          {
-            key: "retry_deepthink",
-            label: "Retry as DeepThink?",
-            kind: "confirm",
-            required: false,
-            helpText: "Runs one bounded research task with honest progress.",
           },
         ],
       },

@@ -48,6 +48,10 @@ describe("router", () => {
     expect(out.intent).toBe("answer_memory");
     expect(out.questionnaire).not.toBeNull();
     expect(out.questionnaire?.kind).toBe("clarify");
+    // Genuine clarify is one text field only: B2 auto-escalates, so the
+    // manual DeepThink-retry item is dead.
+    expect(out.questionnaire?.items).toHaveLength(1);
+    expect(out.questionnaire?.items.some((item) => item.key === "retry_deepthink")).toBe(false);
   });
 
   it("caps missing fields at 3", () => {
@@ -75,15 +79,15 @@ describe("router", () => {
     expect(out.reasonCodes).toContain("CAMPAIGN_REQUIRES_CREATE");
   });
 
-  it("fails closed to answer_memory with a clarify card when the resolver returns garbage", () => {
+  it("fails closed to a memory answer with no questionnaire when the resolver returns garbage", () => {
     const out = routeAgentMessage(
       { ...baseInput, text: "keep watching competitors", model: { kind: "live" } },
       { propose: () => ({ intent: "nonsense" }) as unknown as RouterProposal },
     );
     expect(out.intent).toBe("answer_memory");
-    expect(out.questionnaire).not.toBeNull();
-    expect(out.questionnaire?.kind).toBe("clarify");
+    expect(out.questionnaire).toBeNull();
     expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
+    expect(out.routingNote).toContain("limitation=");
   });
 
   it("rejects an over-long message instead of silently trimming it", () => {
@@ -151,23 +155,28 @@ describe("router", () => {
     });
     expect(out.intent).toBe("answer_memory");
     expect(out.questionnaire?.kind).toBe("clarify");
+    expect(out.questionnaire?.items.some((item) => item.key === "retry_deepthink")).toBe(false);
   });
 
-  it("offers a DeepThink retry on the low-confidence fallback", () => {
+  it("never offers a DeepThink retry on the low-confidence fallback", () => {
     const out = routeAgentMessage({
       ...baseInput,
       text: "hmm what about that thing",
       model: { kind: "stub", intent: "research_once", confidence: "low", missing: [] },
     });
-    expect(out.questionnaire?.items.some((item) => item.key === "retry_deepthink")).toBe(true);
+    expect(out.questionnaire?.items.some((item) => item.key === "retry_deepthink")).toBe(false);
   });
 
-  it("offers a DeepThink retry on the fail-closed card", () => {
+  it("fails closed with no questionnaire and an honest note, never a retry card", () => {
     const out = routeAgentMessage(
       { ...baseInput, text: "keep watching competitors", model: { kind: "live" } },
       { propose: () => ({ intent: "nonsense" }) as unknown as RouterProposal },
     );
-    expect(out.questionnaire?.items.some((item) => item.key === "retry_deepthink")).toBe(true);
+    expect(out.questionnaire).toBeNull();
+    expect(out.questionnaire?.items?.some((item) => item.key === "retry_deepthink") ?? false).toBe(
+      false,
+    );
+    expect(out.routingNote).toContain("limitation=");
   });
 
   it("fails closed on a forged intent instead of routing it", () => {
@@ -179,7 +188,7 @@ describe("router", () => {
       },
     );
     expect(out.intent).toBe("answer_memory");
-    expect(out.questionnaire?.kind).toBe("clarify");
+    expect(out.questionnaire).toBeNull();
     expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
   });
 
@@ -196,6 +205,7 @@ describe("router", () => {
       },
     );
     expect(out.intent).toBe("answer_memory");
+    expect(out.questionnaire).toBeNull();
     expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
   });
 
@@ -209,8 +219,9 @@ describe("router", () => {
       },
     );
     expect(out.intent).toBe("answer_memory");
-    expect(out.questionnaire?.kind).toBe("clarify");
+    expect(out.questionnaire).toBeNull();
     expect(out.reasonCodes).toContain("PROVIDER_FAIL_CLOSED");
+    expect(out.routingNote).toContain("limitation=");
   });
 
   it("keeps the routing note to digests and safe ids, never user text", () => {

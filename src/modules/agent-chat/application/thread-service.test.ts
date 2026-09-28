@@ -197,7 +197,7 @@ describe("thread service", () => {
       threadId: "t1",
     });
     expect(out.intent).toBe("answer_memory");
-    expect(out.questionnaire?.kind).toBe("clarify");
+    expect(out.questionnaire).toBeNull();
   });
 
   it("refuses to route a thread with no readable message", async () => {
