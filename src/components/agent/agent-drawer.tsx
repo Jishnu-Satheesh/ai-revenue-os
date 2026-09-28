@@ -146,6 +146,14 @@ export type AgentDrawerProps = {
    */
   geometry?: AgentDrawerGeometry;
   onGeometryChange?: (next: AgentDrawerGeometry) => void;
+  /**
+   * Shell-controlled single source of truth (F5 fix round 1): the shell
+   * container owns the unit `translate3d`, so the drawer must not apply it
+   * again on its inner section — a transformed ancestor becomes the
+   * containing block for `fixed` descendants, stacking the offset 2x on the
+   * drawer while the bar shifts 1x. Size styles still apply here.
+   */
+  disableUnitTransform?: boolean;
 };
 
 type ThreadsResponse = { threads: ThreadSummary[]; nextCursor: string | null };
@@ -793,6 +801,7 @@ export function AgentDrawer({
   bottomOffset = "bottom-22",
   geometry: geometryProp,
   onGeometryChange,
+  disableUnitTransform = false,
 }: AgentDrawerProps) {
   const queryClient = useQueryClient();
   const sidebarOffset = useAgentSidebarOffset();
@@ -926,20 +935,30 @@ export function AgentDrawer({
     if (axis === "s" || axis === "se") {
       const rawHeight = (current.height ?? AGENT_DRAWER_DEFAULT_HEIGHT_PX) + dy;
       if (shouldCollapseDrawerHeight(rawHeight)) {
-        onToggleCollapsed();
+        // Same once-guard as the pointer path: each sub-threshold press
+        // must not toggle an already-collapsed strip back open.
+        if (!collapsedOnceRef.current) {
+          collapsedOnceRef.current = true;
+          onToggleCollapsed();
+        }
         return;
       }
+      collapsedOnceRef.current = false;
       next.height = clampDrawerHeight(rawHeight, window.innerHeight);
     }
     setGeometry(next);
   }
 
+  // Mobile is native: geometry never applies, so a desktop-set offset or
+  // size cannot persist across a viewport shrink without a reload. The
+  // shell-controlled mount likewise owns the unit transform itself (see
+  // disableUnitTransform) — size styles still come from here.
   const unitStyle: CSSProperties | undefined =
-    geometry.x !== 0 || geometry.y !== 0
-      ? { transform: `translate3d(${geometry.x}px, ${geometry.y}px, 0)` }
-      : undefined;
+    isMobile || disableUnitTransform || (geometry.x === 0 && geometry.y === 0)
+      ? undefined
+      : { transform: `translate3d(${geometry.x}px, ${geometry.y}px, 0)` };
   const panelStyle: CSSProperties | undefined =
-    geometry.width == null && geometry.height == null
+    isMobile || (geometry.width == null && geometry.height == null)
       ? undefined
       : {
           ...(geometry.width != null

@@ -261,7 +261,14 @@ describe("shell", () => {
     fireEvent.pointerDown(handle, { button: 0, clientX: 500, clientY: 500 });
     fireEvent.pointerMove(window, { clientX: 550, clientY: 470 });
     fireEvent.pointerUp(window);
-    expect(section.style.transform).toBe("translate3d(50px, -30px, 0)");
+    // Single source of truth: the shell container owns the unit transform
+    // (bar + drawer move as one); the drawer section applies size only, so
+    // the offset never stacks 2x on the transformed-ancestor block.
+    const unit = screen
+      .getByPlaceholderText(/ask anything/i)
+      .closest("div.fixed") as HTMLElement;
+    expect(unit.style.transform).toBe("translate3d(50px, -30px, 0)");
+    expect(section.style.transform).toBe("");
 
     // Close unmounts the drawer; a fresh send remounts it on the same
     // shell-owned geometry — session memory, reset only on reload.
@@ -271,7 +278,11 @@ describe("shell", () => {
 
     const reopened = await screen.findByLabelText("AI agent conversation");
     expect((reopened.firstElementChild as HTMLElement).style.width).toBe("804px");
-    expect(reopened.style.transform).toBe("translate3d(50px, -30px, 0)");
+    expect(
+      (screen.getByPlaceholderText(/ask anything/i).closest("div.fixed") as HTMLElement).style
+        .transform,
+    ).toBe("translate3d(50px, -30px, 0)");
+    expect(reopened.style.transform).toBe("");
   });
 });
 

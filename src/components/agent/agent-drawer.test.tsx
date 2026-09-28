@@ -2597,6 +2597,74 @@ describe("movable drawer (F5)", () => {
     expect(screen.queryByTestId("agent-drawer-resize-se")).toBeNull();
   });
 
+  it("ignores desktop geometry on mobile — no unit transform, no panel size", () => {
+    stubMobile(true);
+    render(
+      <Harness geometry={{ x: 100, y: -80, width: 600, height: 500 }} onGeometryChange={() => {}} />,
+    );
+    const section = screen.getByLabelText("AI agent conversation");
+    expect(section.style.transform).toBe("");
+    const panel = panelOf(section);
+    expect(panel.style.width).toBe("");
+    expect(panel.style.height).toBe("");
+  });
+
+  it("applies size but no unit transform when the shell owns the offset", () => {
+    render(
+      <Harness
+        geometry={{ x: 50, y: -30, width: 804, height: 400 }}
+        onGeometryChange={() => {}}
+        disableUnitTransform
+      />,
+    );
+    const section = screen.getByLabelText("AI agent conversation");
+    // The shell container carries the translate3d; the inner section must
+    // stay untransformed so the offset never stacks 2x.
+    expect(section.style.transform).toBe("");
+    const panel = panelOf(section);
+    expect(panel.style.width).toBe("804px");
+    expect(panel.style.height).toBe("400px");
+  });
+
+  it("collapses exactly once on repeated sub-threshold keyboard shrinks", () => {
+    const onToggleCollapsed = vi.fn();
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    // Fixed collapsed={false}: the parent never flips, so both presses land
+    // on the handle — without the once-guard the toggle would fire twice
+    // (collapse then expand).
+    render(
+      <SidebarProvider>
+        <QueryClientProvider client={client}>
+          <AgentDrawer
+            organizationId={ORGANIZATION}
+            page="overview"
+            mode="quick"
+            role="operator"
+            permissions={[]}
+            pendingPrompt={null}
+            threadId={null}
+            view="thread"
+            onViewChange={() => {}}
+            collapsed={false}
+            onToggleCollapsed={onToggleCollapsed}
+            onClose={() => {}}
+            onThreadChange={() => {}}
+            onPromptConsumed={() => {}}
+            geometry={{ x: 0, y: 0, width: 500, height: 200 }}
+            onGeometryChange={() => {}}
+          />
+        </QueryClientProvider>
+      </SidebarProvider>,
+    );
+    const south = screen.getByTestId("agent-drawer-resize-s");
+    // 200 - 16 = 184 < 192: sub-threshold, docks the strip.
+    fireEvent.keyDown(south, { key: "ArrowUp" });
+    fireEvent.keyDown(south, { key: "ArrowUp" });
+    expect(onToggleCollapsed).toHaveBeenCalledTimes(1);
+  });
+
   it("clamps width to narrow viewports", () => {
     setViewport(500, 768);
     render(<Harness />);

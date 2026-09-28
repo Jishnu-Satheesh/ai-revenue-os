@@ -251,6 +251,10 @@ export function UniversalAgentShell({
               bottomOffset={expanded ? "bottom-32" : "bottom-22"}
               geometry={drawerGeometry}
               onGeometryChange={setDrawerGeometry}
+              // The container above owns the unit translate3d (bar + drawer
+              // move as one); the drawer applies size styles only, so the
+              // offset never stacks 2x on a transformed-ancestor block.
+              disableUnitTransform
             />
           ) : null}
           <div
