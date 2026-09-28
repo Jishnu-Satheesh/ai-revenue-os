@@ -5,6 +5,7 @@
 Design approved in sections 1–5 on 2026-09-24 (brainstorming, architectural path, Approach 2 governed full build).
 Worktree: `.worktrees/governed-channel-intelligence`, branch `staging`.
 No implementation authorized by this document. Implementation requires a separate approved Execution Plan (writing-plans skill) before any Tier 2/3 code.
+Task B autonomy (2026-09-27–28, lane 2, commits bd0f93a→ce0c1be): L1 zero-click escalate + L2 zero-click research dispatch proven live (B5 route corr a96a9718, run_06gec553); L2 worker execution gated by the deployed Trigger allowlist (AGENT_CHAT_DISABLED, user-step redeploy). L3 one-tap watch/draft execute paths are test-proven only (433/433 agent vitest): live watch-tap re-routes fail closed on tap encodings (structured-output parse) and live draft-tap has no pick surface (ideas card systematically null — synthesizer schema mismatch, follow-up). Fences hold: taps create, never approve/publish/spend; tenant isolation re-verified by route read (B5).
 
 ## 1. Goal
 
