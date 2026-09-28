@@ -28,8 +28,11 @@ import {
   messageDigestFor,
 } from "@/modules/agent-chat/application/thread-keys";
 import {
+  answerDraftSchema,
   buildAnswerIdempotencyKey,
+  buildFallbackAnswer,
   encodeAnswerBody,
+  parseAnswerBody,
   writeAnswer,
   type AnswerDraft,
   type AnswerSynthesizer,
@@ -643,6 +646,71 @@ async function synthesizeAssistantAnswer(
   }
 }
 
+/**
+ * Answers-body prefix (mirrors `encodeQuestionnaireAnswerBody`): answers
+ * rows are turn metadata, not new turns, so turn scope skips them.
+ */
+const ANSWERS_BODY_PREFIX = "[answers ";
+
+/**
+ * The turn's kept assistant row (G3 honest skip): the latest `assistant`
+ * message after the latest non-answers `user` message. Answers rows are
+ * skipped because they belong to the turn they answer — "the turn's row"
+ * in tests means the assistant row(s) after the latest user ask, and
+ * exactly one must exist after an answers submit (reused, or synthesized
+ * once when the turn has none yet). Null when the turn has no row yet, or
+ * when there is no ask at all.
+ */
+export function findTurnAssistantRow(
+  messages: readonly ThreadMessageView[],
+): ThreadMessageView | null {
+  let askIndex = -1;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    if (
+      candidate &&
+      candidate.role === "user" &&
+      !(candidate.body ?? "").startsWith(ANSWERS_BODY_PREFIX)
+    ) {
+      askIndex = index;
+      break;
+    }
+  }
+  if (askIndex === -1) return null;
+  for (let index = messages.length - 1; index > askIndex; index -= 1) {
+    const candidate = messages[index];
+    if (candidate && candidate.role === "assistant") return candidate;
+  }
+  return null;
+}
+
+/**
+ * Returns the kept turn row as the turn message without synthesizing a
+ * second assistant row (G3 skip: no new RPC, no update path, no delete —
+ * the existing row is simply returned). The draft parses back out of the
+ * durable body, which round-trips the writer's encoding; an unreadable
+ * row degrades to the honest general fallback rather than failing the
+ * route.
+ */
+function reuseTurnAnswer(message: ThreadMessageView): RouteAnswer {
+  const parsed = parseAnswerBody(message.body ?? "");
+  const draft = answerDraftSchema.safeParse({
+    body: parsed.body,
+    citations: parsed.citations,
+    limitations: parsed.limitations,
+    estimates: parsed.estimates,
+  });
+  if (draft.success) return { message, draft: draft.data, replayed: true };
+  return {
+    message,
+    draft: buildFallbackAnswer(
+      null,
+      "The kept turn answer was not re-readable; this stays general.",
+    ),
+    replayed: true,
+  };
+}
+
 async function rehydrateKeptAnswer(
   deps: ThreadServiceDeps,
   input: { organizationId: string },
@@ -867,13 +935,21 @@ export function createThreadService(deps: ThreadServiceDeps) {
       threadId: string;
       page?: string;
       /**
-       * Client token for the later executor dispatch. Classification is
-       * read-only and unkeyed; the token is carried in the audit event so
-       * the future keyed dispatch can dedup on the token that produced
-       * this routing — and a repeated route with the same token replays
-       * the kept routing without a duplicate event.
-       */
+        * Client token for the later executor dispatch. Classification is
+        * read-only and unkeyed; the token is carried in the audit event so
+        * the future keyed dispatch can dedup on the token that produced
+        * this routing — and a repeated route with the same token replays
+        * the kept routing without a duplicate event.
+        */
       idempotencyKey?: string;
+      /**
+        * Kept turn row for the answers re-route (G3 honest skip). When
+        * present, the turn already holds a fresh assistant row from the
+        * initial route synthesis, so the re-route returns it as the turn
+        * message instead of synthesizing a second one. Absent → synthesize
+        * exactly once as today. Direct routes never pass this.
+        */
+      reuseAnswer?: ThreadMessageView | null;
     }): Promise<{
       intent: AgentIntent;
       confidence: "high" | "medium" | "low";
@@ -1046,15 +1122,19 @@ export function createThreadService(deps: ThreadServiceDeps) {
         routingNote,
         thread: routedThread,
         research,
-        answer: await synthesizeAssistantAnswer(deps, {
-          organizationId: input.organizationId,
-          actorId: input.actorId,
-          role: input.role,
-          thread: routedThread,
-          message,
-          pack,
-          routingNote,
-        }),
+        // G3 honest skip: the answers re-route carries the turn's kept row
+        // and returns it — no second synthesis, no second assistant row.
+        answer: input.reuseAnswer
+          ? reuseTurnAnswer(input.reuseAnswer)
+          : await synthesizeAssistantAnswer(deps, {
+              organizationId: input.organizationId,
+              actorId: input.actorId,
+              role: input.role,
+              thread: routedThread,
+              message,
+              pack,
+              routingNote,
+            }),
       };
       if (dedupKey) {
         dedup.set(dedupKey, {
@@ -1107,6 +1187,15 @@ export function createThreadService(deps: ThreadServiceDeps) {
           "This chat was not found in your organization.",
         );
       }
+      // G3 honest skip: read the turn before appending, so the re-route
+      // below reuses the turn's existing assistant row (when the initial
+      // route already synthesized one) instead of appending a second.
+      const history = await deps.threads.listMessages({
+        organizationId: input.organizationId,
+        threadId: input.threadId,
+        limit: 50,
+      });
+      const keptTurnRow = findTurnAssistantRow(history.messages);
       const appended = await deps.threads.appendMessageKeyed({
         organizationId: input.organizationId,
         actorId: input.actorId,
@@ -1137,6 +1226,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
         threadId: input.threadId,
         ...(input.page ? { page: input.page } : {}),
         idempotencyKey: `${input.idempotencyKey}:reroute`,
+        ...(keptTurnRow ? { reuseAnswer: keptTurnRow } : {}),
       });
       return {
         message,

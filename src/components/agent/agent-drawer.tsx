@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as R
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
+  CheckIcon,
   ChevronDownIcon,
   ChevronRightIcon,
   GripVerticalIcon,
@@ -12,6 +13,7 @@ import {
   SparklesIcon,
   XIcon,
 } from "lucide-react";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
 
 import {
   AgentQuestionnaireCard,
@@ -408,6 +410,40 @@ async function agentPostJson(
 function formatAnswers(answers: Record<string, unknown>): string {
   return Object.entries(answers)
     .map(([key, value]) => `${key}: ${Array.isArray(value) ? value.join(", ") : String(value)}`)
+    .join(" · ");
+}
+
+/**
+ * Saved-answer rows (G3): any message carrying structured
+ * `questionnaireAnswers`, plus any `user` message with an `[answers …]`
+ * body. Both render as `You clarified: …` Marker receipts — the raw
+ * `[answers …]` body text never reaches the DOM.
+ */
+function isAnswersRowMessage(message: ThreadMessageView): boolean {
+  if (message.questionnaireAnswers !== null && message.questionnaireAnswers !== undefined) {
+    return true;
+  }
+  return (message.body ?? "").startsWith("[answers ");
+}
+
+/**
+ * One-line summary for a saved-answer row: the structured record when one
+ * is attached, otherwise the `key: value` lines under the `[answers …]`
+ * header joined the same way. Always body-derived copy, never the raw
+ * header text.
+ */
+function summarizeAnswersBody(message: ThreadMessageView): string {
+  if (
+    typeof message.questionnaireAnswers === "object" &&
+    message.questionnaireAnswers !== null
+  ) {
+    return formatAnswers(message.questionnaireAnswers as Record<string, unknown>);
+  }
+  const lines = (message.body ?? "").split("\n");
+  const [, ...rest] = lines;
+  return (rest ?? [])
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
     .join(" · ");
 }
 
@@ -1612,8 +1648,15 @@ export function AgentDrawer({
   const questionnaire =
     watchChoice?.outcome === "duplicate" ? watchChoice.card : (routeResult?.questionnaire ?? null);
   const cardKey = questionnaire?.resumeKey ?? null;
+  // The answered card hides while its save is in flight — the Marker
+  // shimmer below owns the turn until the re-routed card (or the error)
+  // lands. A failed save clears `isPending`, so the card returns retryable.
   const cardVisible = Boolean(
-    questionnaire && cardKey && !submittedAnswers[cardKey] && !dismissedCards.includes(cardKey),
+    questionnaire &&
+      cardKey &&
+      !submittedAnswers[cardKey] &&
+      !dismissedCards.includes(cardKey) &&
+      !submitAnswers.isPending,
   );
 
   // Manual fallback trigger (FINAL fix for I-1): the restored forms mount
@@ -1817,7 +1860,20 @@ export function AgentDrawer({
                 </div>
               ) : null}
               {messages.map((message) =>
-                message.role === "assistant" ? (
+                isAnswersRowMessage(message) ? (
+                  <Marker key={message.id}>
+                    <MarkerIcon aria-label="Answers saved">
+                      <CheckIcon aria-hidden="true" />
+                    </MarkerIcon>
+                    <MarkerContent>
+                      {summarizeAnswersBody(message).length > 0 ? (
+                        <>You clarified: {summarizeAnswersBody(message)}</>
+                      ) : (
+                        "You clarified."
+                      )}
+                    </MarkerContent>
+                  </Marker>
+                ) : message.role === "assistant" ? (
                   <AgentResponseMessage key={message.id} message={message} />
                 ) : (
                   <div
@@ -1871,14 +1927,6 @@ export function AgentDrawer({
                   growthIntelligenceHref={`/organizations/${organizationId}/growth-intelligence`}
                 />
               ) : null}
-              {messages
-                .filter((message) => message.questionnaireAnswers)
-                .map((message) => (
-                  <p key={`saved-${message.id}`} className="text-sm text-muted-foreground">
-                    Saved answers:{" "}
-                    {formatAnswers(message.questionnaireAnswers as Record<string, unknown>)}
-                  </p>
-                ))}
               {cardVisible && questionnaire ? (
                 <AgentQuestionnaireCard
                   key={questionnaire.resumeKey}
@@ -1913,14 +1961,18 @@ export function AgentDrawer({
                 />
               ) : null}
               {submitAnswers.isPending ? (
-                <p role="status" className="text-sm text-muted-foreground">
-                  Saving answers…
-                </p>
+                <Marker role="status">
+                  <MarkerContent>Saving answers…</MarkerContent>
+                  <Skeleton className="h-4 w-3/5" />
+                </Marker>
               ) : null}
               {lastSaved ? (
-                <p className="text-sm text-muted-foreground">
-                  Answers saved: {formatAnswers(lastSaved.answers)}
-                </p>
+                <Marker>
+                  <MarkerIcon aria-label="Answers saved">
+                    <CheckIcon aria-hidden="true" />
+                  </MarkerIcon>
+                  <MarkerContent>You clarified: {formatAnswers(lastSaved.answers)}</MarkerContent>
+                </Marker>
               ) : null}
               {(routeResult?.intent === "watch" || watchChoice) && threadId ? (
                 <WatchOneTapCard

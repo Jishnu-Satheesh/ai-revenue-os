@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createResearchAutoSeams,
   createThreadService,
+  findTurnAssistantRow,
   mintResearchAutoAttestation,
   permissionsForRole,
   routingContextDigest,
@@ -1008,5 +1009,45 @@ describe("research auto seams (B3)", () => {
       },
     });
     await expect(seams.resolveProfilePointer?.({ organizationId: "o" })).resolves.toBeNull();
+  });
+});
+
+describe("findTurnAssistantRow (G3 turn scope)", () => {
+  const ask = { ...MESSAGE, id: "m-ask", body: "what do we know?" };
+  const assist = {
+    ...MESSAGE,
+    id: "a-1",
+    role: "assistant" as const,
+    body: "Weekday demand looks soft in the stored window.",
+  };
+  const answersRow = {
+    ...MESSAGE,
+    id: "m-answers",
+    body: "[answers missing_fields]\nfrequency: weekly",
+  };
+
+  it("returns the assistant row after the latest ask", () => {
+    expect(findTurnAssistantRow([ask, assist])?.id).toBe("a-1");
+  });
+
+  it("skips answers rows: they are turn metadata, not new turns", () => {
+    expect(findTurnAssistantRow([ask, assist, answersRow])?.id).toBe("a-1");
+  });
+
+  it("returns null when the turn has no assistant row yet", () => {
+    expect(findTurnAssistantRow([ask])).toBeNull();
+    expect(findTurnAssistantRow([ask, assist, { ...ask, id: "m-ask-2" }])).toBeNull();
+  });
+
+  it("returns null when there is no ask", () => {
+    expect(findTurnAssistantRow([])).toBeNull();
+    expect(findTurnAssistantRow([answersRow])).toBeNull();
+  });
+
+  it("lets the latest turn win", () => {
+    const assist2 = { ...assist, id: "a-2" };
+    expect(findTurnAssistantRow([ask, assist, { ...ask, id: "m-ask-2" }, assist2])?.id).toBe(
+      "a-2",
+    );
   });
 });

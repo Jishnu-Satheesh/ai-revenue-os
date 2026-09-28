@@ -477,7 +477,12 @@ describe("history", () => {
     await user.click(await screen.findByRole("button", { name: /open new chat/i }));
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-    expect(within(thread).getByText(/saved answers: evidence_window: 60d/i)).toBeInTheDocument();
+    expect(
+      within(thread).getByText(/you clarified: evidence_window: 60d/i),
+    ).toBeInTheDocument();
+    // One Marker receipt, never the raw body or an empty-message card.
+    expect(within(thread).queryByText(/\[answers/)).toBeNull();
+    expect(within(thread).queryByText("(empty message)")).toBeNull();
   });
 
   it("shows chat-mimicking skeleton bubbles while a thread loads", async () => {
@@ -673,7 +678,8 @@ describe("questionnaire cards", () => {
 
     await user.click(screen.getByText("Yes"));
     await user.click(screen.getByRole("button", { name: /submit/i }));
-    expect(await screen.findByText(/answers saved: confirm_upgrade: true/i)).toBeInTheDocument();
+    // The persisted answers row plus the last-saved confirmation.
+    expect(await screen.findAllByText(/you clarified: confirm_upgrade: true/i)).toHaveLength(2);
   });
 
   it("blocks an empty required answer with an error and no submit", async () => {
@@ -916,8 +922,10 @@ describe("questionnaire submit wiring", () => {
 
     // The answers message joins the thread and the re-routed card replaces it.
     expect(await screen.findByText("Evidence window needed")).toBeInTheDocument();
-    expect(screen.getByText(/\[answers deepthink_upgrade\]/)).toBeInTheDocument();
-    expect(screen.getByText(/answers saved: confirm_upgrade: true/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/you clarified: confirm_upgrade: true/i)).toHaveLength(2);
+    // Raw `[answers …]` text appears nowhere in the DOM.
+    expect(screen.queryByText(/\[answers/)).toBeNull();
+    expect(document.body.innerHTML).not.toMatch("[answers");
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const answersCall = fetchMock.mock.calls.find(
@@ -987,10 +995,10 @@ describe("questionnaire submit wiring", () => {
     expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
     await user.click(screen.getByText("Yes"));
     await user.click(screen.getByRole("button", { name: /submit/i }));
-    // The POST hangs: the pending lock is on and the checked confirm must
-    // stay valid — no red error beside the saving note.
+    // The POST hangs: the answered card hides behind the saving shimmer, so
+    // no red error can appear beside the saving note.
     expect(await screen.findByText(/saving answers/i)).toBeInTheDocument();
-    expect(screen.queryByText(/confirm to continue/i)).not.toBeVisible();
+    expect(screen.queryByText(/confirm to continue/i)).toBeNull();
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => {
@@ -1036,6 +1044,49 @@ describe("questionnaire submit wiring", () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(answersPosts()).toHaveLength(1);
     }
+  });
+
+  it("renders the saved row and the confirmation as You-clarified Markers, never raw answers text", async () => {
+    globalThis.fetch = mockAgentFetch({
+      route: upgradeRoute,
+      answers: {
+        message: ANSWERS_MESSAGE,
+        replayed: false,
+        answers: { confirm_upgrade: "true" },
+        resumeKey: UPGRADE.resumeKey,
+        intent: "campaign_advice",
+        questionnaire: EVIDENCE_WINDOW,
+        correlationId: "c6",
+      },
+    }) as never;
+    await answerUpgradeCard();
+
+    // Both the persisted answers row and the last-saved confirmation render
+    // as Marker receipts with the same one-line summary.
+    const clarified = await screen.findAllByText(/you clarified: confirm_upgrade: true/i);
+    expect(clarified).toHaveLength(2);
+    for (const row of clarified) {
+      expect(row.closest('[data-slot="marker"]')).not.toBeNull();
+    }
+    // Raw `[answers …]` text appears nowhere in the DOM.
+    expect(screen.queryByText(/\[answers/)).toBeNull();
+    expect(document.body.innerHTML).not.toMatch("[answers");
+  });
+
+  it("hides the answered card during save behind a Marker shimmer with a skeleton", async () => {
+    globalThis.fetch = mockAgentFetch({ route: upgradeRoute, answers: "hang" }) as never;
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
+    await user.click(screen.getByText("Yes"));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    // The answered card hides while the save is in flight...
+    expect(await screen.findByText(/saving answers/i)).toBeInTheDocument();
+    expect(screen.queryByText("Research needed — switch to DeepThink?")).toBeNull();
+    // ...behind a Marker shimmer carrying a Skeleton.
+    const shimmer = screen.getByText(/saving answers/i).closest('[data-slot="marker"]');
+    expect(shimmer).not.toBeNull();
+    expect(shimmer?.querySelector('[data-slot="skeleton"]')).not.toBeNull();
   });
 });
 
@@ -1476,7 +1527,7 @@ describe("nonce idempotency keys (M8)", () => {
     expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
     await user.click(screen.getByText("Yes"));
     await user.click(screen.getByRole("button", { name: /submit/i }));
-    expect(await screen.findByText(/answers saved: confirm_upgrade: true/i)).toBeInTheDocument();
+    expect(await screen.findAllByText(/you clarified: confirm_upgrade: true/i)).toHaveLength(2);
 
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     const answersCall = fetchMock.mock.calls.find(([url]) => String(url).includes("/answers"));
@@ -1518,7 +1569,7 @@ describe("fresh routing codes (F2)", () => {
     expect(await screen.findByText("Research needed — switch to DeepThink?")).toBeInTheDocument();
     await user.click(screen.getByText("Yes"));
     await user.click(screen.getByRole("button", { name: /submit/i }));
-    expect(await screen.findByText(/answers saved: confirm_upgrade: true/i)).toBeInTheDocument();
+    expect(await screen.findAllByText(/you clarified: confirm_upgrade: true/i)).toHaveLength(2);
 
     // Steps stay always visible inline: the re-route codes render with no
     // Steps trigger to open first.

@@ -641,6 +641,165 @@ describe("routeLatest synthesize step", () => {
     );
     expect(assistantCalls).toHaveLength(1);
   });
+
+  it("reuses the turn's assistant row on the answers re-route instead of synthesizing a second", async () => {
+    const draft: AnswerDraft = {
+      body: "Weekday demand looks soft in the stored window.",
+      citations: [],
+      limitations: [
+        "No new research ran for this answer; it uses stored organization context only.",
+      ],
+      estimates: [],
+    };
+    const threads = mockThreads({
+      listMessages: vi.fn(async () => ({
+        messages: [
+          { ...USER_MESSAGE },
+          {
+            id: "a1",
+            threadId: "t1",
+            role: "assistant",
+            body: encodeAnswerBody(draft),
+            questionnaireAnswers: null,
+            markerReceipts: null,
+            citations: null,
+            createdAt: "2026-09-25T10:02:00.000Z",
+          },
+        ],
+        nextCursor: null,
+      })),
+    });
+    const synthesize = vi.fn(async () => ({
+      body: "Second synthesis.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    }));
+    const service = routeService(threads, synthesize);
+    const out = await service.submitAnswers({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      spec: {
+        kind: "missing_fields" as const,
+        title: "One more detail",
+        resumeKey: "router:watch:overview:abcdef1234567890",
+        items: [
+          {
+            key: "frequency",
+            label: "How often?",
+            kind: "single_select" as const,
+            required: true,
+            options: [
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+            ],
+          },
+        ],
+      },
+      answers: { frequency: "weekly" },
+      idempotencyKey: "answers-key-0000000000000002",
+      page: "overview",
+    });
+    // The turn already holds a fresh assistant row from the initial route
+    // synthesis: the re-route must not synthesize a second one.
+    expect(synthesize).not.toHaveBeenCalled();
+    const assistantCalls = threads.__appendMessageKeyed.mock.calls.filter(
+      (call) => (call[0] as { role: string }).role === "assistant",
+    );
+    expect(assistantCalls).toHaveLength(0);
+    // The kept row returns as the turn message, parsing back into its draft.
+    expect(out.answer?.message?.id).toBe("a1");
+    expect(out.answer?.replayed).toBe(true);
+    expect(out.answer?.draft.body).toMatch(/weekday demand looks soft/i);
+  });
+
+  it("synthesizes exactly once when the turn has no assistant row yet", async () => {
+    const threads = mockThreads();
+    const synthesize = vi.fn(async () => ({
+      body: "Stored context says hello.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    }));
+    const service = routeService(threads, synthesize);
+    const out = await service.submitAnswers({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      spec: {
+        kind: "missing_fields" as const,
+        title: "One more detail",
+        resumeKey: "router:watch:overview:abcdef1234567890",
+        items: [
+          {
+            key: "frequency",
+            label: "How often?",
+            kind: "single_select" as const,
+            required: true,
+            options: [
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+            ],
+          },
+        ],
+      },
+      answers: { frequency: "weekly" },
+      idempotencyKey: "answers-key-0000000000000003",
+      page: "overview",
+    });
+    expect(synthesize).toHaveBeenCalledTimes(1);
+    const assistantCalls = threads.__appendMessageKeyed.mock.calls.filter(
+      (call) => (call[0] as { role: string }).role === "assistant",
+    );
+    expect(assistantCalls).toHaveLength(1);
+    expect(out.answer?.message?.role).toBe("assistant");
+    expect(out.answer?.replayed).toBe(false);
+  });
+
+  it("returns the kept row on idempotent answers replay", async () => {
+    const threads = mockThreads();
+    const synthesize = vi.fn(async () => ({
+      body: "Stored context says hello.",
+      citations: [],
+      limitations: [],
+      estimates: [],
+    }));
+    const service = routeService(threads, synthesize);
+    const input = {
+      organizationId: "o",
+      actorId: "u",
+      role: "operator" as const,
+      threadId: "t1",
+      spec: {
+        kind: "missing_fields" as const,
+        title: "One more detail",
+        resumeKey: "router:watch:overview:abcdef1234567890",
+        items: [
+          {
+            key: "frequency",
+            label: "How often?",
+            kind: "single_select" as const,
+            required: true,
+            options: [
+              { value: "daily", label: "Daily" },
+              { value: "weekly", label: "Weekly" },
+            ],
+          },
+        ],
+      },
+      answers: { frequency: "weekly" },
+      idempotencyKey: "answers-key-0000000000000004",
+      page: "overview",
+    };
+    const first = await service.submitAnswers(input);
+    const second = await service.submitAnswers(input);
+    expect(synthesize).toHaveBeenCalledTimes(1);
+    expect(second.answer?.message?.id).toBe(first.answer?.message?.id);
+    expect(second.answer?.replayed).toBe(true);
+  });
 });
 
 describe("AgentResponseMessage", () => {
@@ -876,5 +1035,41 @@ describe("answer-writer chatbot voice (F2)", () => {
     );
     expect(draft.body).toMatch(/didn't hold together/i);
     expect(draft.body).toMatch(/stored organization context/i);
+  });
+});
+
+describe("answer quality (G3): identity restraint", () => {
+  it("never restates org identity basics unless asked — leads with the news", async () => {
+    const pack = await testPack();
+    for (const mode of ["quick", "deepthink"] as const) {
+      const { system } = buildSynthesisPrompt(pack, "note", mode);
+      expect(system).toMatch(/identity basics/i);
+      expect(system).toMatch(/unless.*ask/i);
+      expect(system).toMatch(/lead with the news/i);
+    }
+  });
+
+  it("fallbacks carry no identity text — facts travel in citations only", async () => {
+    const pack = await testPack();
+    const statements = pack.lanes.identity.facts.map((fact) => fact.statement);
+    expect(statements.length).toBeGreaterThan(0);
+    const reasons = [
+      "No context pack was bound to this answer.",
+      "Answer synthesis is not configured; using stored context only.",
+      "Answer synthesis failed; using stored context only.",
+      "The drafted answer failed validation; using stored context only.",
+      "test reason",
+    ];
+    const targets = [null, pack, { ...pack, refused: true }] as const;
+    for (const reason of reasons) {
+      for (const target of targets) {
+        const draft = buildFallbackAnswer(target, reason);
+        for (const statement of statements) {
+          expect(draft.body).not.toContain(statement);
+        }
+      }
+    }
+    // Grounded fallbacks still cite the facts they voice around.
+    expect(buildFallbackAnswer(pack, "test reason").citations.length).toBeGreaterThan(0);
   });
 });
