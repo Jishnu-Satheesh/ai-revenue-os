@@ -670,7 +670,12 @@ describe("questionnaire cards", () => {
     // Locking the step must not invalidate the checked confirm: the actions
     // hide with the locked step and no validation error appears.
     rerender(<AgentQuestionnaireCard spec={UPGRADE} onSubmit={onSubmit} disabled />);
-    expect(screen.queryByRole("button", { name: /submit/i })).toBeNull();
+    // No *enabled* submit may remain (the primitive hides fully-disabled
+    // steps, so the button is usually gone rather than disabled — assert the
+    // affordance, not the primitive's hide behavior), and no error shows.
+    for (const button of screen.queryAllByRole("button", { name: /submit/i })) {
+      expect(button).toBeDisabled();
+    }
     expect(screen.queryByText(/confirm to continue/i)).not.toBeVisible();
   });
 
@@ -937,9 +942,13 @@ describe("questionnaire submit wiring", () => {
           String(url).includes("/answers") && (init as RequestInit | undefined)?.method === "POST",
       );
     await waitFor(() => expect(answersPosts().length).toBeGreaterThanOrEqual(1));
-    // Let a raced second POST land if the guard missed it.
-    await new Promise((resolve) => setTimeout(resolve, 200));
-    expect(answersPosts()).toHaveLength(1);
+    // A raced second POST would land inside this window; assert the count
+    // stays 1 throughout instead of sleeping once and spot-checking.
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < 500) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(answersPosts()).toHaveLength(1);
+    }
   });
 });
 
@@ -1003,7 +1012,6 @@ describe("thread checkpoint polling", () => {
     });
     expect(screen.getByText(/switched to deepthink/i)).toBeInTheDocument();
   });
-
 
   it("polls one row per tick, never the thread collection", async () => {
     globalThis.fetch = mockAgentFetch() as never;
