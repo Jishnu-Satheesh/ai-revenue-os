@@ -1119,8 +1119,11 @@ export function AgentDrawer({
    * Durable-read refresh (Slice A): the route/answers re-route persists the
    * assistant row server-side, but the POST responses carry no message
    * bodies back — rendering always reads durable GET rows, never POST
-   * echoes and never a token stream. Merges by id so locally appended rows
-   * (user prompt, answers receipt) survive the refresh.
+   * echoes and never a token stream. Merges by id, first-seen wins: locally
+   * appended rows (optimistic prompt, answers receipt) survive the refresh,
+   * and same-id rows can never diverge in production (fenced keyed RPCs
+   * return the identical body per id — idempotency), so keeping the local
+   * copy is safe and prevents receipt loss on a stale echo.
    */
   async function refreshMessages(refreshThreadId: string): Promise<void> {
     try {
@@ -1165,6 +1168,8 @@ export function AgentDrawer({
   const streamKeyRef = useRef(0);
   const streamAbortRef = useRef<AbortController | null>(null);
   const [liveStream, setLiveStream] = useState<AgentLiveStream | null>(null);
+  // Settle guarantee: state (not a ref) so the flag flip itself renders.
+  const [endReceived, setEndReceived] = useState(false);
 
   function abortLiveStream(): void {
     streamAbortRef.current?.abort();
@@ -1219,7 +1224,10 @@ export function AgentDrawer({
             // route's row, `replayed: true`): any stale `stream-draft` for
             // the turn is dropped before the re-read, so exactly one
             // assistant row lands per streamed turn and steps flip terminal
-            // when the durable row arrives.
+            // when the durable row arrives. The validated end marks the
+            // turn received: steps go terminal on this flag even if the
+            // refresh lags, so the stuck Checking state is unreachable.
+            setEndReceived(true);
             const draftId = `stream-draft:${args.userMessageId}`;
             setLiveStream(null);
             setMessages((previous) =>
@@ -1246,6 +1254,10 @@ export function AgentDrawer({
                 citations: null,
                 createdAt: new Date().toISOString(),
               };
+              // Draft-only end with a validated draft is still a validated
+              // answer: the draft renders AND the turn counts received, so
+              // steps go terminal with the draft on screen.
+              setEndReceived(true);
               setLiveStream(null);
               setMessages((previous) =>
                 previous.some((message) => message.id === draftMessage.id)
@@ -1353,6 +1365,9 @@ export function AgentDrawer({
       };
     },
     onMutate: (vars) => {
+      // Settle guarantee: a new send starts a clean turn — the previous
+      // turn's end-received flag must not stick the next turn done.
+      setEndReceived(false);
       // G1 honest send: the user's bubble renders on mutate, before the
       // server round-trip lands. The optimistic row carries the nonce client
       // key, so the confirm below replaces exactly one row, never doubling.
@@ -1620,7 +1635,9 @@ export function AgentDrawer({
     onMutate: () => {
       // Navigate first, load second: the thread view opens immediately with
       // chat-mimicking skeleton bubbles while the durable read lands.
-      // Reopens never resume a stream — any live one dies here.
+      // Reopens never resume a stream — any live one dies here. The reloaded
+      // turn starts clean: a leaked end flag must not stick it done.
+      setEndReceived(false);
       abortLiveStream();
       setLiveStream(null);
       onViewChange("thread");
@@ -1654,6 +1671,8 @@ export function AgentDrawer({
 
   function startNewThread() {
     onThreadChange(null);
+    // A fresh conversation starts clean: no leaked end flag.
+    setEndReceived(false);
     abortLiveStream();
     setLiveStream(null);
     setMessages([]);
@@ -1687,14 +1706,24 @@ export function AgentDrawer({
   // still reads `running`; a `running` thread with no assistant row yet is
   // genuinely in flight and keeps the single narrating row.
   const turnSettled = messages.some((message) => message.role === "assistant");
+  // Settle guarantee: a validated `end` (durable row or validated draft)
+  // settles the turn even if the refresh lags or pending/stream flags wedge
+  // — end-received with a routed turn present outranks them by construction.
+  // Gated on routeResult/liveThread so a leaked flag can never prematurely
+  // settle an unrouted turn; resets on send/reopen/new-chat keep next turns
+  // clean. Failures still error first; pre-end streaming still routes.
+  const endReceivedForTurn =
+    endReceived && (routeResult !== null || liveThread !== null);
   const phase: AgentStepPhase =
     turnFailure
       ? "error"
-      : send.isPending || streamActive
-        ? "routing"
-        : routeResult || liveThread
-          ? liveThread?.status === "running" && !turnSettled
-            ? "routing"
+      : endReceivedForTurn
+        ? "done"
+        : send.isPending || streamActive
+          ? "routing"
+          : routeResult || liveThread
+            ? liveThread?.status === "running" && !turnSettled
+              ? "routing"
             : "done"
           : "idle";
 

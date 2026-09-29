@@ -3091,3 +3091,228 @@ describe("honest send failures (G1)", () => {
     expect(screen.queryByText(/answers saved:/i)).not.toBeInTheDocument();
   });
 });
+
+describe("settle guarantee (end-received)", () => {
+  const ASSISTANT: ThreadMessageView = {
+    id: "88888888-8888-4888-8888-888888888888",
+    threadId: THREAD.id,
+    role: "assistant",
+    body: "Durable answer with citations.",
+    questionnaireAnswers: null,
+    markerReceipts: null,
+    citations: null,
+    createdAt: "2026-09-25T10:00:03.000Z",
+  };
+  const END_CORRELATION = "99999999-9999-4999-8999-999999999999";
+
+  function tokenFrame(text: string): string {
+    return `event: token\ndata: ${JSON.stringify({ text })}\n\n`;
+  }
+  const DONE_FRAME = "event: done\ndata: [DONE]\n\n";
+  function endFrame(payload: Record<string, unknown>): string {
+    return `event: end\ndata: ${JSON.stringify(payload)}\n\n`;
+  }
+  function endPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      messageId: ASSISTANT.id,
+      replayed: true,
+      fallback: false,
+      reason: null,
+      draft: { body: "Hello, world.", citations: [], limitations: [], estimates: [] },
+      correlationId: END_CORRELATION,
+      ...overrides,
+    };
+  }
+
+  it("settles steps terminal when end arrives but the durable read lags (no assistant row yet)", async () => {
+    // Live E2E: a valid end validates, yet steps stick on Checking because
+    // the row-merge lags. End-received must settle steps by construction.
+    const running: ThreadSummary = { ...THREAD, status: "running" };
+    globalThis.fetch = mockAgentFetch({
+      stream: [DONE_FRAME, endFrame(endPayload())],
+      messages: [USER_MESSAGE],
+      thread: running,
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("What do we know?")).toBeInTheDocument();
+    // The routed turn lands; the durable assistant row never arrives in the
+    // lagged read, yet the validated end settles the steps.
+    expect(await within(thread).findByText(/understood: memory answer/i)).toBeInTheDocument();
+    const steps = within(thread).getByLabelText("Agent run steps");
+    await waitFor(() => {
+      expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(0);
+    });
+    expect(steps.querySelector('[data-slot="spinner"]')).toBeNull();
+    expect(within(steps).queryByText(/checking organization memory/i)).toBeNull();
+    expect(within(steps).queryByText(/thinking/i)).toBeNull();
+    expect(within(steps).getByText("Checked organization memory")).toBeInTheDocument();
+  });
+
+  it("merges the durable read with no duplicates on end", async () => {
+    // Production-honest fixture: fenced keyed RPCs return the identical body
+    // per id, so same-id rows never diverge — the durable read carries the
+    // canonical bodies and the merge keeps exactly one row per id.
+    const canonical: ThreadMessageView = { ...USER_MESSAGE };
+    globalThis.fetch = mockAgentFetch({
+      stream: [DONE_FRAME, endFrame(endPayload())],
+      messages: [canonical, ASSISTANT],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
+    });
+    // One user bubble, one assistant bubble, never duplicated.
+    expect(within(thread).getAllByText("What do we know?")).toHaveLength(1);
+    expect(within(thread).getAllByText("Durable answer with citations.")).toHaveLength(1);
+  });
+
+  it("keeps the drop path honest (partial text plus note, durable read, no resume)", async () => {
+    globalThis.fetch = mockAgentFetch({
+      stream: [tokenFrame("Half.")],
+      messages: [USER_MESSAGE, ASSISTANT],
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Half.")).toBeInTheDocument();
+    expect(await within(thread).findByText(/the live answer stopped here/i)).toBeInTheDocument();
+    // The durable read still lands beside the partial preview.
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(
+          ([url, init]) =>
+            String(url).includes("/messages") &&
+            ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+        ),
+      ).toBe(true);
+    });
+    const streams = fetchMock.mock.calls.filter(
+      ([url, init]) =>
+        String(url).includes("/stream") &&
+        ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url, init]) =>
+          String(url).includes("/stream") &&
+          ((init as RequestInit | undefined)?.method ?? "GET") === "GET",
+      ),
+    ).toHaveLength(streams.length);
+  });
+
+  it("resets on a new send so the next turn routes instead of sticking done", async () => {
+    // Two turns in one mount: the first end settles done (lagged read, so
+    // only the end flag can settle it); the second send hangs on route and
+    // must route. Without the reset the second turn sticks done.
+    let routeCalls = 0;
+    const base = mockAgentFetch({
+      stream: [DONE_FRAME, endFrame(endPayload())],
+      messages: [USER_MESSAGE],
+      thread: { ...THREAD, status: "running" },
+    });
+    globalThis.fetch = vi.fn(async (url: unknown, init?: RequestInit) => {
+      const target = String(url);
+      const method = init?.method ?? "GET";
+      if (target.includes("/route") && method === "POST") {
+        routeCalls += 1;
+        if (routeCalls > 1) return new Promise<Response>(() => {});
+      }
+      return base(target, init);
+    }) as never;
+
+    function TwoTurnHarness() {
+      const [client] = useState(
+        () =>
+          new QueryClient({
+            defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+          }),
+      );
+      const [view, setView] = useState<AgentDrawerView>("thread");
+      const [threadId, setThreadId] = useState<string | null>(null);
+      const [prompt, setPrompt] = useState<PendingPrompt | null>(sendPrompt());
+      const [nonce, setNonce] = useState(1);
+      return (
+        <SidebarProvider>
+          <QueryClientProvider client={client}>
+            <button
+              type="button"
+              onClick={() => {
+                const next = nonce + 1;
+                setNonce(next);
+                setPrompt({ text: "Follow-up question?", nonce: next });
+              }}
+            >
+              send-next
+            </button>
+            <AgentDrawer
+              organizationId={ORGANIZATION}
+              page="overview"
+              mode="quick"
+              role="operator"
+              permissions={[]}
+              pendingPrompt={prompt}
+              threadId={threadId}
+              view={view}
+              onViewChange={setView}
+              collapsed={false}
+              onToggleCollapsed={() => {}}
+              onClose={() => {}}
+              onThreadChange={setThreadId}
+              onPromptConsumed={() => setPrompt(null)}
+            />
+          </QueryClientProvider>
+        </SidebarProvider>
+      );
+    }
+
+    const user = userEvent.setup();
+    render(<TwoTurnHarness />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    // First turn settles through the end flag despite the lagged read.
+    expect(await within(thread).findByText(/understood: memory answer/i)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "send-next" }));
+    // Second turn hangs on route: steps route again, never stuck-done.
+    expect(await screen.findByText(/checking organization memory/i)).toBeInTheDocument();
+    const steps = within(thread).getByLabelText("Agent run steps");
+    expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(1);
+  });
+
+  it("resets on reopen so the reloaded running turn routes, and new chat starts clean", async () => {
+    const user = userEvent.setup();
+    const running: ThreadSummary = { ...THREAD, status: "running" };
+    globalThis.fetch = mockAgentFetch({
+      stream: [DONE_FRAME, endFrame(endPayload())],
+      messages: [USER_MESSAGE],
+      thread: running,
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    // First turn settles through the end flag despite the lagged read.
+    expect(await within(thread).findByText(/understood: memory answer/i)).toBeInTheDocument();
+
+    // Reopen the same thread: the reload has no assistant row on a running
+    // thread, so steps route again. A leaked flag would stick done here.
+    await user.click(screen.getByRole("button", { name: /back to thread history/i }));
+    await user.click(await screen.findByRole("button", { name: /open new chat/i }));
+    const reopened = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(reopened).findByText("What do we know?")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(within(reopened).getByLabelText("Agent run steps")).toBeInTheDocument();
+    });
+    const steps = within(reopened).getByLabelText("Agent run steps");
+    await waitFor(() => {
+      expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(1);
+    });
+
+    // New chat clears everything: the empty state returns with no steps.
+    await user.click(screen.getByRole("button", { name: /back to thread history/i }));
+    await user.click(await screen.findByRole("button", { name: "New chat" }));
+    expect(screen.getByText(/ask anything to initiate the conversation/i)).toBeInTheDocument();
+    expect(screen.queryByText("What do we know?")).not.toBeInTheDocument();
+  });
+});
