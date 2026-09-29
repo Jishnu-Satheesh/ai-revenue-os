@@ -8,6 +8,7 @@ import {
 } from "@/modules/agent-chat/application/thread-keys";
 import {
   contextPackSchema,
+  EVIDENCE_WIDENING_EXHAUSTED,
   type ContextPack,
 } from "@/modules/agent-chat/application/context-pack";
 import type { ThreadMode } from "@/modules/agent-chat/infrastructure/thread-repository";
@@ -357,6 +358,7 @@ export function buildSynthesisPrompt(
     "Cite every factual claim with a sourceId from <allowed_sources> and nothing else.",
     "Stored context, gaps, and research status are prompt context, never body text — never mention packs, digests, lanes, sources lists, or limitation lists in the body.",
     "Voice what the evidence does not support inline in the body as one natural sentence, and also list it in limitations, never in the answer body as a section or header — no Sources or Limitations sections in the body.",
+    "Voice the actual evidence window conversationally from the <evidence_window> branch dates — e.g. 'I took data from X to Y, which was available — on that basis…' — and say honestly when coverage widened or is missing; gaps stay labeled, never zero-filled.",
     "Never state a realized or attributed business result (no 'this earned you X'). Forward-looking numbers are estimates only: label Estimate with inputs and assumptions.",
     "Return a single JSON value matching the output contract and nothing else.",
   ].join("\n");
@@ -374,7 +376,7 @@ export function buildSynthesisPrompt(
     `<goals count="${goals.length} of ${pack.lanes.goals.goals.length}">`,
     ...goals.map((goal) => `- [${goal.id}] ${goal.title} (${goal.status})`),
     "</goals>",
-    `<evidence_window days="${pack.window.windowDays}" start="${pack.window.startUtc}" end="${pack.window.endUtc}">`,
+    `<evidence_window days="${pack.window.windowDays}" start="${pack.window.startUtc}" end="${pack.window.endUtc}" branchStart="${pack.window.branchStartLabel}" branchEnd="${pack.window.branchEndLabel}" branchTimezone="${pack.window.branchTimezone}">`,
     ...periods.map(
       (period) =>
         `- ${period.periodStartUtc}..${period.periodEndUtc}: ${period.status}${period.valueMinorUnits !== null && period.valueMinorUnits !== undefined ? ` (${period.valueMinorUnits} minor units)` : ""}`,
@@ -410,7 +412,9 @@ export function buildSynthesisPrompt(
  * The body stays a short warm one-liner in chatbot voice (F2): each case
  * voices its gap inline in one natural sentence — null pack, refused pack,
  * facts, no-facts, model-unset, model-failure, invalid candidate — with no
- * scaffold, no header block, no embedded fact bullets. Cited facts travel
+ * scaffold, no header block, no embedded fact bullets. An exhausted evidence
+ * widening gets the same honest window voice as the synthesis prompt ("I
+ * looked from X to Y…"), dated from the pack's branch labels. Cited facts travel
  * once, in `citations` (parsed back from the encoded row, never rendered
  * as a Sources section); gaps travel in `limitations` (likewise encoded,
  * never rendered as a Limitations section).
@@ -418,9 +422,14 @@ export function buildSynthesisPrompt(
 export function buildFallbackAnswer(pack: ContextPack | null, reason: string): AnswerDraft {
   // G3 identity restraint: fallback bodies stay identity-free by
   // construction — fixed one-liners with no pack interpolation, so no org
-  // name/industry/country text can leak in unasked. Identity facts travel
-  // in `citations` only. Keep it that way: never template fact statements
-  // into `body` below.
+  // name/industry/country text can leak in unasked. The exhausted-widening
+  // body below interpolates only the pack's branch date labels, never fact
+  // statements. Identity facts travel in `citations` only. Keep it that way:
+  // never template fact statements into `body` below.
+  const wideningExhausted =
+    pack !== null &&
+    !pack.refused &&
+    pack.limitations.some((line) => line.includes(EVIDENCE_WIDENING_EXHAUSTED));
   const limitations: string[] = [];
   if (pack) {
     limitations.push(...pack.limitations);
@@ -449,7 +458,9 @@ export function buildFallbackAnswer(pack: ContextPack | null, reason: string): A
       ? "I couldn't reach your full organization context, so this stays general."
       : pack.refused
         ? "Your organization context was too large to use here, so this answer uses no stored evidence."
-        : isUnset && facts.length > 0
+        : wideningExhausted
+          ? `I looked from ${pack.window.branchStartLabel} to ${pack.window.branchEndLabel} and found no governed evidence there, so this stays general.`
+          : isUnset && facts.length > 0
           ? "Answer synthesis isn't set up yet, so here's what I found in your stored organization context."
           : isUnset
             ? "Answer synthesis isn't set up yet, and your stored organization context had no confirmed facts, so this stays general."

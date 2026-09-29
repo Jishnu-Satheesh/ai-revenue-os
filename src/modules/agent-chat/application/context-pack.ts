@@ -15,7 +15,9 @@ import { DomainError } from "@/lib/errors";
  *   `src/modules/organizations/`).
  * - goals lane: goals / constraints / policies routes.
  * - evidence lane: governed ledger readers (`src/modules/economics/`
- *   ledger + growth-progress) over exact 30/60-day ranges.
+ *   ledger + growth-progress) over an auto-widening 30 → 45 → 60 → 90 →
+ *   120-day ladder of exact ranges (first rung with ≥1 governed period
+ *   wins; an exhausted ladder stays an honest gap).
  * - marketProfile lane: Market Profile current version + digest
  *   (`src/modules/growth-intelligence/application/profile-service.ts`,
  *   `profile-repository`, `profile-digest`).
@@ -40,14 +42,33 @@ export const MAX_CONTEXT_PACK_BYTES = 1_000_000;
 /** Safe reason code for oversize refusal (matches router reason-code shape). */
 export const CONTEXT_PACK_OVERSIZED = "CONTEXT_PACK_OVERSIZED";
 
-const WINDOW_DAYS = [30, 60] as const;
+const WINDOW_DAYS = [30, 45, 60, 90, 120] as const;
+
+/** Evidence ladder rungs, narrowest first. The build tries each in turn. */
+export type ContextPackWindowDays = (typeof WINDOW_DAYS)[number];
+
+const windowDaysSchema = z.union([
+  z.literal(30),
+  z.literal(45),
+  z.literal(60),
+  z.literal(90),
+  z.literal(120),
+]);
+
+/**
+ * Limitation fragment marking an exhausted evidence ladder: the reader was
+ * bound, every rung came back failed or with no governed period, and the
+ * pack records the widest rung as an honest gap. The answer-writer keys its
+ * exhausted-widening fallback voice off this fragment.
+ */
+export const EVIDENCE_WIDENING_EXHAUSTED = "after widening the evidence window";
 
 export const contextPackInputSchema = z
   .object({
     organizationId: z.string().trim().min(1).max(200),
     userId: z.string().trim().min(1).max(200),
     branchId: z.string().trim().min(1).max(200).optional(),
-    windowDays: z.union([z.literal(30), z.literal(60)]),
+    windowDays: windowDaysSchema,
     page: z.preprocess(
       (value) => (typeof value === "string" ? value.trim() : value),
       z.string().min(1).max(120),
@@ -119,7 +140,7 @@ const timelineEntrySchema = z
 
 const evidenceWindowSchema = z
   .object({
-    windowDays: z.union([z.literal(30), z.literal(60)]),
+    windowDays: windowDaysSchema,
     startUtc: z.string().trim().min(1).max(80),
     endUtc: z.string().trim().min(1).max(80),
     branchTimezone: z.string().trim().min(1).max(120),
@@ -133,7 +154,7 @@ export const contextPackSchema = z
     organizationId: z.string().trim().min(1).max(200),
     userId: z.string().trim().min(1).max(200),
     branchId: z.string().trim().min(1).max(200).optional(),
-    windowDays: z.union([z.literal(30), z.literal(60)]),
+    windowDays: windowDaysSchema,
     page: z.string().trim().min(1).max(120),
     /** 16-hex stable digest; same format as Task 3's placeholder. */
     digest: z.string().regex(/^[0-9a-f]{16}$/),
@@ -181,7 +202,7 @@ export type ContextPackScope = {
   organizationId: string;
   userId: string;
   branchId?: string;
-  windowDays: 30 | 60;
+  windowDays: ContextPackWindowDays;
   page: string;
 };
 
@@ -205,7 +226,7 @@ export type ContextPackReaders = {
     branchId?: string;
     startUtc: string;
     endUtc: string;
-    windowDays: 30 | 60;
+    windowDays: ContextPackWindowDays;
   }) => Promise<unknown>;
   getMarketProfile?: (scope: { organizationId: string }) => Promise<unknown>;
   searchMemory?: (scope: { organizationId: string; userId: string }) => Promise<unknown>;
@@ -335,6 +356,36 @@ type LanePeriod = z.infer<typeof evidencePeriodSchema>;
 type LaneHit = z.infer<typeof memoryHitSchema>;
 type LaneEntry = z.infer<typeof timelineEntrySchema>;
 
+function parseEvidencePeriods(value: unknown): { periods: LanePeriod[]; dropped: number } {
+  const periods: LanePeriod[] = [];
+  let dropped = 0;
+  for (const row of toArray(value)) {
+    const parsed = evidencePeriodSchema.safeParse(row);
+    if (!parsed.success) {
+      dropped += 1;
+      continue;
+    }
+    if (parsed.data.status === "gap" && parsed.data.valueMinorUnits !== null) {
+      dropped += 1;
+      continue;
+    }
+    periods.push(parsed.data);
+  }
+  periods.sort((left, right) =>
+    left.periodStartUtc < right.periodStartUtc
+      ? -1
+      : left.periodStartUtc > right.periodStartUtc
+        ? 1
+        : 0,
+  );
+  return { periods, dropped };
+}
+
+/** A rung counts as governed only with ≥1 covered, valued period — gaps never qualify. */
+function hasGovernedPeriod(periods: LanePeriod[]): boolean {
+  return periods.some((period) => period.status === "covered" && period.valueMinorUnits !== null);
+}
+
 function emptyLanes(): ContextPack["lanes"] {
   return {
     identity: { facts: [] },
@@ -363,7 +414,7 @@ function refusedPack(args: {
     organizationId: args.scope.organizationId,
     userId: args.scope.userId,
     ...(args.scope.branchId ? { branchId: args.scope.branchId } : {}),
-    windowDays: args.scope.windowDays,
+    windowDays: args.window.windowDays,
     page: args.scope.page,
     digest: "0000000000000000",
     sources: [],
@@ -429,7 +480,10 @@ export async function buildAgentContextPack(
     : { value: "UTC", failed: false };
   const { timezone, fallback } = resolveBranchTimezone(rawTimezone.value ?? "UTC");
   const timezoneFallback = fallback || rawTimezone.failed;
-  const window: ContextPack["window"] = {
+  // Requested-range window: the oversize probe below may refuse with it
+  // before any lane work runs. Lane 3 re-records the widened range after
+  // the ladder lands.
+  let window: ContextPack["window"] = {
     windowDays: scope.windowDays,
     startUtc,
     endUtc,
@@ -542,78 +596,93 @@ export async function buildAgentContextPack(
     limitations.push("No active goals; advice cannot weigh targets.");
   }
 
-  // Lane 3 — governed evidence over the exact window. Missing coverage is a
-  // gap entry (value null), never a zero.
+  // Lane 3 — governed evidence over an auto-widening ladder: 30 → 45 →
+  // 60 → 90 → 120 days, stopping at the first rung with ≥1 governed
+  // period. A failed, empty, or all-gap rung widens; an exhausted ladder
+  // records the widest rung as an honest gap. Gaps are entries with null
+  // values, never zeros.
+  let usedWindowDays: ContextPackWindowDays = scope.windowDays;
+  let usedStartUtc = startUtc;
+  let evidencePeriods: LanePeriod[] | null = null;
+  let evidenceDropped = 0;
   if (readers.getEvidence) {
     const getEvidence = readers.getEvidence;
-    const { value } = await settle(() =>
-      getEvidence({
-        organizationId: scope.organizationId,
-        ...(scope.branchId ? { branchId: scope.branchId } : {}),
-        startUtc,
-        endUtc,
-        windowDays: scope.windowDays,
-      }),
-    );
-    if (value === null) {
-      limitations.push("Governed evidence unavailable for this window; the period is a gap.");
-      lanes.evidence = {
-        periods: [
-          { periodStartUtc: startUtc, periodEndUtc: endUtc, status: "gap", valueMinorUnits: null },
-        ],
-      };
-    } else {
-      const periods: LanePeriod[] = [];
-      let dropped = 0;
-      for (const row of toArray(value)) {
-        const parsed = evidencePeriodSchema.safeParse(row);
-        if (!parsed.success) {
-          dropped += 1;
-          continue;
-        }
-        if (parsed.data.status === "gap" && parsed.data.valueMinorUnits !== null) {
-          dropped += 1;
-          continue;
-        }
-        periods.push(parsed.data);
-      }
-      periods.sort((left, right) =>
-        left.periodStartUtc < right.periodStartUtc
-          ? -1
-          : left.periodStartUtc > right.periodStartUtc
-            ? 1
-            : 0,
+    for (const days of WINDOW_DAYS.filter((rung) => rung >= scope.windowDays)) {
+      const candidateStart = new Date(now.getTime() - days * 86_400_000).toISOString();
+      const { value } = await settle(() =>
+        getEvidence({
+          organizationId: scope.organizationId,
+          ...(scope.branchId ? { branchId: scope.branchId } : {}),
+          startUtc: candidateStart,
+          endUtc,
+          windowDays: days,
+        }),
       );
-      lanes.evidence = {
-        periods:
-          periods.length > 0
-            ? periods
-            : [
-                {
-                  periodStartUtc: startUtc,
-                  periodEndUtc: endUtc,
-                  status: "gap",
-                  valueMinorUnits: null,
-                },
-              ],
-      };
-      if (dropped > 0) limitations.push(`Evidence skipped ${dropped} invalid period(s).`);
-      if (periods.length === 0) {
-        limitations.push("Governed evidence unavailable for this window; the period is a gap.");
-      } else if (periods.some((period) => period.status === "gap")) {
+      if (value === null) continue;
+      const parsed = parseEvidencePeriods(value);
+      if (parsed.periods.length === 0 || !hasGovernedPeriod(parsed.periods)) continue;
+      usedWindowDays = days;
+      usedStartUtc = candidateStart;
+      evidencePeriods = parsed.periods;
+      evidenceDropped = parsed.dropped;
+      break;
+    }
+    if (evidencePeriods === null) {
+      const widest = WINDOW_DAYS[WINDOW_DAYS.length - 1] ?? scope.windowDays;
+      usedWindowDays = widest;
+      usedStartUtc = new Date(now.getTime() - widest * 86_400_000).toISOString();
+    }
+  }
+  if (readers.getEvidence) {
+    if (evidencePeriods !== null) {
+      lanes.evidence = { periods: evidencePeriods };
+      if (evidenceDropped > 0)
+        limitations.push(`Evidence skipped ${evidenceDropped} invalid period(s).`);
+      if (evidencePeriods.some((period) => period.status === "gap")) {
         limitations.push(
           "Evidence has uncovered periods; gaps are shown, never filled with zeros.",
         );
       }
+    } else {
+      // Reader bound but every rung failed or held no governed period: the
+      // widest rung stays an honest gap, marked so the answer voices the
+      // window it actually checked.
+      lanes.evidence = {
+        periods: [
+          {
+            periodStartUtc: usedStartUtc,
+            periodEndUtc: endUtc,
+            status: "gap",
+            valueMinorUnits: null,
+          },
+        ],
+      };
+      limitations.push(
+        `No governed evidence from ${branchLabel(new Date(usedStartUtc), timezone)} to ${branchLabel(new Date(endUtc), timezone)} ${EVIDENCE_WIDENING_EXHAUSTED}; the period is a gap.`,
+      );
     }
   } else {
     lanes.evidence = {
       periods: [
-        { periodStartUtc: startUtc, periodEndUtc: endUtc, status: "gap", valueMinorUnits: null },
+        {
+          periodStartUtc: usedStartUtc,
+          periodEndUtc: endUtc,
+          status: "gap",
+          valueMinorUnits: null,
+        },
       ],
     };
     limitations.push("Governed evidence unavailable for this window; the period is a gap.");
   }
+  // The pack records the window actually used, in the branch timezone.
+  window = {
+    windowDays: usedWindowDays,
+    startUtc: usedStartUtc,
+    endUtc,
+    branchTimezone: timezone,
+    branchStartLabel: branchLabel(new Date(usedStartUtc), timezone),
+    branchEndLabel: branchLabel(new Date(endUtc), timezone),
+  };
 
   // Lane 4 — Market Profile current version + digest.
   if (readers.getMarketProfile) {
@@ -700,11 +769,11 @@ export async function buildAgentContextPack(
     limitations.push("Economics data not ready; cost claims stay withheld.");
   }
 
-  // Lane 7 — recent timeline: activity vs evidence dates stay distinct.
+  // Lane 7 — recent timeline over the used window: activity vs evidence dates stay distinct.
   if (readers.getTimeline) {
     const getTimeline = readers.getTimeline;
     const { value } = await settle(() =>
-      getTimeline({ organizationId: scope.organizationId, startUtc, endUtc }),
+      getTimeline({ organizationId: scope.organizationId, startUtc: usedStartUtc, endUtc }),
     );
     if (value === null) {
       limitations.push("Recent timeline unavailable; lineage notes stay partial.");
@@ -754,7 +823,7 @@ export async function buildAgentContextPack(
     organizationId: scope.organizationId,
     userId: scope.userId,
     ...(scope.branchId ? { branchId: scope.branchId } : {}),
-    windowDays: scope.windowDays,
+    windowDays: usedWindowDays,
     page: scope.page,
     digest: "0000000000000000",
     sources: [...sources].sort(),

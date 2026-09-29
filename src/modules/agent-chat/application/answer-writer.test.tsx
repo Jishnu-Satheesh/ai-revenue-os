@@ -1201,6 +1201,88 @@ describe("answer-writer chatbot voice (F2)", () => {
   });
 });
 
+describe("answer-writer honest window (H3)", () => {
+  const NOW = "2026-09-20T10:00:00.000Z";
+
+  function widenedPack() {
+    return buildAgentContextPack({
+      organizationId: "o",
+      userId: "u",
+      windowDays: 30,
+      page: "overview",
+      now: NOW,
+      readers: {
+        getIdentityFacts: async () => [
+          { id: "f1", statement: "Confirmed trading name.", verified: true, source: "profile" },
+        ],
+        getEvidence: async (scope: { windowDays: number }) =>
+          scope.windowDays < 90
+            ? []
+            : [
+                {
+                  periodStartUtc: "2026-06-22T10:00:00.000Z",
+                  periodEndUtc: NOW,
+                  status: "covered",
+                  valueMinorUnits: 3400,
+                  currency: "AED",
+                },
+              ],
+      },
+    });
+  }
+
+  function exhaustedPack() {
+    return buildAgentContextPack({
+      organizationId: "o",
+      userId: "u",
+      windowDays: 30,
+      page: "overview",
+      now: NOW,
+      readers: {
+        getIdentityFacts: async () => [
+          { id: "f1", statement: "Confirmed trading name.", verified: true, source: "profile" },
+        ],
+        getEvidence: async () => [],
+      },
+    });
+  }
+
+  it("voices the actual evidence window from the pack in the synthesis prompt", async () => {
+    const pack = await widenedPack();
+    expect(pack.window.windowDays).toBe(90);
+    const { system, prompt } = buildSynthesisPrompt(pack, "note", "quick");
+    expect(system).toMatch(/actual evidence window/i);
+    expect(system).toMatch(/which was available/i);
+    expect(prompt).toContain(pack.window.branchStartLabel);
+    expect(prompt).toContain(pack.window.branchEndLabel);
+  });
+
+  it("falls back with the same honest window voice when widening exhausts", async () => {
+    const pack = await exhaustedPack();
+    expect(pack.window.windowDays).toBe(120);
+    const draft = buildFallbackAnswer(
+      pack,
+      "Answer synthesis is not configured; using stored context only.",
+    );
+    expect(draft.body).toMatch(/looked from/i);
+    expect(draft.body).toContain(pack.window.branchStartLabel);
+    expect(draft.body).toContain(pack.window.branchEndLabel);
+    expect(draft.body).toMatch(/no governed evidence/i);
+    expect(draft.limitations.join(" ")).toMatch(/widening/i);
+    // Gaps stay labeled, never zero-filled; identity facts stay in citations.
+    expect(draft.body).not.toMatch(/Sources|Limitations/);
+    expect(draft.body).not.toContain("Confirmed trading name.");
+    expect(draft.citations.map((citation) => citation.claim)).toContain("Confirmed trading name.");
+  });
+
+  it("keeps the existing fallback voice when no widening ran", async () => {
+    const pack = await testPack();
+    const draft = buildFallbackAnswer(pack, "test reason");
+    expect(draft.body).toMatch(/stored organization context/i);
+    expect(draft.body).not.toMatch(/looked from/i);
+  });
+});
+
 describe("answer quality (G3): identity restraint", () => {
   it("never restates org identity basics unless asked — leads with the news", async () => {
     const pack = await testPack();

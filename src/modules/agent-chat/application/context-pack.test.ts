@@ -178,7 +178,7 @@ describe("context pack", () => {
       buildAgentContextPack({
         organizationId: "o",
         userId: "u",
-        windowDays: 45 as unknown as 30,
+        windowDays: 44 as unknown as 30,
         page: "overview",
       }),
     ).rejects.toMatchObject({ code: "VALIDATION_ERROR" });
@@ -216,6 +216,156 @@ describe("context pack", () => {
             provenance: "log",
             recordedAt: "2026-09-19T10:00:00.000Z",
           })),
+      },
+    });
+    expect(out.refused).toBe(true);
+    expect(out.reasonCode).toBe(CONTEXT_PACK_OVERSIZED);
+  });
+});
+
+describe("context pack evidence auto-widening (H3)", () => {
+  const NOW = "2026-09-20T12:00:00.000Z";
+
+  function covered(valueMinorUnits = 1200) {
+    return {
+      periodStartUtc: "2026-08-06T12:00:00.000Z",
+      periodEndUtc: NOW,
+      status: "covered",
+      valueMinorUnits,
+      currency: "AED",
+    };
+  }
+
+  it("widens an empty 30-day window to the first rung with governed evidence and records it", async () => {
+    const calls: number[] = [];
+    const out = await buildAgentContextPack({
+      organizationId: "o",
+      userId: "u",
+      windowDays: 30,
+      page: "overview",
+      now: NOW,
+      readers: {
+        getEvidence: async (scope: { windowDays: number }) => {
+          calls.push(scope.windowDays);
+          return scope.windowDays === 30 ? [] : [covered()];
+        },
+      },
+    });
+    expect(calls).toEqual([30, 45]);
+    expect(out.refused).toBe(false);
+    expect(out.window.windowDays).toBe(45);
+    expect(out.windowDays).toBe(45);
+    expect(out.window.startUtc).toBe("2026-08-06T12:00:00.000Z");
+    expect(out.window.endUtc).toBe(NOW);
+    expect(out.lanes.evidence.periods.some((period) => period.status === "covered")).toBe(true);
+  });
+
+  it("treats an all-gap rung as empty and keeps widening", async () => {
+    const calls: number[] = [];
+    const out = await buildAgentContextPack({
+      organizationId: "o",
+      userId: "u",
+      windowDays: 30,
+      page: "overview",
+      now: NOW,
+      readers: {
+        getEvidence: async (scope: { windowDays: number }) => {
+          calls.push(scope.windowDays);
+          if (scope.windowDays < 60) {
+            return [
+              {
+                periodStartUtc: "2026-08-21T12:00:00.000Z",
+                periodEndUtc: NOW,
+                status: "gap",
+                valueMinorUnits: null,
+              },
+            ];
+          }
+          return [covered()];
+        },
+      },
+    });
+    expect(calls).toEqual([30, 45, 60]);
+    expect(out.window.windowDays).toBe(60);
+    expect(out.windowDays).toBe(60);
+    expect(out.lanes.evidence.periods.some((period) => period.status === "covered")).toBe(true);
+  });
+
+  it("reads only the requested window when it already holds governed evidence", async () => {
+    const calls: number[] = [];
+    const out = await buildAgentContextPack({
+      organizationId: "o",
+      userId: "u",
+      windowDays: 30,
+      page: "overview",
+      now: NOW,
+      readers: {
+        getEvidence: async (scope: { windowDays: number }) => {
+          calls.push(scope.windowDays);
+          return [covered()];
+        },
+      },
+    });
+    expect(calls).toEqual([30]);
+    expect(out.window.windowDays).toBe(30);
+    expect(out.windowDays).toBe(30);
+  });
+
+  it("stays honest when every rung is empty", async () => {
+    const out = await buildAgentContextPack({
+      organizationId: "o",
+      userId: "u",
+      windowDays: 30,
+      page: "overview",
+      now: NOW,
+      readers: { getEvidence: async () => [] },
+    });
+    expect(out.refused).toBe(false);
+    expect(out.window.windowDays).toBe(120);
+    expect(out.windowDays).toBe(120);
+    expect(out.lanes.evidence.periods.length).toBeGreaterThan(0);
+    for (const period of out.lanes.evidence.periods) {
+      expect(period.status).toBe("gap");
+      expect(period.valueMinorUnits).toBeNull();
+    }
+    expect(out.limitations.join(" ")).toMatch(/widening/i);
+    expect(out.limitations.join(" ")).toMatch(/no governed evidence/i);
+  });
+
+  it("accepts the widened window literals", async () => {
+    for (const windowDays of [45, 90, 120] as const) {
+      const out = await buildAgentContextPack({
+        organizationId: "o",
+        userId: "u",
+        windowDays,
+        page: "overview",
+        now: NOW,
+        readers: { getEvidence: async () => [covered()] },
+      });
+      expect(out.refused).toBe(false);
+      expect(out.window.windowDays).toBe(windowDays);
+      expect(out.windowDays).toBe(windowDays);
+    }
+  });
+
+  it("refuses instead of trimming when a widened window overflows the period cap", async () => {
+    const out = await buildAgentContextPack({
+      organizationId: "o",
+      userId: "u",
+      windowDays: 30,
+      page: "overview",
+      now: NOW,
+      readers: {
+        getEvidence: async (scope: { windowDays: number }) => {
+          if (scope.windowDays < 120) return [];
+          return Array.from({ length: 121 }, (_, index) => ({
+            periodStartUtc: `2026-05-24T00:00:00.${String(index).padStart(3, "0")}Z`,
+            periodEndUtc: NOW,
+            status: "covered",
+            valueMinorUnits: 100 + index,
+            currency: "AED",
+          }));
+        },
       },
     });
     expect(out.refused).toBe(true);
