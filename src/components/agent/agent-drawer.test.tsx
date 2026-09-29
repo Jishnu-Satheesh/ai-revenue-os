@@ -1921,6 +1921,45 @@ describe("live answer stream", () => {
     expect(within(thread).queryByText(/stopped here/i)).toBeNull();
   });
 
+  it("swaps a conflict-reused kept row to durable with terminal steps, never a second bubble", async () => {
+    // H2: the route already persisted the turn's row, so the stream's end
+    // reuses the kept row (`replayed: true`) with its own live-only draft —
+    // the drawer must discard both the preview and the stream draft and
+    // render the durable row exactly once, with steps terminal.
+    const running: ThreadSummary = { ...THREAD, status: "running" };
+    globalThis.fetch = mockAgentFetch({
+      stream: [
+        tokenFrame("Live preview words."),
+        DONE_FRAME,
+        endFrame(
+          endPayload({
+            messageId: ASSISTANT.id,
+            replayed: true,
+            fallback: false,
+            reason: null,
+            draft: { body: "Stream-only draft words.", citations: [], limitations: [], estimates: [] },
+          }),
+        ),
+      ],
+      messages: [USER_MESSAGE, ASSISTANT],
+      thread: running,
+    }) as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    const thread = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(thread).findByText("Live preview words.")).toBeInTheDocument();
+
+    expect(await within(thread).findByText("Durable answer with citations.")).toBeInTheDocument();
+    await waitFor(() => expect(within(thread).queryByText("Live preview words.")).toBeNull());
+    // The stream's live-only draft never renders as a second bubble.
+    expect(within(thread).queryByText("Stream-only draft words.")).toBeNull();
+    expect(within(thread).queryByText(/stopped here/i)).toBeNull();
+    const steps = within(thread).getByLabelText("Agent run steps");
+    await waitFor(() => {
+      expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(0);
+    });
+    expect(steps.querySelector('[data-slot="spinner"]')).toBeNull();
+  });
+
   it("flips every step terminal on the durable swap, even while the poll still reads running", async () => {
     const running: ThreadSummary = { ...THREAD, status: "running" };
     globalThis.fetch = mockAgentFetch({

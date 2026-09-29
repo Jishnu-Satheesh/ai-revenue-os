@@ -29,6 +29,7 @@ vi.mock("@/lib/env", () => ({
 }));
 
 import { logger } from "@/lib/logger";
+import { IdempotencyConflictError } from "@/domain/agent-chat/errors";
 import {
   clearStreamRouteTestSeams,
   GET,
@@ -96,6 +97,7 @@ function repoFake(overrides: Record<string, unknown> = {}) {
         : USER_MESSAGE_ROW,
     ),
     latestUserMessage: vi.fn(async () => USER_MESSAGE_ROW),
+    listMessages: vi.fn(async () => ({ messages: [], nextCursor: null })),
     appendMessageKeyed: vi.fn(async () => ({
       messageId: ASSISTANT_MESSAGE,
       threadId: THREAD,
@@ -246,6 +248,89 @@ describe("agent thread stream route", () => {
     const secondRepo = mocks.createRepo.mock.results[1]?.value;
     const secondKey = secondRepo.appendMessageKeyed.mock.calls[0][0].idempotencyKey;
     expect(secondKey).toBe(firstKey);
+  });
+
+  it("reuses the route's kept row on idempotency conflict instead of persisting a second synthesis", async () => {
+    const KEPT = "b0000000-0000-4000-8000-00000000000b";
+    const keptRow = {
+      ...USER_MESSAGE_ROW,
+      id: KEPT,
+      role: "assistant" as const,
+      body: "Route-kept durable answer.",
+    };
+    const source: AgentStreamSource = async () => ({
+      deltas: ["Hello ", "world."],
+      candidate: { ...CANDIDATE, body: "Hello world." },
+    });
+    setStreamRouteTestSeams({ source });
+    mocks.createRepo.mockReturnValue(
+      repoFake({
+        appendMessageKeyed: vi.fn(async () => {
+          throw new IdempotencyConflictError("already saved");
+        }),
+        listMessages: vi.fn(async () => ({
+          messages: [USER_MESSAGE_ROW, keptRow],
+          nextCursor: null,
+        })),
+      }),
+    );
+    const response = await GET(request(streamUrl()), params);
+
+    expect(response.status).toBe(200);
+    const end = parseSse(await response.text()).find((frame) => frame.event === "end");
+    const payload = streamEndPayloadSchema.parse(JSON.parse(end!.data));
+    // Conflict is the normal path: the turn keeps the route's row and the
+    // stream's synthesis stays live-only — exactly one assistant row.
+    expect(payload.messageId).toBe(KEPT);
+    expect(payload.replayed).toBe(true);
+    expect(payload.fallback).toBe(false);
+    expect(payload.reason).toBeNull();
+    expect(payload.draft.body).toBe("Hello world.");
+
+    const repo = mocks.createRepo.mock.results[0]?.value;
+    // No second synthesis is persisted: one failed attempt, then the read.
+    expect(repo.appendMessageKeyed).toHaveBeenCalledTimes(1);
+    expect(repo.listMessages).toHaveBeenCalled();
+    // Downgraded: identifier-only info, no scary warn or fallback log.
+    expect(vi.mocked(logger.warn).mock.calls.map((call) => call[0])).not.toContain(
+      "agent_stream.answer_append_failed",
+    );
+    expect(logger.info).toHaveBeenCalledWith(
+      "agent_stream.answer_reused",
+      expect.objectContaining({ threadId: THREAD, correlationId: CORRELATION }),
+    );
+    expect(JSON.stringify(vi.mocked(logger.info).mock.calls)).not.toContain(
+      "What should we focus on next?",
+    );
+  });
+
+  it("degrades to draft-only append_conflict when the conflict has no reusable row", async () => {
+    const source: AgentStreamSource = async () => ({
+      deltas: ["Hello ", "world."],
+      candidate: { ...CANDIDATE, body: "Hello world." },
+    });
+    setStreamRouteTestSeams({ source });
+    mocks.createRepo.mockReturnValue(
+      repoFake({
+        appendMessageKeyed: vi.fn(async () => {
+          throw new IdempotencyConflictError("already saved");
+        }),
+        listMessages: vi.fn(async () => ({ messages: [USER_MESSAGE_ROW], nextCursor: null })),
+      }),
+    );
+    const response = await GET(request(streamUrl()), params);
+
+    expect(response.status).toBe(200);
+    const end = parseSse(await response.text()).find((frame) => frame.event === "end");
+    const payload = streamEndPayloadSchema.parse(JSON.parse(end!.data));
+    expect(payload.messageId).toBeNull();
+    expect(payload.replayed).toBe(false);
+    expect(payload.fallback).toBe(false);
+    expect(payload.reason).toBe("append_conflict");
+    expect(logger.warn).toHaveBeenCalledWith(
+      "agent_stream.answer_append_failed",
+      expect.objectContaining({ threadId: THREAD, correlationId: CORRELATION }),
+    );
   });
 
   it("streams read-only for viewers without persisting", async () => {

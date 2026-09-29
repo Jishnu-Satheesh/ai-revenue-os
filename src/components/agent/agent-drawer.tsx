@@ -243,9 +243,10 @@ export function resolveLiveThread(
  *   never fatal.
  * - `event: done` / `data: [DONE]` — literal, never JSON. Tokens complete.
  * - `event: end` / `data: {messageId, replayed, fallback, reason, draft,
- *   correlationId}` — `messageId` is the durable assistant row id (null
- *   for viewers and conflicting/failed appends: draft-only). `draft` is
- *   the content persisted when `messageId` is non-null.
+ *   correlationId}` — `messageId` is the durable assistant row id (a
+ *   conflicted stream reuses the route's kept row, `replayed: true`); null
+ *   only for viewers and failed appends with no reusable row (draft-only).
+ *   `draft` is the content persisted when `messageId` is non-null.
  *
  * Client rules honored here: a transport drop before a valid `end` keeps
  * the partial text with a note and reads the durable row — the drawer
@@ -1213,12 +1214,23 @@ export function AgentDrawer({
           if (end.messageId) {
             // Durable swap: the routed turn's row is source of truth — the
             // preview is discarded (even intact) and the durable read
-            // renders, so reconnects always agree with history.
+            // renders, so reconnects always agree with history. This branch
+            // also owns the kept-row end (a conflicted stream reuses the
+            // route's row, `replayed: true`): any stale `stream-draft` for
+            // the turn is dropped before the re-read, so exactly one
+            // assistant row lands per streamed turn and steps flip terminal
+            // when the durable row arrives.
+            const draftId = `stream-draft:${args.userMessageId}`;
             setLiveStream(null);
+            setMessages((previous) =>
+              previous.some((message) => message.id === draftId)
+                ? previous.filter((message) => message.id !== draftId)
+                : previous,
+            );
             void refreshMessages(args.threadId);
           } else {
-            // Draft-only (viewers, conflicting/failed appends): no durable
-            // row exists, so the validated `end` draft renders with its
+            // Draft-only (viewers and failed appends with no reusable row):
+            // no durable row exists, so the validated `end` draft renders with its
             // full sections under a stable per-turn id. An `end` draft
             // that fails writer validation keeps nothing (drop path).
             try {

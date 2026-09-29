@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { DomainError, toPublicError } from "@/lib/errors";
+import { IdempotencyConflictError } from "@/domain/agent-chat/errors";
 import { logger } from "@/lib/logger";
 import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { routeAgentMessage } from "@/modules/agent-router/application/router-service";
@@ -28,6 +29,7 @@ import {
 import type { ContextPack } from "@/modules/agent-chat/application/context-pack";
 import { resolvePackContextDigest } from "@/modules/agent-chat/application/executors";
 import {
+  findTurnAssistantRow,
   permissionsForRole,
   routingContextDigest,
 } from "@/modules/agent-chat/application/thread-service";
@@ -60,8 +62,11 @@ import {
  *
  * Streaming is transport only: durable rows stay the system of record.
  * Reconnects and reopens read durable rows, never resume dead streams.
- * Viewers stream read-only (draft, no stored row); conflicting or failed
- * appends degrade to draft-only rather than failing the stream.
+ * Viewers stream read-only (draft, no stored row); a conflicting append
+ * reuses the route's kept row under the same key (conflict is the normal
+ * path — the stream's synthesis stays live-only), and only a failed
+ * append with no reusable row degrades to draft-only rather than failing
+ * the stream.
  */
 
 // ---------------------------------------------------------------------------
@@ -115,13 +120,14 @@ import {
 //   the same content the server persisted (when `messageId` is non-null)
 //   and always validates through `answerDraftSchema`.
 // - `messageId` is the durable assistant row id (uuid), or null for viewers and
-//   for conflicting/failed appends (draft-only). `replayed` is true when
-//   the idempotency key replayed a kept row.
+//   for failed appends with no reusable row (draft-only). A conflicting
+//   append reuses the turn's kept row (`replayed: true`). `replayed` is true when
+//   the idempotency key replayed or reused a kept row.
 // - `fallback` with its `reason` names the honest path taken:
 //   `not_configured` (tier unconfigured), `timeout` (15 s synthesis
 //   budget), `invalid_candidate` (model text failed strict validation and
 //   was discarded), `synthesis_failed` (model threw), `append_conflict`
-//   (valid draft, row not stored). A null `reason` means a model draft.
+//   (valid draft, no reusable row stored). A null `reason` means a model draft.
 // - On an invalid candidate the already-forwarded tokens stay on the
 //   wire; the client discards them and renders the fallback `draft` from
 //   `end` instead — the same swap it performs on every stream.
@@ -915,8 +921,12 @@ export async function GET(
           controller.enqueue(sseFrame(STREAM_EVENT_DONE, STREAM_DONE_DATA));
           // Durable end-persist under the existing thread-linked answer key:
           // retries replay the kept row. Viewers stream read-only (ADR 0072:
-          // viewer routes synthesize without persisting), and a conflicting
-          // or failed append degrades to draft-only — never a failed stream.
+          // viewer routes synthesize without persisting). A conflicting
+          // append is the normal path — route synthesis already persisted
+          // the turn's row under this same key, so the kept row is reused
+          // (G3 SKIP lesson: the stream's synthesis stays live-only, never
+          // a second row) — and only a failed append with no reusable row
+          // degrades to draft-only. Never a failed stream.
           let messageId: string | null = null;
           let replayed = false;
           let reason = outcome.reason;
@@ -937,18 +947,51 @@ export async function GET(
               messageId = kept?.id ?? appended.messageId;
               replayed = appended.replayed;
             } catch (error) {
-              logger.warn("agent_stream.answer_append_failed", {
-                organizationId: orgId,
-                threadId,
-                messageId: userMessageId,
-                correlationId: endCorrelationId,
-                errorCode: error instanceof Error ? error.name : "unknown",
-              });
-              messageId = null;
-              replayed = false;
-              if (reason === null) {
-                reason = "append_conflict";
-                logStreamFallback(logContext, "append_conflict");
+              // H2 conflict-reuse (same SKIP lesson as G3): the route's
+              // synthesis already persisted the turn's row under this same
+              // answer key, so the conflict IS the kept row — reuse it and
+              // persist nothing more. Exactly one assistant row per streamed
+              // turn; the conflict logs identifier-only info, never the
+              // scary warn + fallback. Real failures (no reusable row, or a
+              // non-conflict error) keep the draft-only handling below.
+              let keptId: string | null = null;
+              if (error instanceof IdempotencyConflictError) {
+                try {
+                  const history = await threads.listMessages({
+                    organizationId: orgId,
+                    threadId,
+                    limit: 50,
+                  });
+                  keptId = findTurnAssistantRow(history.messages)?.id ?? null;
+                } catch {
+                  keptId = null;
+                }
+                if (keptId !== null) {
+                  logger.info("agent_stream.answer_reused", {
+                    organizationId: orgId,
+                    threadId,
+                    messageId: userMessageId,
+                    correlationId: endCorrelationId,
+                  });
+                }
+              }
+              if (keptId !== null) {
+                messageId = keptId;
+                replayed = true;
+              } else {
+                logger.warn("agent_stream.answer_append_failed", {
+                  organizationId: orgId,
+                  threadId,
+                  messageId: userMessageId,
+                  correlationId: endCorrelationId,
+                  errorCode: error instanceof Error ? error.name : "unknown",
+                });
+                messageId = null;
+                replayed = false;
+                if (reason === null) {
+                  reason = "append_conflict";
+                  logStreamFallback(logContext, "append_conflict");
+                }
               }
             }
           }
