@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { DomainError } from "@/lib/errors";
+import { logger } from "@/lib/logger";
 import {
   buildThreadIdempotencyKey,
   messageDigestFor,
@@ -150,7 +151,22 @@ export type WriteAnswerSeams = {
 };
 
 const ANSWER_MODEL_TIMEOUT_MS = 15_000;
-const ANSWER_MODEL_MAX_OUTPUT_TOKENS = 1500;
+/**
+ * Output-token budget for the answer call, shared with the stream route
+ * (which imports this constant — the buffered and streaming paths stay in
+ * step by construction).
+ *
+ * Why 8192: the output contract allows body ≤16000 chars (~4–5k tokens)
+ * plus citations/limitations/estimates JSON, and live telemetry shows
+ * Gemini thinking burns ~170–240 reasoning tokens per call — spiking past
+ * 1400 on full-contract prompts — *inside* this budget. The old 1500 cap
+ * strangled any substantive answer into a `length` finish (unparseable, so
+ * the writer fell back with "couldn't reach the answer model"). 8192 fits
+ * the contract with headroom and sits at or below the Gemini Flash family
+ * max-output floor (gemini-2.0-flash tops out at 8192; newer Flash models
+ * allow more), so neither tier can outgrow its provider limit.
+ */
+export const ANSWER_MODEL_MAX_OUTPUT_TOKENS = 8192;
 /** Conversational variety for chat answers; strict schema disposal is unchanged. */
 export const ANSWER_MODEL_TEMPERATURE = 0.7;
 /** Quick/light tier model env — values are set by the human, never committed. */
@@ -180,6 +196,33 @@ export type AnswerSynthesizerConfig = {
 function readModelEnv(name: string): string | undefined {
   const raw = process.env[name]?.trim() ?? "";
   return raw.length > 0 ? raw : undefined;
+}
+
+/**
+ * Identifier-only failure ids for synthesis logging (G4): the error's
+ * constructor name plus the provider finish reason when present
+ * (`NoObjectGeneratedError` carries `finishReason`, e.g. `length`).
+ * Never the message, prompt, candidate, or credential — those can quote
+ * tenant text or secrets, so they stay out of the log stream by
+ * construction. Logged through `errorName` + `errorCode`, both existing
+ * allowlist fields, so the logger fence needs no change.
+ */
+export function synthesisFailureIds(error: unknown): {
+  errorName: string;
+  finishReason?: string;
+} {
+  const errorName = error instanceof Error ? error.name : "unknown";
+  const candidates = [
+    (error as { finishReason?: unknown } | null)?.finishReason,
+    ((error as { cause?: unknown } | null)?.cause as { finishReason?: unknown } | null)
+      ?.finishReason,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.length > 0 && candidate.length <= 64) {
+      return { errorName, finishReason: candidate };
+    }
+  }
+  return { errorName };
 }
 
 /**
@@ -483,7 +526,17 @@ export async function writeAnswer(
       mode: scope.mode,
       ...(seams.correlationId ? { correlationId: seams.correlationId } : {}),
     });
-  } catch {
+  } catch (error) {
+    // G4: the provider error name + finishReason distinguish a failed call
+    // from an unconfigured tier (which returns the fallback above with no
+    // log line at all). Identifiers only — never bodies or secrets.
+    const failure = synthesisFailureIds(error);
+    logger.warn("agent_answer.synthesis_failed", {
+      ...(seams.correlationId ? { correlationId: seams.correlationId } : {}),
+      threadId: scope.threadId,
+      errorName: failure.errorName,
+      ...(failure.finishReason ? { errorCode: failure.finishReason } : {}),
+    });
     return buildFallbackAnswer(pack, "Answer synthesis failed; using stored context only.");
   }
   const candidate = synthesisCandidateSchema.safeParse(raw);

@@ -2,8 +2,21 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+const aiMocks = vi.hoisted(() => ({ generateObject: vi.fn() }));
+// Seam-level provider mock (G4): `runSynthesis` lazy-imports these, so the
+// budget + failure-path tests below make zero live calls.
+vi.mock("ai", () => ({ generateObject: aiMocks.generateObject }));
+vi.mock("@ai-sdk/google", () => ({
+  createGoogleGenerativeAI: () => () => ({}),
+}));
+vi.mock("@/lib/logger", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+import { logger } from "@/lib/logger";
 import {
   ANSWER_LIGHT_MODEL_ENV,
+  ANSWER_MODEL_MAX_OUTPUT_TOKENS,
   ANSWER_MODEL_TEMPERATURE,
   ANSWER_STRONG_MODEL_ENV,
   answerCitationSchema,
@@ -17,6 +30,7 @@ import {
   parseAnswerBody,
   resolveAnswerModelId,
   synthesisCandidateSchema,
+  synthesisFailureIds,
   writeAnswer,
   type AnswerDraft,
   type AnswerSynthesizer,
@@ -29,6 +43,8 @@ import { AgentResponseMessage } from "@/components/agent/agent-response-message"
 afterEach(() => {
   cleanup();
   vi.unstubAllEnvs();
+  aiMocks.generateObject.mockReset();
+  vi.clearAllMocks();
 });
 
 const THREAD = {
@@ -459,6 +475,102 @@ describe("answer-writer synthesis", () => {
       );
       expect(draft.estimates).toEqual([]);
       expect(draft.limitations.join(" ")).toMatch(/failed validation/i);
+    });
+  });
+
+  describe("output budget (G4)", () => {
+    it("budgets the output cap to the contract, not the old 1500", () => {
+      // 16000-char bodies plus citations/limitations/estimates JSON must be
+      // representable; the old 1500-token cap strangled them into `length`.
+      expect(ANSWER_MODEL_MAX_OUTPUT_TOKENS).toBe(8192);
+      expect(() =>
+        synthesisCandidateSchema.parse({
+          body: "x".repeat(16000),
+          citations: [],
+          limitations: ["gap"],
+          estimates: [],
+        }),
+      ).not.toThrow();
+    });
+
+    it("calls generateObject with the contract-sized budget (seam-level, no live calls)", async () => {
+      vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key");
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "light-id");
+      aiMocks.generateObject.mockResolvedValue({
+        object: {
+          body: "Stored context says hello.",
+          citations: [],
+          limitations: [],
+          estimates: [],
+        },
+      });
+      const synthesize = createAnswerSynthesizer({ mode: "quick" });
+      expect(synthesize).not.toBeNull();
+      await synthesize!({ system: "s", prompt: "p", sourceIds: [], mode: "quick" });
+      expect(aiMocks.generateObject).toHaveBeenCalledTimes(1);
+      const call = aiMocks.generateObject.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(call.maxOutputTokens).toBe(8192);
+      expect(call.temperature).toBe(0.7);
+      expect(call.schema).toBe(synthesisCandidateSchema);
+    });
+
+    it("logs a length-finish failure with identifiers only, then falls back honestly", async () => {
+      vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key");
+      vi.stubEnv(ANSWER_LIGHT_MODEL_ENV, "light-id");
+      aiMocks.generateObject.mockRejectedValue(
+        Object.assign(new Error("No object generated"), {
+          name: "AI_NoObjectGeneratedError",
+          finishReason: "length",
+          text: "",
+        }),
+      );
+      const pack = await testPack();
+      const draft = await writeAnswer(
+        {
+          pack,
+          routingNote: "sentinel-routing-note-xyz",
+          threadId: "t1",
+          mode: "quick",
+        },
+        { correlationId: "corr-1" },
+      );
+      expect(draft.body).toMatch(/couldn't reach the answer model/i);
+      expect(logger.warn).toHaveBeenCalledWith(
+        "agent_answer.synthesis_failed",
+        expect.objectContaining({
+          errorName: "AI_NoObjectGeneratedError",
+          errorCode: "length",
+          correlationId: "corr-1",
+        }),
+      );
+      const logged = JSON.stringify(vi.mocked(logger.warn).mock.calls);
+      expect(logged).not.toContain("sentinel-routing-note-xyz");
+      expect(logged).not.toContain("test-key");
+      expect(logged).not.toContain("Confirmed trading name.");
+    });
+
+    it("reads failure ids off the error and its cause, never bodies", () => {
+      expect(
+        synthesisFailureIds(
+          Object.assign(new Error("x"), {
+            name: "AI_NoObjectGeneratedError",
+            finishReason: "length",
+          }),
+        ),
+      ).toEqual({ errorName: "AI_NoObjectGeneratedError", finishReason: "length" });
+      expect(synthesisFailureIds(new Error("plain"))).toEqual({ errorName: "Error" });
+      expect(synthesisFailureIds("string-shaped")).toEqual({ errorName: "unknown" });
+      expect(
+        synthesisFailureIds(
+          Object.assign(new Error("w"), { cause: { finishReason: "content-filter" } }),
+        ),
+      ).toEqual({ errorName: "Error", finishReason: "content-filter" });
+      // Non-string or unbounded reasons never reach the log stream.
+      expect(
+        synthesisFailureIds(
+          Object.assign(new Error("w"), { finishReason: { leaked: "body" } }),
+        ),
+      ).toEqual({ errorName: "Error" });
     });
   });
 

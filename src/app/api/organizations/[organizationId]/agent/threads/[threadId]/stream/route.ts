@@ -13,6 +13,7 @@ import {
   agentPersistenceFor,
 } from "@/modules/agent-chat/application/http";
 import {
+  ANSWER_MODEL_MAX_OUTPUT_TOKENS,
   ANSWER_MODEL_TEMPERATURE,
   answerDraftSchema,
   buildAnswerIdempotencyKey,
@@ -21,6 +22,7 @@ import {
   encodeAnswerBody,
   resolveAnswerModelId,
   synthesisCandidateSchema,
+  synthesisFailureIds,
   type AnswerDraft,
 } from "@/modules/agent-chat/application/answer-writer";
 import type { ContextPack } from "@/modules/agent-chat/application/context-pack";
@@ -481,8 +483,13 @@ type StreamOutcome = {
 
 type StreamSynthesis = StreamOutcome;
 
-/** Output-token budget for the streaming answer call (Task 1 parity). */
-const STREAM_MAX_OUTPUT_TOKENS = 1500;
+/**
+ * Output-token budget for the streaming answer call — aliased to Task 1's
+ * `ANSWER_MODEL_MAX_OUTPUT_TOKENS` (see its comment for the 8192
+ * accounting), so the buffered and streaming paths stay in step by
+ * construction instead of by matching magic numbers.
+ */
+const STREAM_MAX_OUTPUT_TOKENS = ANSWER_MODEL_MAX_OUTPUT_TOKENS;
 
 function readAnswerApiKey(): string | undefined {
   // Same rule as Task 1 (light-model-provider precedent): reads
@@ -726,6 +733,17 @@ async function runStreamingSynthesis(input: {
           ? "timeout"
           : "synthesis_failed";
     if (reason === "invalid_candidate") logInvalidCandidate(input.logContext);
+    if (reason === "synthesis_failed") {
+      // G4: the provider error name + finishReason distinguish a failed
+      // call from an unconfigured tier (`not_configured` stays info-only
+      // with no error name). Identifiers only — never bodies or secrets.
+      const failure = synthesisFailureIds(error);
+      logger.warn("agent_stream.synthesis_failed", {
+        ...input.logContext,
+        errorName: failure.errorName,
+        ...(failure.finishReason ? { errorCode: failure.finishReason } : {}),
+      });
+    }
     const fallback = buildFallbackAnswer(input.pack, STREAM_FALLBACK_TEXT[reason]);
     logStreamFallback(input.logContext, reason);
     return {

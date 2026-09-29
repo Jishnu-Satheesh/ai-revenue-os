@@ -28,6 +28,7 @@ vi.mock("@/lib/env", () => ({
   env: { AGENT_CHAT_V1_ORGANIZATION_IDS: "10000000-0000-4000-8000-000000000001" },
 }));
 
+import { logger } from "@/lib/logger";
 import {
   clearStreamRouteTestSeams,
   GET,
@@ -416,6 +417,56 @@ describe("agent thread stream route", () => {
     expect(payload.fallback).toBe(false);
     expect(payload.reason).toBeNull();
     expect(payload.draft.body).toBe(body);
+  });
+
+  it("logs provider failures with identifiers only, keeping config-absent distinct", async () => {
+    // G4: a failed call (length-finish) must be observable as call-failed —
+    // error name + finishReason + correlation, never bodies or secrets.
+    const failing: AgentStreamSource = async () => ({
+      deltas: [],
+      candidate: Promise.reject(
+        Object.assign(new Error("No object generated"), {
+          name: "AI_NoObjectGeneratedError",
+          finishReason: "length",
+          text: "",
+        }),
+      ),
+    });
+    setStreamRouteTestSeams({ source: failing });
+    const failed = await GET(request(streamUrl()), params);
+    expect(failed.status).toBe(200);
+    const failedEnd = parseSse(await failed.text()).find((frame) => frame.event === "end");
+    const failedPayload = streamEndPayloadSchema.parse(JSON.parse(failedEnd!.data));
+    expect(failedPayload.fallback).toBe(true);
+    expect(failedPayload.reason).toBe("synthesis_failed");
+    expect(logger.warn).toHaveBeenCalledWith(
+      "agent_stream.synthesis_failed",
+      expect.objectContaining({
+        errorName: "AI_NoObjectGeneratedError",
+        errorCode: "length",
+        correlationId: CORRELATION,
+      }),
+    );
+    expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(
+      "What should we focus on next?",
+    );
+
+    // Config-absent stays the info-only honest fallback: no error name, no
+    // failure warn — operators can tell the two apart in the log stream.
+    vi.clearAllMocks();
+    vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "");
+    vi.stubEnv("AI_ANSWER_MODEL", "");
+    vi.stubEnv("AI_ANSWER_STRONG_MODEL", "");
+    clearStreamRouteTestSeams();
+    const unconfigured = await GET(request(streamUrl()), params);
+    expect(unconfigured.status).toBe(200);
+    const plainEnd = parseSse(await unconfigured.text()).find((frame) => frame.event === "end");
+    const plainPayload = streamEndPayloadSchema.parse(JSON.parse(plainEnd!.data));
+    expect(plainPayload.fallback).toBe(true);
+    expect(plainPayload.reason).toBe("not_configured");
+    expect(vi.mocked(logger.warn).mock.calls.map((call) => call[0])).not.toContain(
+      "agent_stream.synthesis_failed",
+    );
   });
 
   it("validates end message ids as uuids like the query does", () => {
