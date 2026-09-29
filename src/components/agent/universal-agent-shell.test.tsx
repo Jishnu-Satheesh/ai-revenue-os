@@ -214,7 +214,7 @@ describe("shell", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("sends on Enter, opens the drawer, routes through the three Task 3 calls, and collapses", async () => {
+  it("sends on Enter, opens the drawer, routes through the three Task 3 calls, and keeps controls", async () => {
     const user = userEvent.setup();
     renderShell({ role: "operator", permissions: [] });
     await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
@@ -243,9 +243,10 @@ describe("shell", () => {
     // Steps collapse trigger anywhere.
     expect(within(thread).getByText("Understood: Memory answer")).toBeInTheDocument();
     expect(within(thread).queryByRole("button", { name: /^steps$/i })).toBeNull();
-    // Send returns the bar to its resting single-line state with chips hidden.
+    // Send keeps the control row open while the drawer is up so the user
+    // can keep chatting without refocusing; chips stay hidden.
     await waitFor(() => {
-      expect(screen.queryByRole("button", { name: /answer mode/i })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /answer mode/i })).toBeInTheDocument();
     });
     // With the short resting bar, the drawer docks close but detached:
     // in-flow directly above the bar with a small bottom margin (the flow

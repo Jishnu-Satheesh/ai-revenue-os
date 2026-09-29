@@ -162,6 +162,10 @@ export function UniversalAgentShell({
   const isViewer = role === "viewer";
   const canSend = input.trim().length > 0 && !isViewer;
   const chipsVisible = expanded && !drawerOpen && input.trim() === "";
+  // The control row (mode, send, history) stays open whenever the drawer is
+  // open so the user can keep chatting without refocusing; the bare
+  // single-line rest state is only for when the agent is not in use.
+  const controlsOpen = expanded || drawerOpen;
   const motionMs = reduceMotion ? 0 : 220;
 
   function handleSend() {
@@ -248,7 +252,7 @@ export function UniversalAgentShell({
               onClose={() => setDrawerOpen(false)}
               onThreadChange={setThreadId}
               onPromptConsumed={() => setPendingPrompt(null)}
-              bottomOffset={expanded ? "bottom-32" : "bottom-22"}
+              bottomOffset={controlsOpen ? "bottom-32" : "bottom-22"}
               geometry={drawerGeometry}
               onGeometryChange={setDrawerGeometry}
               // The container above owns the unit translate3d (bar + drawer
@@ -286,7 +290,7 @@ export function UniversalAgentShell({
                   className="min-h-10 cursor-text resize-none border-0 bg-transparent text-zinc-50 caret-zinc-50 placeholder:text-zinc-500 focus-visible:ring-0"
                 />
                 <AnimatePresence initial={false}>
-                  {expanded ? (
+                  {controlsOpen ? (
                     <motion.div
                       key="agent-controls"
                       initial={{ height: 0, opacity: 0 }}
