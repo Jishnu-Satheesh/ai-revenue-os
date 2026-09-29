@@ -2659,6 +2659,51 @@ describe("movable drawer (F5)", () => {
     expect(panelOf(section).style.width).toBe("992px");
   });
 
+  it("resizes width from the west edge with x + width moving together", () => {
+    render(<Harness />);
+    const section = screen.getByLabelText("AI agent conversation");
+    const edge = screen.getByTestId("agent-drawer-resize-w");
+
+    // Drag the left edge left 100: the panel grows while the right edge
+    // stays put — width +100, unit offset -100 on x.
+    fireEvent.pointerDown(edge, { button: 0, clientX: 800, clientY: 400 });
+    fireEvent.pointerMove(window, { clientX: 700, clientY: 400 });
+    fireEvent.pointerUp(window);
+    expect(panelOf(section).style.width).toBe("804px");
+    expect(section.style.transform).toBe("translate3d(-100px, 0px, 0)");
+
+    // Shrinking past the floor parks at 300px — width never collapses.
+    fireEvent.pointerDown(edge, { button: 0, clientX: 700, clientY: 400 });
+    fireEvent.pointerMove(window, { clientX: 5000, clientY: 400 });
+    fireEvent.pointerUp(window);
+    expect(panelOf(section).style.width).toBe("300px");
+    expect(section.style.transform).toBe("translate3d(404px, 0px, 0)");
+    expect(screen.queryByRole("button", { name: /expand conversation/i })).toBeNull();
+    expect(screen.getByLabelText("AI agent conversation")).toBeInTheDocument();
+
+    // Growing past the viewport parks at viewport minus margins (992px).
+    fireEvent.pointerDown(edge, { button: 0, clientX: 400, clientY: 400 });
+    fireEvent.pointerMove(window, { clientX: -5000, clientY: 400 });
+    fireEvent.pointerUp(window);
+    expect(panelOf(section).style.width).toBe("992px");
+    expect(section.style.transform).toBe("translate3d(-288px, 0px, 0)");
+  });
+
+  it("nudges west-edge width with arrow keys, ArrowLeft growing the panel", () => {
+    render(<Harness />);
+    const section = screen.getByLabelText("AI agent conversation");
+    const edge = screen.getByTestId("agent-drawer-resize-w");
+
+    fireEvent.keyDown(edge, { key: "ArrowLeft" });
+    expect(panelOf(section).style.width).toBe("720px");
+    expect(section.style.transform).toBe("translate3d(-16px, 0px, 0)");
+
+    fireEvent.keyDown(edge, { key: "ArrowRight" });
+    expect(panelOf(section).style.width).toBe("704px");
+    // Back at rest the unit transform is unset, never a zero translate.
+    expect(section.style.transform).toBe("");
+  });
+
   it("resizes height from the south edge and the corner resizes both dims", () => {
     render(<Harness />);
     const section = screen.getByLabelText("AI agent conversation");
@@ -2676,6 +2721,35 @@ describe("movable drawer (F5)", () => {
     fireEvent.pointerUp(window);
     expect(panelOf(section).style.width).toBe("754px");
     expect(panelOf(section).style.height).toBe("574px");
+  });
+
+  it("resizes width and height together from the southwest corner", () => {
+    render(<Harness />);
+    const section = screen.getByLabelText("AI agent conversation");
+    const corner = screen.getByTestId("agent-drawer-resize-sw");
+
+    // Left edge left 50 grows width to 754 (x tracks -50); down 10 grows
+    // height to 554 — the same dims the southeast corner reaches mirrored.
+    fireEvent.pointerDown(corner, { button: 0, clientX: 400, clientY: 520 });
+    fireEvent.pointerMove(window, { clientX: 350, clientY: 530 });
+    fireEvent.pointerUp(window);
+    expect(panelOf(section).style.width).toBe("754px");
+    expect(panelOf(section).style.height).toBe("554px");
+    expect(section.style.transform).toBe("translate3d(-50px, 0px, 0)");
+  });
+
+  it("collapses to the strip when a southwest resize would drop height below 12rem", () => {
+    render(<Harness />);
+    expect(screen.getByLabelText("AI agent conversation")).toBeInTheDocument();
+
+    const corner = screen.getByTestId("agent-drawer-resize-sw");
+    fireEvent.pointerDown(corner, { button: 0, clientX: 400, clientY: 500 });
+    // 544 - 400 = 144 < 192: no shrink, the strip docks instead.
+    fireEvent.pointerMove(window, { clientX: 350, clientY: 100 });
+    fireEvent.pointerUp(window);
+
+    expect(screen.queryByLabelText("AI agent conversation")).toBeNull();
+    expect(screen.getByRole("button", { name: /expand conversation/i })).toBeInTheDocument();
   });
 
   it("never lets the section flex container squeeze a resized panel", () => {
@@ -2735,8 +2809,10 @@ describe("movable drawer (F5)", () => {
     expect(section.className).toMatch(/(^|\s)left-0(\s|$)/);
     expect(screen.queryByTestId("agent-drawer-drag-handle")).toBeNull();
     expect(screen.queryByTestId("agent-drawer-resize-e")).toBeNull();
+    expect(screen.queryByTestId("agent-drawer-resize-w")).toBeNull();
     expect(screen.queryByTestId("agent-drawer-resize-s")).toBeNull();
     expect(screen.queryByTestId("agent-drawer-resize-se")).toBeNull();
+    expect(screen.queryByTestId("agent-drawer-resize-sw")).toBeNull();
   });
 
   it("ignores desktop geometry on mobile — no unit transform, no panel size", () => {

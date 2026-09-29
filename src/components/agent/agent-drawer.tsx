@@ -936,7 +936,33 @@ export function AgentDrawer({
     setGeometry({ ...geometryRef.current, ...next });
   }
 
-  type ResizeAxis = "e" | "s" | "se";
+  type ResizeAxis = "e" | "s" | "se" | "w" | "sw";
+
+  /**
+   * West-edge shared math: the left edge moves with the pointer while the
+   * right edge stays put, so x + width move together. Width clamps first
+   * (300px floor, viewport ceiling — width never collapses), then the offset
+   * clamps like the drag unit, then width re-derives from the kept x so the
+   * two never disagree at a rail.
+   */
+  function westResize(
+    current: AgentDrawerGeometry,
+    baseX: number,
+    startWidth: number,
+    edgeDx: number,
+  ): { x: number; width: number } {
+    const viewportWidth = window.innerWidth;
+    const widthLimited = clampDrawerWidth(startWidth - edgeDx, viewportWidth);
+    const widthDx = startWidth - widthLimited;
+    const offset = clampDrawerOffset(
+      baseX + widthDx,
+      current.y,
+      viewportWidth,
+      window.innerHeight,
+    );
+    const appliedDx = offset.x - baseX;
+    return { x: offset.x, width: clampDrawerWidth(startWidth - appliedDx, viewportWidth) };
+  }
 
   function beginResize(axis: ResizeAxis, event: ReactPointerEvent): void {
     if (isMobile || event.button !== 0) return;
@@ -944,6 +970,7 @@ export function AgentDrawer({
     const startY = event.clientY;
     const startWidth = geometryRef.current.width ?? AGENT_DRAWER_DEFAULT_WIDTH_PX;
     const startHeight = geometryRef.current.height ?? AGENT_DRAWER_DEFAULT_HEIGHT_PX;
+    const baseX = geometryRef.current.x;
     collapsedOnceRef.current = false;
     trackPointer((move) => {
       // One merged write per move: separate width/height writes would race
@@ -952,7 +979,12 @@ export function AgentDrawer({
       if (axis === "e" || axis === "se") {
         next.width = clampDrawerWidth(startWidth + (move.clientX - startX), window.innerWidth);
       }
-      if (axis === "s" || axis === "se") {
+      if (axis === "w" || axis === "sw") {
+        const west = westResize(next, baseX, startWidth, move.clientX - startX);
+        next.x = west.x;
+        next.width = west.width;
+      }
+      if (axis === "s" || axis === "se" || axis === "sw") {
         const rawHeight = startHeight + (move.clientY - startY);
         if (shouldCollapseDrawerHeight(rawHeight)) {
           // Sub-threshold: dock the existing strip instead of shrinking.
@@ -979,7 +1011,19 @@ export function AgentDrawer({
         window.innerWidth,
       );
     }
-    if (axis === "s" || axis === "se") {
+    if (axis === "w" || axis === "sw") {
+      // Keyboard dx is edge travel like the pointer path (ArrowLeft moves
+      // the left edge left, growing the panel), so width takes -dx.
+      const west = westResize(
+        current,
+        current.x,
+        current.width ?? AGENT_DRAWER_DEFAULT_WIDTH_PX,
+        dx,
+      );
+      next.x = west.x;
+      next.width = west.width;
+    }
+    if (axis === "s" || axis === "se" || axis === "sw") {
       const rawHeight = (current.height ?? AGENT_DRAWER_DEFAULT_HEIGHT_PX) + dy;
       if (shouldCollapseDrawerHeight(rawHeight)) {
         // Same once-guard as the pointer path: each sub-threshold press
@@ -2116,6 +2160,21 @@ export function AgentDrawer({
               />
               <button
                 type="button"
+                data-testid="agent-drawer-resize-w"
+                onPointerDown={(event) => beginResize("w", event)}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 64 : 16;
+                  if (event.key === "ArrowLeft") nudgeSize("w", -step, 0);
+                  else if (event.key === "ArrowRight") nudgeSize("w", step, 0);
+                  else return;
+                  event.preventDefault();
+                }}
+                aria-label="Resize conversation width from the left"
+                title="Drag to resize width from the left"
+                className="absolute top-0 left-0 h-full w-2 cursor-ew-resize touch-none focus-visible:outline-2 focus-visible:outline-ring"
+              />
+              <button
+                type="button"
                 data-testid="agent-drawer-resize-s"
                 onPointerDown={(event) => beginResize("s", event)}
                 onKeyDown={(event) => {
@@ -2145,6 +2204,23 @@ export function AgentDrawer({
                 aria-label="Resize conversation"
                 title="Drag to resize"
                 className="absolute right-0 bottom-0 size-4 cursor-nwse-resize touch-none focus-visible:outline-2 focus-visible:outline-ring"
+              />
+              <button
+                type="button"
+                data-testid="agent-drawer-resize-sw"
+                onPointerDown={(event) => beginResize("sw", event)}
+                onKeyDown={(event) => {
+                  const step = event.shiftKey ? 64 : 16;
+                  if (event.key === "ArrowLeft") nudgeSize("sw", -step, 0);
+                  else if (event.key === "ArrowRight") nudgeSize("sw", step, 0);
+                  else if (event.key === "ArrowUp") nudgeSize("sw", 0, -step);
+                  else if (event.key === "ArrowDown") nudgeSize("sw", 0, step);
+                  else return;
+                  event.preventDefault();
+                }}
+                aria-label="Resize conversation from the left"
+                title="Drag to resize from the left"
+                className="absolute left-0 bottom-0 size-4 cursor-nesw-resize touch-none focus-visible:outline-2 focus-visible:outline-ring"
               />
             </>
           )}
