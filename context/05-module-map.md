@@ -137,12 +137,10 @@ Human-readable history of observations, decisions, approvals, executions, failur
 
 ## Experience
 
-### Public Landing Page
+### App Entry
 
-The signed-out face of the product at `/`: hero with an illustrative cockpit preview, capabilities,
-how-it-works, governance, and walkthrough CTA. Signed-in users are redirected by the ADR 0015
-resolver instead. Lives in `src/components/marketing/` with its own dark token scope in
-`globals.css` (`.marketing`).
+`/` is app-only and redirects through the ADR 0015 resolver. The public landing page
+was retired to the separate Astro project (see `specs/021-public-landing-page.md`).
 
 ### Agency Portfolio
 

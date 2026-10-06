@@ -159,12 +159,11 @@ require a staged provider qualification and budget approval; until then they ski
 reason, the research routes stay fail-closed, and no browser, provider, or canary acceptance is
 claimed.
 
-## Public landing page
+## App entry
 
-`/` serves a public landing page (`src/components/marketing/`) to signed-out visitors; signed-in
-users keep the ADR 0015 resolver redirect. The page renders inside a scoped dark token shell
-(`.marketing` in `src/app/globals.css`) and makes no backend calls beyond the session probe.
-Specified in `specs/021-public-landing-page.md`.
+`/` is app-only: every visit redirects through the ADR 0015 resolver to the user's
+organization, `/organizations/new`, or `/login`. The public site lives in the separate Astro
+project. Retired in `specs/021-public-landing-page.md`.
 
 ## Foundation boundaries
 

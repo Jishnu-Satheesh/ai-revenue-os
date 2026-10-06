@@ -2,7 +2,12 @@
 
 ## Status
 
-Done — shipped 2026-08-26. Walkthrough CTA currently points at a placeholder mailto
+Retired 2026-10-06 — the public site moved to the separate Astro project and `/`
+is app-only (resolver redirect for every visitor). `src/components/marketing/`
+and its token scope are removed. Kept for history; do not reintroduce a
+marketing surface in this repo.
+
+Shipped 2026-08-26. Walkthrough CTA currently points at a placeholder mailto
 (`walkthroughs@airevenueos.com`); replace with the live address in
 `src/components/marketing/content.ts` when confirmed.
 
