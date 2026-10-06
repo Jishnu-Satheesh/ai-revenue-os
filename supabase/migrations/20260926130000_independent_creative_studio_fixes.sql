@@ -1579,7 +1579,7 @@ begin
       'google_horizontal', 'google_vertical', 'ecommerce_creative'
     ) then
     raise exception 'studio_export_invalid' using errcode = '22023';
-  end;
+  end if;
 
   select run.* into run
   from public.studio_runs run
