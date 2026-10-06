@@ -1,6 +1,6 @@
 # Independent Creative Studio prototype notes
 
-Status: proposed design only. The requested wireframe attachment was not available; this is derived from the written brief and the current repository shell. It is not an approved visual baseline or app implementation.
+Status: approved visual reference only. The requested wireframe attachment was not available; this was derived from the written brief and current repository shell, then explicitly accepted by the user as the replacement visual reference on September 24, 2026. It is not an application implementation or production evidence.
 
 ## Artifact and layout
 
@@ -37,3 +37,9 @@ Use `?state=history`, `canvas`, `streaming`, `loading`, `error`, `empty`, `picke
 - Alternate aspect controls demonstrate input selection, not qualified native generation or verified export conversion. Custom remains disabled. Sample history thumbnails use the same illustration geometry across aspect fixtures.
 - History changes live only in JavaScript memory and disappear on reload. Revision comparison is transient; full immutable branching, per-marker instruction lists/position adjustment, provider continuation, revision restore and durable exact-byte campaign linking are implementation requirements, not claimed prototype capabilities.
 - Browser screenshot and interaction evidence is captured separately by the controller. A JavaScript syntax check alone is not visual acceptance.
+
+## Superdesign import compatibility
+
+Dynamic image markup carries `data-preview-source`; a root-scoped hydration observer assigns the embedded data URL to the DOM image `src` and removes the temporary attribute. This avoids the importer mistaking JavaScript template expressions for relative asset paths. No external asset uploads are introduced. Picker preview updates continue to assign DOM `src` directly.
+
+Picker ordering correction: Upload appears first, followed by the labelled Approved designs or Products & Subjects collection. Selecting a reference clears the prior missing-reference notice.

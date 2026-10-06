@@ -44,7 +44,7 @@ Proposed routes (new, not existing): `/organizations/[organizationId]/campaigns/
 Canonical desktop viewport: **1728 × 1080**, device scale 1, browser zoom 100%, Manrope loaded, light theme. Preserve the actual application shell: 256px global sidebar and 64px header. The Studio split applies to its content width after the sidebar, outer gutters and inter-panel gap; it does not mean 20% of the full browser including navigation.
 
 - Page gutters: 32px horizontal; two-pane gap 24px. Available pane width is 1384px; left 276.8px, right 1107.2px at the canonical viewport.
-- Left controls are one vertical sequence, with 16–20px section spacing, consistent labels, compact 36–40px controls and full-width upload triggers. The primary Generate action stays reachable at the bottom of the controls region while long settings scroll internally.
+- Left controls are one vertical sequence, with 15px section spacing at the canonical viewport (17–24px at other desktop sizes), consistent labels, compact 36–42px controls and full-width upload triggers. The primary Generate action stays reachable at the bottom of the controls region while long settings scroll internally.
 - Preserve the 1:4 ratio while the control rail is at least 256px. Below that width clamp the rail at 256px rather than crush controls. This responsive deviation is explicit and must be included in visual review.
 - At tablet widths use a control drawer or a dedicated Create tab alongside History/Canvas; at mobile use a single work area and a clearly labelled settings opener. Do not compress the desktop rail into an unreadable 20% column.
 - The right region is one workspace with mutually exclusive History, initial loading, streaming canvas, completed canvas and recoverable-error presentations. History is not left behind as a third panel once the canvas opens.
@@ -52,7 +52,7 @@ Canonical desktop viewport: **1728 × 1080**, device scale 1, browser zoom 100%,
 - Filters sit above the rows: search, campaign including No campaign, state, format and date range. Show active filter count, Clear filters, result count, empty results and retained-result refresh error. Dates render in organization timezone.
 - Use the existing neutral/emerald chrome, border/radius/typography tokens and Lucide icon language. Artwork supplies color. Avoid a new visual theme.
 
-`REFERENCE.md` records measured positions from the final proposed prototype. The missing sketch cannot be clinically analyzed by guessing: a later comparison must enumerate each discrepancy in sidebar order, left-section order, proportions, history-card arrangement, canvas treatment, picker placement and loading transition.
+`REFERENCE.md` records measured positions from the approved replacement prototype. The original sketch was unavailable, so no honest sketch-to-prototype comparison exists. The user resolved that gap by approving the prototype as the replacement visual authority on September 24, 2026. Implementation comparison must therefore enumerate discrepancies against the frozen PNGs and prototype in sidebar order, left-section order, proportions, history-card arrangement, canvas treatment, picker placement and loading transition.
 
 ## 5. Entry states and navigation
 

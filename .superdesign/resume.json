@@ -396,6 +396,40 @@
         "80ffebe4-cb3e-44b2-b79e-d17c993a2aac",
         "4383a445-9f5c-4f42-8779-5989d558db2b"
       ]
+    },
+    "/organizations/[organizationId]/campaigns/studio": {
+      "targetKind": "new-ui",
+      "projectId": "1acb3016-c8be-4e30-a461-3e06e9782041",
+      "activeDraftId": "21d0f45c-6ad2-4d78-a831-03df6684d43a",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/creative-studio-independent/prototype.html",
+        "docs/superpowers/specs/2026-09-20-independent-creative-studio-design.md",
+        "docs/design/creative-studio-independent/technical-contract.md",
+        "src/components/layout/sidebar.tsx",
+        "src/components/layout/app-shell.tsx",
+        "src/app/globals.css"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "87056df0a2fec772d8f15c75fa938f247fdb1206f0b4ce0e47e7fc43cebed608",
+        ".superdesign/creative-studio-independent/prototype.html": "9bdef5dc39342f1f1425149233766003e0ae05bb9535963288b00ad60fb41672",
+        "docs/superpowers/specs/2026-09-20-independent-creative-studio-design.md": "3f42e7935960626613262054efe60ae264c7afceae3991e6df1fd59154f04825",
+        "docs/design/creative-studio-independent/technical-contract.md": "c52ac3b90233511caed964943ffced12cc466fd5d06d4a2df3ecb4913bb3ec70",
+        "src/components/layout/sidebar.tsx": "54fe05f95e5bb2bc853e16380327623a7f0bd9924d09a8ae8454a44b1a039708",
+        "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+        "src/app/globals.css": "c9277914defc17b2d2378e3e257f3d95dc4222e710e3f7e62a9b7bde62427114"
+      },
+      "components": [],
+      "drafts": {
+        "21d0f45c-6ad2-4d78-a831-03df6684d43a": {
+          "title": "Creative Studio — Independent workspace (proposed)",
+          "visualDirection": "20/80 settings and history/canvas; optional campaign; complete-poster mock; real progressive provider previews required for implementation; unapproved text-derived design, sketch unavailable.",
+          "currentVersion": 2
+        }
+      },
+      "updatedAt": "2026-09-24T04:07:03.416Z",
+      "previewUrl": "https://p.superdesign.dev/draft/21d0f45c-6ad2-4d78-a831-03df6684d43a"
     }
   }
 }

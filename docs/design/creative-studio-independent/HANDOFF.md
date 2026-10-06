@@ -1,15 +1,17 @@
 # Independent Creative Studio — handoff entrypoint
 
-**Design package only. Production implementation is not approved by this file.** Started 2026-09-20; resumed 2026-09-21. Read the final review report for known gaps. The original wireframe attachment was not visible; no sketch comparison has been claimed.
+**Approved visual package; production implementation is not approved by this file alone.** Started 2026-09-20; approved as the replacement visual reference on 2026-09-24. Read the final review report for known gaps. The original wireframe attachment was not visible; the user explicitly accepted this prototype in its place.
 
 ## Open first
 
-1. `Desktop.png` and the other state screenshots in this directory.
-2. Interactive `.superdesign/creative-studio-independent/prototype.html` (serve that directory over HTTP).
-3. `docs/superpowers/specs/2026-09-20-independent-creative-studio-design.md`.
-4. `technical-contract.md`, then `provider-and-assets-audit.md` and `current-studio-audit.md`.
-5. `docs/superpowers/plans/2026-09-20-independent-creative-studio.md`.
-6. `REFERENCE.md`, `design-review.md` and `browser-review.md`.
+1. `SUCCESSOR-IMPLEMENTATION-PROMPT.md`; use it as the controller brief.
+2. `SDD-PLAN-ADAPTER.md`; use it only with the skill's task extractor, never as authority over the bullet-only plan.
+3. `Desktop.png` and the other state screenshots in this directory.
+4. Interactive `.superdesign/creative-studio-independent/prototype.html` (serve that directory over HTTP).
+5. `docs/superpowers/specs/2026-09-20-independent-creative-studio-design.md`.
+6. `technical-contract.md`, then `provider-and-assets-audit.md` and `current-studio-audit.md`.
+7. `docs/superpowers/plans/2026-09-20-independent-creative-studio.md`.
+8. `REFERENCE.md`, `reference-manifest.json`, `design-review.md` and `browser-review.md`.
 
 The prototype's local sample organization, artwork, uploads, generation, campaign creation and saving demonstrate interaction. They do not prove production persistence, paid-provider behavior or authorization. Do not copy the mock state store, timers or SVG poster renderer into the application.
 
@@ -21,8 +23,8 @@ The prototype's local sample organization, artwork, uploads, generation, campaig
 | AI creates complete poster, including supplied Text Copy | Explicitly confirmed by user |
 | Visible progressive preview images; qualify alternate provider if needed | Explicitly confirmed by user |
 | Build reviewable prototype, screenshot, spec and detailed plan | Authorized in this session |
-| Original sketch received and clinically compared | Not received in visible conversation |
-| Proposed prototype/visual contract approved | Pending user review |
+| Original sketch received and clinically compared | Not received; prototype explicitly approved as its replacement |
+| Prototype/visual contract approved | Approved by user on 2026-09-24 |
 | Proposed specification and execution plan approved | Pending user review |
 | Provider account/model access, cost cap and real qualification | Not tested; required before enablement |
 | New application, migrations and workers implemented | Not performed in this design task |
@@ -75,7 +77,7 @@ Each task follows: brief → implementation/tests → code review + browser veri
 
 ## Visual evidence rules
 
-- After user approval, record original screenshot/prototype SHA-256 hashes and freeze them. Keep proposed and approved states distinct.
+- Approved screenshot/prototype SHA-256 hashes are frozen in `reference-manifest.json`. Verify them before comparison; never overwrite them.
 - Capture implementation screenshots separately under `docs/verification/creative-studio-independent/`; no overwrite of design files.
 - Use the same viewport, scale, theme, font, fixture and UI state. Wait for fonts/assets; disable animation only for static comparison, then separately test motion/reduced motion.
 - Compare sidebar order, header, pane bounds, label baseline alignment, input heights, button placement, history-card layout, picker preview, canvas fit and overlay transition. Use a 2px tolerance for major box geometry; allow font anti-aliasing differences, not missing controls or changed layouts.
