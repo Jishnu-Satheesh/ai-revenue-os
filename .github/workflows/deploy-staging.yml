@@ -132,6 +132,13 @@ jobs:
       # have Development (local runs) and Production environments (free plan
       # allows no custom staging env), so deploys always target each
       # project's Production environment — here, the staging project's.
+      - name: Verify Trigger project ref is set
+        run: |
+          if [ -z "$TRIGGER_PROJECT_REF" ]; then
+            echo "::error::TRIGGER_PROJECT_REF is empty. Check the staging environment secret name."
+            exit 1
+          fi
+
       - name: Deploy Trigger.dev workers
         run: |
           SDK_VERSION=$(node -p "require('./package.json').dependencies['@trigger.dev/sdk']")
