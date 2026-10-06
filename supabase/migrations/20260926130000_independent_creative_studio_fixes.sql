@@ -11,6 +11,14 @@
 -- (acceptance always raised), and no image version row can exist (image
 -- completion always raised). Runs, events, uploads, policies, and documents
 -- may hold rows; every change to those tables is nullable-additive.
+--
+-- Convergence note (2026-10-06): staging already runs exactly what this file
+-- describes (objects were built there first, all 14 function bodies verified
+-- byte-identical), but the migration was never recorded, so pushes replay it
+-- from statement 1. Every one-shot DDL below is therefore guarded
+-- (if [not] exists / drop-before-add) so a push converges to a recorded
+-- no-op here and still builds a fresh database correctly. Functions were
+-- already create-or-replace and converge on their own.
 
 -- ---------------------------------------------------------------------------
 -- C1: break the versions↔continuations insert deadlock. The continuation row
@@ -20,7 +28,7 @@
 -- inserted, the continuation exists.
 -- ---------------------------------------------------------------------------
 alter table public.studio_continuations
-  drop constraint studio_continuations_version_fk;
+  drop constraint if exists studio_continuations_version_fk;
 alter table public.studio_continuations
   add constraint studio_continuations_version_fk
   foreign key (organization_id, version_id)
@@ -38,20 +46,22 @@ alter table public.studio_continuations
 -- identity (the version pin covers the source bytes).
 -- ---------------------------------------------------------------------------
 alter table public.studio_runs
-  add column preassigned_export_id uuid null;
+  add column if not exists preassigned_export_id uuid null;
 
-alter table public.studio_exports add column preset text null;
+alter table public.studio_exports add column if not exists preset text null;
 -- No backfill: no export row can exist (see header). The SET NOT NULL below
 -- fails loudly rather than corrupting identity if that ever proves wrong.
 alter table public.studio_exports alter column preset set not null;
+alter table public.studio_exports
+  drop constraint if exists studio_exports_preset_allowed;
 alter table public.studio_exports
   add constraint studio_exports_preset_allowed check (preset in (
     'instagram_feed', 'instagram_stories', 'google_square',
     'google_horizontal', 'google_vertical', 'ecommerce_creative'
   ));
 
-drop index public.studio_exports_dedup_idx;
-create unique index studio_exports_dedup_idx
+drop index if exists public.studio_exports_dedup_idx;
+create unique index if not exists studio_exports_dedup_idx
   on public.studio_exports (
     organization_id, studio_version_id, preset_version, preset,
     transform_version, transform
@@ -64,7 +74,7 @@ create unique index studio_exports_dedup_idx
 -- only real provider ids are written there.
 -- ---------------------------------------------------------------------------
 alter table public.studio_runs
-  add column worker_id text null
+  add column if not exists worker_id text null
   constraint studio_runs_worker_id_length
   check (worker_id is null or char_length(worker_id) between 1 and 120);
 
@@ -72,9 +82,13 @@ alter table public.studio_runs
 -- M9a/M9b: the explicit identity + lineage the other tables already carry.
 -- ---------------------------------------------------------------------------
 alter table public.studio_run_events
+  drop constraint if exists studio_run_events_org_identity;
+alter table public.studio_run_events
   add constraint studio_run_events_org_identity
   unique (organization_id, id);
 
+alter table public.studio_versions
+  drop constraint if exists studio_versions_run_fk;
 alter table public.studio_versions
   add constraint studio_versions_run_fk
   foreign key (run_id)
@@ -85,7 +99,7 @@ alter table public.studio_versions
 -- Code minor 7: pin the upload transfer to the exact reserved object name, so
 -- a reservation for one filename cannot land bytes under another.
 -- ---------------------------------------------------------------------------
-drop policy "actors transfer own studio uploads" on storage.objects;
+drop policy if exists "actors transfer own studio uploads" on storage.objects;
 create policy "actors transfer own studio uploads"
 on storage.objects for insert to authenticated
 with check (
