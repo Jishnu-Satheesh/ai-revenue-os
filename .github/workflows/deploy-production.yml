@@ -98,6 +98,6 @@ jobs:
       # traces back to one merge.
       - name: Deploy Trigger.dev workers
         run: |
-          SDK_VERSION=$(node -p "require('./package.json').devDependencies['@trigger.dev/sdk']")
+          SDK_VERSION=$(node -p "require('./package.json').dependencies['@trigger.dev/sdk']")
           echo "Deploying with trigger.dev CLI $SDK_VERSION to match the SDK"
           pnpm dlx trigger.dev@$SDK_VERSION deploy --external-id ${{ github.sha }}

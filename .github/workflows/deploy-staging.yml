@@ -131,6 +131,6 @@ jobs:
       # commit for traceability.
       - name: Deploy Trigger.dev workers
         run: |
-          SDK_VERSION=$(node -p "require('./package.json').devDependencies['@trigger.dev/sdk']")
+          SDK_VERSION=$(node -p "require('./package.json').dependencies['@trigger.dev/sdk']")
           echo "Deploying with trigger.dev CLI $SDK_VERSION to match the SDK"
           pnpm dlx trigger.dev@$SDK_VERSION deploy --env staging --external-id ${{ github.sha }}

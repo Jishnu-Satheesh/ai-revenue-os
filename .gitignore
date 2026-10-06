@@ -5,6 +5,7 @@ dist
 .env
 .env.local
 .env.production
+.env.production*
 .env.*.local
 !.env.example
 # Holds a Trigger.dev personal access token inline. Keep it out of history.
