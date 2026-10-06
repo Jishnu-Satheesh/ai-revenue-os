@@ -12,6 +12,23 @@ export type GenerationRunSnapshot = {
   status: string;
   failureCode: string | null;
   leaseExpiresAt: string | null;
+  /**
+   * When the run row last changed, UTC.
+   *
+   * Carried because `queued` on its own cannot be read. A run enqueued a second
+   * ago and a run enqueued last Friday that no worker ever collected look
+   * identical in the status column, and the screen was calling both of them
+   * "building your campaign". See audit finding F02.
+   */
+  updatedAt: string;
+  /**
+   * The pinned evidence this run was generating from.
+   *
+   * Carried so a retry can tell "the same request that already failed" from
+   * "a new request against newer evidence". Without it, refusing a pointless
+   * retry would also refuse the useful one.
+   */
+  sourceSnapshotId: string;
 };
 
 /**
@@ -32,7 +49,7 @@ export const campaignSummarySchema = z.strictObject({
   id: uuidSchema,
   organizationId: uuidSchema,
   title: z.string(),
-  sourceKind: z.enum(["manual_brief", "decision_opportunity"]),
+  sourceKind: z.enum(["manual_brief", "decision_opportunity", "campaign_proposal"]),
   briefId: uuidSchema.nullable(),
   opportunityId: uuidSchema.nullable(),
   state: z.string(),
@@ -143,6 +160,17 @@ export type CampaignReadPort = {
     campaignId: string,
   ): Promise<GenerationRunSnapshot | null>;
   getLiveApproval(organizationId: string, campaignId: string): Promise<CampaignApproval | null>;
+  /**
+   * The most recent approval whatever became of it, for surfaces that explain
+   * rather than authorize.
+   *
+   * Never use this to decide whether something may happen -- that is
+   * `getLiveApproval`, which refuses to return a revoked row at all. This one
+   * exists because "an approval was superseded when you edited the plate" and
+   * "nothing has ever been approved here" are different sentences, and the
+   * screen was saying the second when the first was true.
+   */
+  getLatestApproval(organizationId: string, campaignId: string): Promise<CampaignApproval | null>;
 };
 
 /** Human acts performed inside a session, re-authorized in the database. */

@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 import { Activity, BookOpen, Database, Eye, Plug } from "lucide-react";
 
 import { ActivityTab } from "@/components/integrations/activity-tab";
@@ -24,6 +25,8 @@ export type IntegrationHubClientProps = {
   organizationId: string;
   organizationName: string;
   organizationTimeZone: string;
+  /** Base currency used as the report upload form's starting currency. */
+  defaultCurrency?: string;
   role: OrganizationRole;
   initialSnapshot: IntegrationHubSnapshot;
   initialCatalog: readonly ProviderDefinition[];
@@ -47,12 +50,16 @@ export function IntegrationHubClient({
   organizationId,
   organizationName,
   organizationTimeZone,
+  defaultCurrency,
   role,
   initialSnapshot,
   initialCatalog,
   initialDataUpdatedAt,
   metricTargets,
 }: IntegrationHubClientProps) {
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const initialTab = tabs.find((tab) => tab.value === requestedTab)?.value ?? "connections";
   const snapshotQuery = useQuery(
     integrationSnapshotQueryOptions({
       organizationId,
@@ -105,7 +112,7 @@ export function IntegrationHubClient({
         </Alert>
       )}
 
-      <Tabs defaultValue="connections" className="min-h-0 flex-1">
+      <Tabs key={initialTab} defaultValue={initialTab} className="min-h-0 flex-1">
         <TabsList aria-label="Integration Hub views" className="w-full sm:w-fit">
           {tabs.map(({ value, label, icon: Icon }) => (
             <TabsTrigger key={value} value={value}>
@@ -139,6 +146,7 @@ export function IntegrationHubClient({
             metricTargets={metricTargets}
             role={role}
             timeZone={organizationTimeZone}
+            defaultCurrency={defaultCurrency}
           />
         </TabsContent>
         <TabsContent value="activity" className="min-h-0">

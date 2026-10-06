@@ -1,6 +1,7 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { generateText } from "ai";
 
+import { OVERCLAIM_PATTERNS, overclaimGuidance } from "@/domain/campaigns/measurement";
 import { DomainError } from "@/lib/errors";
 import { env } from "@/lib/env";
 import { createModelRouter, type ModelRouter } from "@/ai/model-router";
@@ -44,6 +45,24 @@ const LESSON_RULES: readonly string[] = Object.freeze([
   "Do not invent numbers. Use only the figures given, and only as they are given.",
 ]);
 
+/**
+ * The refused vocabulary, stated up front.
+ *
+ * The first production run of this worker drafted a lesson containing
+ * "because", was rejected, redrafted, was rejected again, and wrote nothing at
+ * all. Both refusals were correct -- an `execution_only` campaign measured
+ * nothing, so no sentence may explain why anything happened. What was wrong was
+ * asking for prose about a result while never mentioning that one causal word
+ * ends the attempt. A fence the writer cannot see is a trap, not a rule.
+ *
+ * Built from `OVERCLAIM_PATTERNS`, so the list a model is warned about and the
+ * list the validator enforces cannot drift apart.
+ */
+function forbiddenWordingRule(): string {
+  const words = OVERCLAIM_PATTERNS.map((entry) => entry.says).join(", ");
+  return `Never use any of these, in any form: ${words}. A lesson containing one of them is rejected outright, however reasonable the sentence around it.`;
+}
+
 export type LearningDrafterOptions = {
   apiKey?: string;
   router?: ModelRouter;
@@ -71,8 +90,8 @@ export function buildLearningPrompt(input: DraftLessonInput): string {
     input.repairHints.length > 0
       ? [
           "",
-          "A previous draft was rejected for the following, which must not recur:",
-          ...input.repairHints.map((hint) => `- ${hint}`),
+          "A previous draft was rejected for using the following. Rewrite without them:",
+          ...input.repairHints.map((hint) => `- ${overclaimGuidance(hint)}`),
         ]
       : [];
 
@@ -85,6 +104,7 @@ export function buildLearningPrompt(input: DraftLessonInput): string {
     "",
     "Rules:",
     ...LESSON_RULES.map((rule) => `- ${rule}`),
+    `- ${forbiddenWordingRule()}`,
     ...repair,
   ].join("\n");
 }

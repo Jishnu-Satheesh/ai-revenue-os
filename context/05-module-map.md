@@ -44,6 +44,8 @@ Organization creation, branch setup, business profile, facts, goals, constraints
 
 Guided onboarding is the organization-scoped control plane for resumable ten-section intake, missing-data requests, private uploads, bounded extraction candidates, and versioned AI-readiness assessments. It lives under `src/modules/onboarding`, `src/components/onboarding`, and `src/app/api/organizations/[organizationId]/onboarding`; confirmed values remain canonical in the Organization/Digital Twin module.
 
+Brand Identity holds the organization's canonical logo and the structured rules generation must respect. It lives under `src/domain/brand`, `src/modules/brand`, and `src/app/api/organizations/[organizationId]/brand`, over two tables — `organization_brand_guidelines` (palette, hard/soft rules, restricted terms) and `organization_brand_logos` (a `primary` and optional `dark` pointer into validated `organization_brand_asset_versions`, keyed composite so a cross-tenant pointer fails in Postgres). Writing needs `brand.manage`, which sits above the operator line because a brand's rules constrain what may be published in a client's name. It is collected in onboarding's brand assets section, edited in the Asset Library's Brand Guidelines tab, displayed by the organization switcher, and promoted into `load_campaign_creation_facts` — which is what finally gives `hardConstraints`, `softConventions` and `restrictedTerms` a producer after being read, prompted and policy-checked with nothing ever writing them. `resolveDisplayLogo` and the SQL's `canonicalLogoVersionId` apply the same displayability test and must stay in step. See `specs/026-brand-identity.md` and ADR 0059.
+
 ### Integration Hub
 
 Connection catalog, OAuth or credential handoff, webhook registration, file imports, provider health, and branch mappings.
@@ -90,6 +92,19 @@ Creates controlled tests, calculates guardrails, and records results.
 
 Evaluates technical execution, output quality, business impact, and long-term playbook evidence.
 
+### Growth Intelligence
+
+The organization workspace at `/organizations/[organizationId]/growth-intelligence`
+(Spec 022, ADRs 0044 and 0047). Composes four tabs — Overview, Recommendations, Your
+actions, Insights & market — from source-owned reads (Channel findings, Channel
+Recommendations, Decision Opportunities, synthesized items, Market Evidence) without
+copying lifecycle state. Branch-scoped market research, durable pipelines, synthesis,
+and Campaign draft handoff live under `src/domain/growth-intelligence/`,
+`src/modules/growth-intelligence/`, `src/components/growth-intelligence/`, and the
+`growth_intelligence_*` migrations. An explicit manager-clicked live preview may show
+fresh Brave results on screen and discard them; it stores nothing and creates no
+evidence (Spec 022 ss 4.2/8.2 exception).
+
 ### Campaign Bundles
 
 Owns the industry-neutral campaign identity, immutable Campaign Bundle versions and digests, qualification, structured generation ports, revisions and diffs, channel-action manifests, exact-version approval envelopes, measurement plans, and campaign-scoped learning proposals. Decision Engine opportunities and manual briefs enter the same service. Studio and Telegram review are presentation adapters over the same version chain. See ADRs 0015, 0017, 0018, and 0019.
@@ -122,12 +137,10 @@ Human-readable history of observations, decisions, approvals, executions, failur
 
 ## Experience
 
-### Public Landing Page
+### App Entry
 
-The signed-out face of the product at `/`: hero with an illustrative cockpit preview, capabilities,
-how-it-works, governance, and walkthrough CTA. Signed-in users are redirected by the ADR 0015
-resolver instead. Lives in `src/components/marketing/` with its own dark token scope in
-`globals.css` (`.marketing`).
+`/` is app-only and redirects through the ADR 0015 resolver. The public landing page
+was retired to the separate Astro project (see `specs/021-public-landing-page.md`).
 
 ### Agency Portfolio
 
@@ -136,6 +149,8 @@ Cross-client health, readiness, opportunities, blocked actions, run failures, an
 ### Organization Workspace
 
 Client-specific overview, goals, data, memory, opportunities, integrations, and outcomes.
+
+The Overview route serves the organization home (`src/components/organizations/home/`, composed by `src/modules/organizations/application/home-service.ts` from `loadOrganizationHome` in `src/modules/organizations/infrastructure/home-loader.ts`): identity, campaigns, creative gallery, attention, goals, destinations, and activity. Campaign and creative reads stay source-owned in `src/modules/campaigns/infrastructure/home-campaign-reader.ts` and `home-asset-reader.ts`. See `docs/superpowers/specs/2026-09-11-organization-home-design.md`. The Digital Twin management editors remain mounted below the home on the same route. The first home section is Current vs projected growth: a deterministic revenue scenario (`src/domain/organizations/revenue-scenario.ts`, inputs mapped in `revenue-inputs.ts` from analysed-window money bands plus the recommendation/proposal/insight action set, reads shared via `revenue-source.ts`) with an explicit-click rough-estimate proposal route (`src/app/api/organizations/[organizationId]/revenue/proposals/`) that stores nothing. See `docs/superpowers/specs/2026-09-11-organization-home-revenue-scenario.md`. Behind `OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS` the first section is instead the fixed-projection growth card (spec `specs/027-overview-growth-progress.md`, ADR 0064): immutable projections, viewer-invariant comparisons, and a refresh-failure path that retains the last readable view with its report date. Migration push, worker deployment, and staged publication runs are user-gated and have not run; see `docs/verification/overview-growth/final-report.md`.
 
 ### Revenue Opportunity Feed
 

@@ -127,6 +127,12 @@ export type MemorySearchParameters = {
   maxAgeDays?: number;
   includeSuperseded: boolean;
   includeExpired: boolean;
+  /**
+   * The organization workspace is the one surface that shows pre-shared-context
+   * rows, so it passes true explicitly. Every AI consumer leaves this unset or
+   * false: the unqualified legacy corpus never enters a model prompt.
+   */
+  includeLegacy?: boolean;
   lexicalWeight: number;
   semanticWeight: number;
   limit: number;

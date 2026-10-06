@@ -1,0 +1,22 @@
+{
+  "head": "9498d84007330acac416dd425d0bbaf39b9d3903",
+  "scope": "design reference only; hashes are current working files, not assumed clean HEAD",
+  "files": {
+    "src/app/(platform)/organizations/[organizationId]/overview/page.tsx": "adc1a1b6c46ba7a1ad8b975cb8330fd23159578faf144640acd48abe4da3dd1f",
+    "src/components/organizations/overview-report.tsx": "c346c6254af947d7e97eb58a4f56215dad70c1367f4bb8128a00aa02f3534c66",
+    "src/components/organizations/digital-twin-workspace.tsx": "09c771c43bf87bd57206313fd97d972bc2c64deff551bdaedc9a8e84ed3a4ee5",
+    "src/modules/organizations/application/overview.ts": "09810c2622bc7661def564a398fe00a4cd5668ece3990d68b7ba30867cfbdba2",
+    "src/modules/organizations/infrastructure/repository.ts": "6111c59aecfeee4860d327b14a85b0ad4766d05f595e1ed1d2467eff8d403429",
+    "src/modules/campaigns/application/studio-view.ts": "f556e65f1800e6e992e87422c184fe62978817296d6af7449d236f883719475b",
+    "src/modules/campaigns/application/ports.ts": "506a75b6fda463aa54931921e9b32f6007f917cca72654fc8e2a4cb22594beda",
+    "src/modules/campaigns/infrastructure/repository.ts": "ef708ba95d223a3610a3c4acdd2e9440d20cffa72bd17c38d50fd856c4dd8944",
+    "src/modules/campaigns/infrastructure/asset-library-repository.ts": "1f87e1e2a17cfe51ec8c10c01ba8536abcbdfeddd321eb96254c2965a74dae01",
+    "src/modules/campaigns/infrastructure/asset-preview.ts": "ba7eccbef198dbca4a08d0682d656e878ad79231bfca29d59b079c1d3a983fd8",
+    "src/modules/campaigns/infrastructure/poster-studio-reader.ts": "ad4c64f0466be43021ef7861538e82a3aa0fc712e2edd5db5f9142091674a1b7",
+    "src/components/assets/asset-workspace.tsx": "64c6e4288259ab12d3ff38bcc0c021b62579380faa8d898aa4b1f99ebf7c714d",
+    "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+    "src/components/layout/sidebar.tsx": "79e6b159c149d941f7d9472430c0cb3606cb4247a62d0e91c4187d7250dbcdc1",
+    "src/app/globals.css": "9d84771e9dd3ffba9016d03395f9f7ee8c0a18104ef6f8ccff1f2063a21257cb",
+    "src/lib/supabase/database.types.ts": "828b9fa0b3260252c7ffe0a3d3a1bd32124eecbb818022697d0bbf1941c301a8"
+  }
+}

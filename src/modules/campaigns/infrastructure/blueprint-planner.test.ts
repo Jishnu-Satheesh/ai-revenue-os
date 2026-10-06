@@ -49,10 +49,11 @@ const RESOLUTION: ReferenceResolution = {
 
 const REFERENCES = [
   {
-    role: "avoid" as const,
+    role: "rejected_creative" as const,
     ordinal: 0,
     mimeType: "image/png" as const,
     bytes: new Uint8Array([2]),
+    reasonCodes: ["wrong_subject"],
   },
   {
     role: "subject" as const,
@@ -79,7 +80,7 @@ function input() {
     brandContext: "Muted natural materials; no neon.",
     subjectDescription: "Kingfish in brick-red coconut gravy in a clay pot.",
     resolution: RESOLUTION,
-    references: REFERENCES,
+    blueprintEvidence: REFERENCES,
   };
 }
 

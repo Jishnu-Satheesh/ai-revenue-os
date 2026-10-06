@@ -1,4 +1,4 @@
-import { CalendarCheck2, Check, Clock3, FilePlus2, X } from "lucide-react";
+import { CalendarCheck2, Check, Clock3, FilePlus2, Megaphone, ThumbsUp, X } from "lucide-react";
 
 import type { TimelineEvent } from "@/modules/growth-intelligence/application/read-model";
 
@@ -13,6 +13,15 @@ const EVENT_META = {
   retry: { label: "Retried", Icon: Clock3 },
   "draft-created": { label: "Draft created", Icon: Check },
   "draft-failed": { label: "Draft failed", Icon: X },
+  // Research lifecycle rows arrive from the read contract; the Task 11
+  // progress/outcome surfaces own their presentation.
+  "research-started": { label: "Research started", Icon: FilePlus2 },
+  "research-finished": { label: "Research finished", Icon: Check },
+  "research-retried": { label: "Analysis retried", Icon: Clock3 },
+  // Never shortened to "Approved": what was agreed to is preparing creative.
+  "proposal-ready": { label: "Proposal ready to review", Icon: Megaphone },
+  "proposal-approved": { label: "Approved to prepare creative", Icon: ThumbsUp },
+  "changes-requested": { label: "Changes requested", Icon: Clock3 },
 } as const;
 
 function sourceLabel(source: TimelineEvent["source"]): string {
@@ -20,7 +29,11 @@ function sourceLabel(source: TimelineEvent["source"]): string {
     ? "Opportunity"
     : source.kind === "channel_recommendation"
       ? "Recommendation"
-      : "Intelligence item";
+      : source.kind === "research_pipeline"
+        ? "Market research"
+        : source.kind === "campaign_proposal"
+          ? "Campaign proposal"
+          : "Intelligence item";
 }
 
 /**
@@ -28,15 +41,27 @@ function sourceLabel(source: TimelineEvent["source"]): string {
  * Month navigation changes this history only; it never relabels evidence.
  */
 export function IntelligenceTimeline({
-  events,
+  events: incoming,
   timeZone,
+  compact = false,
 }: {
   events: readonly TimelineEvent[];
   timeZone: string;
+  compact?: boolean;
 }) {
+  // Your actions names one start and one terminal event per transition, so
+  // the view deduplicates identical rows instead of showing the same moment
+  // twice when workspace and research reads overlap.
+  const seen = new Set<string>();
+  const events = incoming.filter((event) => {
+    const key = `${event.type}::${event.source.kind}::${event.source.id}::${event.occurredAt}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   return (
     <section aria-label="Activity timeline" className="flex flex-col gap-4">
-      <h2 className="text-lg font-semibold">Activity</h2>
+      {compact ? null : <h2 className="text-lg font-semibold">Activity</h2>}
       {events.length === 0 ? (
         <p className="text-sm text-muted-foreground">No activity this month.</p>
       ) : (
@@ -58,6 +83,7 @@ export function IntelligenceTimeline({
                   <span className="font-medium">
                     {label} · {sourceLabel(event.source)}
                   </span>
+                  <span className="truncate text-sm">{event.title}</span>
                   <span className="text-xs text-muted-foreground">
                     {new Date(event.occurredAt).toLocaleDateString("en-AE", {
                       timeZone,

@@ -21,7 +21,9 @@ function sheet(overrides: Partial<ProfiledSheet> = {}): ProfiledSheet {
     headerCandidateDigests: [
       {
         rowPosition: 1,
-        normalizedHeaderDigests: ["pos_id", "total_sales", "total_orders", "total_commission"].map(digest),
+        normalizedHeaderDigests: ["pos_id", "total_sales", "total_orders", "total_commission"].map(
+          digest,
+        ),
       },
     ],
     ...overrides,
@@ -81,7 +83,11 @@ describe("recognising a file from its profile", () => {
 
   it("tolerates extra sheets when the definition says it reviewed and ignored them", () => {
     // Every real workbook has some. EatEasily ships an empty second tab.
-    const extra = sheet({ normalizedSheetName: "worksheet", sheetPosition: 2, headerCandidateDigests: [] });
+    const extra = sheet({
+      normalizedSheetName: "worksheet",
+      sheetPosition: 2,
+      headerCandidateDigests: [],
+    });
 
     expect(match([sheet(), extra]).outcome).toBe("matched");
   });

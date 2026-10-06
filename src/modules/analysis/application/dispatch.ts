@@ -1,6 +1,6 @@
 import "server-only";
 
-import { tasks } from "@trigger.dev/sdk";
+import { tasks, idempotencyKeys } from "@trigger.dev/sdk";
 
 import type { AnalysisGrain } from "@/domain/analysis/types";
 import { logger } from "@/lib/logger";
@@ -25,10 +25,8 @@ export async function requestChannelAnalysis(input: {
   windowStart: string;
   windowEnd: string;
   periodGrain: AnalysisGrain;
-  /** The canonical month the route selected. Absent on the legacy path. */
-  month?: string;
-  /** The zone the route resolved the month in. Required with `month`. */
-  windowTimezone?: string;
+  /** The zone the caller resolved the window in. */
+  windowTimezone: string;
   analysisRunId: string;
   correlationId: string;
 }): Promise<boolean> {
@@ -47,13 +45,12 @@ export async function requestChannelAnalysis(input: {
         windowStart: input.windowStart,
         windowEnd: input.windowEnd,
         periodGrain: input.periodGrain,
-        month: input.month,
         windowTimezone: input.windowTimezone,
         analysisRunId: input.analysisRunId,
         correlationId: input.correlationId,
         idempotencyKey,
       },
-      { idempotencyKey },
+      { idempotencyKey:await idempotencyKeys.create(idempotencyKey,{scope:"global"}) },
     );
     return true;
   } catch (error) {
@@ -101,7 +98,7 @@ export async function requestChannelRecommendations(input: {
         analysisRunId: input.analysisRunId,
         correlationId: input.correlationId,
       },
-      { idempotencyKey, idempotencyKeyTTL },
+      { idempotencyKey:await idempotencyKeys.create(idempotencyKey,{scope:"global"}), idempotencyKeyTTL },
     );
     return true;
   } catch (error) {

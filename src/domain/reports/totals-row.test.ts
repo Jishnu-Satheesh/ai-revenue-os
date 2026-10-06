@@ -186,9 +186,10 @@ describe("locating the row on its own", () => {
     // The provider renders it as `Total`, ` total `, or `TOTAL` depending on
     // the report, and none of those are a different row.
     for (const written of ["Total", " total ", "TOTAL"]) {
-      expect(
-        findTotalsRow({ rule, rows: [HEADER, [written, 89]], fieldColumns }),
-      ).toEqual({ outcome: "found", rowIndex: 1 });
+      expect(findTotalsRow({ rule, rows: [HEADER, [written, 89]], fieldColumns })).toEqual({
+        outcome: "found",
+        rowIndex: 1,
+      });
     }
   });
 

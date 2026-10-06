@@ -21,7 +21,9 @@ const PROJECTION_VERSION_ID = "66666666-6666-4666-8666-666666666666";
 const ADMISSION_ID = "77777777-7777-4777-8777-777777777777";
 const CORRELATION_ID = "88888888-8888-4888-8888-888888888888";
 
-function admissionRow(overrides: Partial<ReportStructureAdmissionRow> = {}): ReportStructureAdmissionRow {
+function admissionRow(
+  overrides: Partial<ReportStructureAdmissionRow> = {},
+): ReportStructureAdmissionRow {
   return {
     id: ADMISSION_ID,
     organization_id: ORGANIZATION_ID,
@@ -216,7 +218,10 @@ describe("grantAdmission", () => {
   it("surfaces any other grant failure honestly instead of swallowing it", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: null,
-      error: { code: "23514", message: "report contract version is not an approved proposal for this package" },
+      error: {
+        code: "23514",
+        message: "report contract version is not an approved proposal for this package",
+      },
     });
     const service = createAdmissionService({ rpc, from: vi.fn() } as never);
 

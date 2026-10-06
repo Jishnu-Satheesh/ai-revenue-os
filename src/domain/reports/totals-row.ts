@@ -1,4 +1,7 @@
-import { normalizeReportStructureIdentifier, type ReportContractDocument } from "@/domain/reports/contracts";
+import {
+  normalizeReportStructureIdentifier,
+  type ReportContractDocument,
+} from "@/domain/reports/contracts";
 
 type ContractSheet = ReportContractDocument["sheets"][number];
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import type { CoverageWindow } from "@/domain/analysis/window-selection";
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -13,7 +14,7 @@ vi.mock("server-only", () => ({}));
  * narrated more than once, and where a triage answer's name comes from.
  */
 
-type QueryResult = { data: unknown; error: null };
+type QueryResult = { data: unknown; error: null; count?: number | null };
 
 function stubClient(
   results: Record<string, QueryResult>,
@@ -29,6 +30,7 @@ function stubClient(
       select: () => builder,
       eq: () => builder,
       in: () => builder,
+      not: () => builder,
       order: () => builder,
       limit: () => builder,
       then: (
@@ -119,6 +121,96 @@ describe("loadRecommendationsForRun", () => {
 
     expect(loaded.map((rec) => rec.id)).toEqual(["rec-b1", "rec-b0"]);
     expect(loaded.every((rec) => rec.resultDigest === "b".repeat(64))).toBe(true);
+  });
+
+  it("shows both tellings when the newer one is a gap-fill over disjoint findings", async () => {
+    // Amendment C: the first narration (group A) cites finding-1, the
+    // gap-fill (group B) cites finding-2. The fence guarantees disjoint
+    // citations, so both tellings show — hiding A behind B would un-advise
+    // the chapter B never touched.
+    const { supabase } = stubClient({
+      channel_recommendations: {
+        data: [
+          recommendationRow({
+            id: "rec-b1",
+            result_digest: "b".repeat(64),
+            created_at: "2026-02-02T10:00:00Z",
+          }),
+          recommendationRow({
+            id: "rec-a1",
+            result_digest: "a".repeat(64),
+            headline: "The first telling",
+            created_at: "2026-02-01T08:00:00Z",
+          }),
+        ],
+        error: null,
+      },
+      channel_recommendation_citations: {
+        data: [
+          { recommendation_id: "rec-b1", finding_id: "finding-2" },
+          { recommendation_id: "rec-a1", finding_id: "finding-1" },
+        ],
+        error: null,
+      },
+    });
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationsForRun({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: null,
+    });
+
+    expect(loaded.map((rec) => rec.id)).toEqual(["rec-b1", "rec-a1"]);
+  });
+
+  it("lets a newer telling replace the older words about a re-cited finding", async () => {
+    // The gap-fill cites only uncited findings by fence rule, so a re-cited
+    // finding means a replacement telling: the older item about it drops
+    // while an older item about an untouched finding survives.
+    const { supabase } = stubClient({
+      channel_recommendations: {
+        data: [
+          recommendationRow({
+            id: "rec-b1",
+            result_digest: "b".repeat(64),
+            created_at: "2026-02-02T10:00:00Z",
+          }),
+          recommendationRow({
+            id: "rec-a2",
+            result_digest: "a".repeat(64),
+            headline: "Older words about finding-2",
+            created_at: "2026-02-01T09:00:00Z",
+          }),
+          recommendationRow({
+            id: "rec-a1",
+            result_digest: "a".repeat(64),
+            headline: "Older words about finding-1",
+            created_at: "2026-02-01T08:00:00Z",
+          }),
+        ],
+        error: null,
+      },
+      channel_recommendation_citations: {
+        data: [
+          { recommendation_id: "rec-b1", finding_id: "finding-2" },
+          { recommendation_id: "rec-a2", finding_id: "finding-2" },
+          { recommendation_id: "rec-a1", finding_id: "finding-1" },
+        ],
+        error: null,
+      },
+    });
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationsForRun({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: null,
+    });
+
+    expect(loaded.map((rec) => rec.id)).toEqual(["rec-b1", "rec-a1"]);
   });
 
   it("names answers from the stored snapshot and asks profiles for nothing", async () => {
@@ -213,6 +305,144 @@ describe("loadRecommendationsForRun", () => {
     const loaded = await createAuthenticatedChannelAnalysisRepository(
       supabase,
     ).loadRecommendationsForRun({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: "viewer-1",
+    });
+
+    expect(loaded).toEqual([]);
+  });
+
+  it("reads no decisions and no feedback when the viewer is null", async () => {
+    // The null-viewer payload is what the run cache holds under the run id,
+    // so either read reaching for viewer state here would store one
+    // operator's answers where every later operator is served from.
+    const { supabase } = stubClient(
+      {
+        channel_recommendations: { data: [recommendationRow()], error: null },
+        channel_recommendation_citations: {
+          data: [{ recommendation_id: "rec-1", finding_id: "finding-1" }],
+          error: null,
+        },
+      },
+      {
+        forbiddenTables: ["channel_recommendation_decisions", "channel_recommendation_feedback"],
+      },
+    );
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationsForRun({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: null,
+    });
+
+    expect(loaded[0].decisions).toEqual([]);
+    expect(loaded[0].myFeedback).toBeNull();
+    expect(loaded[0].citationFindingIds).toEqual(["finding-1"]);
+  });
+});
+
+describe("countRecommendationsForRun", () => {
+  it("returns the exact filed count without reading row data", async () => {
+    // The view cache keys on this count so a gap-fill filing misses the
+    // pre-gap-fill payload. A head count is one indexed lookup; the fence
+    // caps a run's filings, so the number stays small by construction.
+    const { supabase, asked } = stubClient({
+      channel_recommendations: { data: null, error: null, count: 8 },
+    });
+
+    const count = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).countRecommendationsForRun({ organizationId: "org-1", analysisRunId: "run-1" });
+
+    expect(count).toBe(8);
+    expect(asked).toEqual(["channel_recommendations"]);
+  });
+
+  it("reads zero when the run was never narrated", async () => {
+    const { supabase } = stubClient({
+      channel_recommendations: { data: null, error: null, count: 0 },
+    });
+
+    const count = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).countRecommendationsForRun({ organizationId: "org-1", analysisRunId: "run-1" });
+
+    expect(count).toBe(0);
+  });
+
+  it("reads zero when the count comes back null", async () => {
+    const { supabase } = stubClient({
+      channel_recommendations: { data: null, error: null },
+    });
+
+    const count = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).countRecommendationsForRun({ organizationId: "org-1", analysisRunId: "run-1" });
+
+    expect(count).toBe(0);
+  });
+});
+
+describe("loadRecommendationViewerState", () => {
+  it("returns every answer and the viewer's own vote keyed by recommendation", async () => {
+    const { supabase } = stubClient({
+      channel_recommendations: { data: [recommendationRow()], error: null },
+      channel_recommendation_decisions: {
+        data: [
+          decisionRow(),
+          decisionRow({
+            id: "decision-0",
+            decision: "acknowledged",
+            dismissal_reason: null,
+            actor_id: "actor-1",
+            actor_display_name: "Dana",
+            created_at: "2026-02-02T09:00:00Z",
+          }),
+        ],
+        error: null,
+      },
+      channel_recommendation_feedback: {
+        data: [{ recommendation_id: "rec-1", helpful: true }],
+        error: null,
+      },
+    });
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationViewerState({
+      organizationId: "org-1",
+      analysisRunId: "run-1",
+      viewerId: "viewer-1",
+    });
+
+    expect(loaded).toEqual([
+      {
+        recommendationId: "rec-1",
+        decisions: [
+          expect.objectContaining({ decision: "dismissed", actorName: "Omar" }),
+          expect.objectContaining({ decision: "acknowledged", actorName: "Dana" }),
+        ],
+        myFeedback: true,
+      },
+    ]);
+  });
+
+  it("reads nothing viewer-shaped when the run was never narrated", async () => {
+    const { supabase } = stubClient(
+      {
+        channel_recommendations: { data: [], error: null },
+      },
+      {
+        forbiddenTables: ["channel_recommendation_decisions", "channel_recommendation_feedback"],
+      },
+    );
+
+    const loaded = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadRecommendationViewerState({
       organizationId: "org-1",
       analysisRunId: "run-1",
       viewerId: "viewer-1",
@@ -316,9 +546,14 @@ function supabaseStub(dataByTable: Record<string, unknown[]> = {}) {
   const from = (table: string) => {
     const filters: [string, unknown][] = [];
     queries.push({ table, filters });
+    const rows = dataByTable[table] ?? [];
     const builder = {
       select: () => builder,
       eq: (column: string, value: unknown) => {
+        filters.push([column, value]);
+        return builder;
+      },
+      is: (column: string, value: unknown) => {
         filters.push([column, value]);
         return builder;
       },
@@ -326,14 +561,21 @@ function supabaseStub(dataByTable: Record<string, unknown[]> = {}) {
       in: () => builder,
       order: () => builder,
       limit: () => builder,
+      // Terminal like the real client's: resolves directly rather than
+      // returning `builder`, and narrows to one row (or null) instead of the
+      // array `then` below resolves with.
+      maybeSingle: () => Promise.resolve({ data: rows[0] ?? null, error: null } as QueryResult),
       then: (
-        onFulfilled: (value: QueryResult) => unknown,
+        onFulfilled: (value: QueryResult & { count: number }) => unknown,
         onRejected?: (reason: unknown) => unknown,
       ) =>
-        Promise.resolve({ data: dataByTable[table] ?? [], error: null } as QueryResult).then(
-          onFulfilled,
-          onRejected,
-        ),
+        Promise.resolve({
+          data: rows,
+          error: null,
+          // Only meaningful for a `{ count: "exact", head: true }` select; a
+          // caller not asking for a count simply ignores this field.
+          count: rows.length,
+        } as QueryResult & { count: number }).then(onFulfilled, onRejected),
     };
     return builder;
   };
@@ -518,6 +760,271 @@ describe("loadChannelBandsForWindow", () => {
   });
 });
 
+describe("loadChannelCardFindingsForWindow", () => {
+  const cardFindingRow = (overrides: Record<string, unknown> = {}) => ({
+    id: "finding-1",
+    analysis_run_id: "run-1",
+    channel_id: "channel-1",
+    branch_id: null,
+    detector_key: "test.detector",
+    detector_version: 1,
+    kind: "observation",
+    code: "WINDOW_GROSS_REVENUE",
+    severity: null,
+    priority: null,
+    metric_key: "revenue.gross",
+    period_start: "2026-02-01",
+    period_end: "2026-02-28",
+    value_kind: "money",
+    value_numerator: 6_000_000,
+    value_denominator: null,
+    currency: "AED",
+    monetary_impact_minor_units: null,
+    expected_period_count: 1,
+    observed_period_count: 1,
+    absent_period_count: 0,
+    quality_state: "complete",
+    needs_data_reason: null,
+    limitations: [],
+    calculation_digest: "d".repeat(64),
+    created_at: "2026-03-01T00:00:00Z",
+    status: "open",
+    ...overrides,
+  });
+
+  function cardStub(findingRows: Record<string, unknown>[]) {
+    const codeFilters: unknown[][] = [];
+    const runRows = [
+      { id: "run-1", channel_id: "channel-1", completed_at: "2026-03-01T00:00:00Z" },
+    ];
+    const from = (table: string) => {
+      const eqFilters: [string, unknown][] = [];
+      let codeValues: unknown[] | null = null;
+      const builder = {
+        select: () => builder,
+        eq: (column: string, value: unknown) => {
+          eqFilters.push([column, value]);
+          return builder;
+        },
+        not: () => builder,
+        in: (column: string, values: unknown[]) => {
+          if (column === "code") {
+            codeValues = values;
+            codeFilters.push(values);
+          }
+          return builder;
+        },
+        order: () => builder,
+        limit: () => builder,
+        then: (onFulfilled: (value: QueryResult) => unknown) => {
+          // Apply the code and status filters the way PostgREST would, so a
+          // query that omits them sees every row and one that includes them
+          // sees only the matching rows.
+          let data: Record<string, unknown>[] =
+            table === "channel_analysis_runs"
+              ? runRows
+              : table === "channel_findings"
+                ? findingRows
+                : [];
+          if (table === "channel_findings") {
+            const status = eqFilters.find(([column]) => column === "status")?.[1];
+            data = data.filter(
+              (row) =>
+                (codeValues === null || codeValues.includes(row["code"])) &&
+                (status === undefined || row["status"] === status),
+            );
+          }
+          return Promise.resolve({ data, error: null }).then(onFulfilled);
+        },
+      };
+      return builder;
+    };
+    return {
+      supabase: { from } as unknown as SupabaseClient<Database>,
+      codeFilters,
+    };
+  }
+
+  it("reads the card codes beyond the money band for the latest run", async () => {
+    const rows = [
+      cardFindingRow({ id: "gross" }),
+      cardFindingRow({
+        id: "orders",
+        code: "FUNNEL_STAGE_CONVERSION",
+        metric_key: "listing.placed_orders",
+        value_kind: "ratio",
+        value_numerator: 1200,
+        value_denominator: 50,
+        currency: null,
+      }),
+      cardFindingRow({
+        id: "share",
+        code: "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS",
+        metric_key: "order.cancellation_attribution_count",
+        value_kind: "ratio",
+        value_numerator: 60,
+        value_denominator: 1200,
+        currency: null,
+      }),
+      // Another detector's answer is not the card's business, even when open.
+      cardFindingRow({ id: "other", code: "CHANNEL_REVENUE_SHARE" }),
+    ];
+    const { supabase, codeFilters } = cardStub(rows);
+
+    const records = await createAuthenticatedChannelAnalysisRepository(
+      supabase as unknown as SupabaseClient<Database>,
+    ).loadChannelCardFindingsForWindow({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-02-01",
+      windowEnd: "2026-02-28",
+      grain: "month",
+    });
+
+    expect(records).toHaveLength(1);
+    expect(records[0]?.findings.map((finding) => finding.id).sort()).toEqual([
+      "gross",
+      "orders",
+      "share",
+    ]);
+    expect(codeFilters).toHaveLength(1);
+    expect(codeFilters[0]).toContain("FUNNEL_STAGE_CONVERSION");
+    expect(codeFilters[0]).toContain("ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS");
+  });
+
+  it("refuses an unbounded findings read rather than silently truncating it", async () => {
+    const rows = Array.from({ length: 11 }, (_, index) =>
+      cardFindingRow({ id: `finding-${index}` }),
+    );
+    const { supabase } = cardStub(rows);
+
+    await expect(
+      createAuthenticatedChannelAnalysisRepository(
+        supabase as unknown as SupabaseClient<Database>,
+      ).loadChannelCardFindingsForWindow({
+        organizationId: ORGANIZATION,
+        windowStart: "2026-02-01",
+        windowEnd: "2026-02-28",
+        grain: "month",
+      }),
+    ).rejects.toThrow("CARD_FINDINGS_NOT_BOUNDED");
+  });
+});
+
+describe("loadChannelRangeCardFindingsForWindow", () => {
+  function rangeStub() {
+    // Newest first, as the query orders them: channel-1 was re-analysed at a
+    // finer grain later, channel-2 only ever ran a span, and the quarterly
+    // row names a grain the card does not read.
+    const runRows = [
+      {
+        id: "run-day",
+        channel_id: "channel-1",
+        period_grain: "day",
+        completed_at: "2026-03-02T00:00:00Z",
+      },
+      {
+        id: "run-span",
+        channel_id: "channel-2",
+        period_grain: "span",
+        completed_at: "2026-03-01T00:00:00Z",
+      },
+      {
+        id: "run-month",
+        channel_id: "channel-1",
+        period_grain: "month",
+        completed_at: "2026-02-01T00:00:00Z",
+      },
+      {
+        id: "run-quarter",
+        channel_id: "channel-3",
+        period_grain: "quarter",
+        completed_at: "2026-03-03T00:00:00Z",
+      },
+    ];
+    const from = (table: string) => {
+      const builder = {
+        select: () => builder,
+        eq: () => builder,
+        not: () => builder,
+        in: () => builder,
+        order: () => builder,
+        limit: () => builder,
+        then: (onFulfilled: (value: QueryResult) => unknown) =>
+          Promise.resolve({
+            data: table === "channel_analysis_runs" ? runRows : [],
+            error: null,
+          }).then(onFulfilled),
+      };
+      return builder;
+    };
+    return { supabase: { from } as unknown as SupabaseClient<Database> };
+  }
+
+  it("reads each channel once at its coarsest completed grain", async () => {
+    const { supabase } = rangeStub();
+
+    const records = await createAuthenticatedChannelAnalysisRepository(
+      supabase as unknown as SupabaseClient<Database>,
+    ).loadChannelRangeCardFindingsForWindow({
+      organizationId: ORGANIZATION,
+      windowStart: "2026-01-01",
+      windowEnd: "2026-02-28",
+    });
+
+    expect(records.map((record) => [record.channelId, record.analysisRunId]).sort()).toEqual([
+      ["channel-1", "run-month"],
+      ["channel-2", "run-span"],
+    ]);
+  });
+});
+
+describe("loadCompletedRunCountSince", () => {
+  it("counts newer completed runs without reading them", async () => {
+    const seen: { filters: [string, unknown][]; head: boolean } = { filters: [], head: false };
+    const from = () => {
+      const builder = {
+        select: (_columns: string, options?: { count: string; head: boolean }) => {
+          seen.head = options?.head === true;
+          return builder;
+        },
+        eq: (column: string, value: unknown) => {
+          seen.filters.push([column, value]);
+          return builder;
+        },
+        gt: (column: string, value: unknown) => {
+          seen.filters.push([column, value]);
+          return builder;
+        },
+        gte: (column: string, value: unknown) => {
+          seen.filters.push([column, value]);
+          return builder;
+        },
+        lte: (column: string, value: unknown) => {
+          seen.filters.push([column, value]);
+          return builder;
+        },
+        then: (onFulfilled: (value: QueryResult) => unknown) =>
+          Promise.resolve({ data: [], error: null, count: 2 }).then(onFulfilled),
+      };
+      return builder;
+    };
+    const supabase = { from } as unknown as SupabaseClient<Database>;
+
+    const count = await createAuthenticatedChannelAnalysisRepository(
+      supabase as unknown as SupabaseClient<Database>,
+    ).loadCompletedRunCountSince({
+      organizationId: ORGANIZATION,
+      since: "2026-03-01T00:00:00Z",
+      windowStartMin: "2025-11-03",
+      windowEndMax: "2026-02-28",
+    });
+
+    expect(count).toBe(2);
+    expect(seen.head).toBe(true);
+    expect(seen.filters).toContainEqual(["status", "completed"]);
+  });
+});
+
 describe("loadAnalysedWindowKeys", () => {
   it("scopes to the organization and to completed runs", async () => {
     const supabase = supabaseStub();
@@ -554,6 +1061,76 @@ describe("loadAnalysedWindowKeys", () => {
       { windowStart: "2026-02-01", windowEnd: "2026-02-28", grain: "day" },
       { windowStart: "2026-01-01", windowEnd: "2026-01-31", grain: "day" },
     ]);
+  });
+});
+
+describe("loadRunForWindow", () => {
+  it("keeps an explicitly requested branch separate from organization-wide runs", async () => {
+    for (const branchId of [null, "branch-1"]) {
+      const supabase = supabaseStub({ channel_analysis_runs: [], channel_recommendations: [] });
+      const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+      await repository.loadRunForWindow({
+        organizationId: ORGANIZATION,
+        channelId: "channel-1",
+        branchId,
+        windowStart: "2026-01-01",
+        windowEnd: "2026-01-04",
+      });
+      expect(
+        supabase.queries.find((query) => query.table === "channel_analysis_runs")?.filters,
+      ).toContainEqual(["branch_id", branchId]);
+    }
+  });
+  it("scopes both queries to the organization and to this channel", async () => {
+    // The status endpoint the Channel Audit loader polls every second reads
+    // through this method. A run or recommendation count belonging to
+    // another organization -- or another channel in this same organization
+    // -- must never surface through it.
+    const supabase = supabaseStub({
+      channel_analysis_runs: [
+        {
+          id: "run-1",
+          status: "completed",
+          cache_key: "digest-1",
+          finding_count: 0,
+          observation_count: 14,
+          needs_data_count: 5,
+        },
+      ],
+      channel_recommendations: [{ id: "rec-1" }],
+    });
+    const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+
+    const result = await repository.loadRunForWindow({
+      organizationId: ORGANIZATION,
+      channelId: "channel-1",
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-04",
+    });
+
+    const runsQuery = supabase.queries.find((query) => query.table === "channel_analysis_runs");
+    expect(runsQuery).toBeDefined();
+    expect(runsQuery?.filters).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(runsQuery?.filters).toContainEqual(["channel_id", "channel-1"]);
+    expect(runsQuery?.filters).toContainEqual(["window_start", "2026-01-01"]);
+    expect(runsQuery?.filters).toContainEqual(["window_end", "2026-01-04"]);
+
+    const recommendationsQuery = supabase.queries.find(
+      (query) => query.table === "channel_recommendations",
+    );
+    expect(recommendationsQuery).toBeDefined();
+    expect(recommendationsQuery?.filters).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(recommendationsQuery?.filters).toContainEqual(["analysis_run_id", "run-1"]);
+
+    expect(result).toEqual({
+      id: "run-1",
+      status: "completed",
+      cacheKey: "digest-1",
+      findingCount: 0,
+      observationCount: 14,
+      needsDataCount: 5,
+      recommendationCount: 1,
+    });
   });
 });
 
@@ -829,171 +1406,658 @@ describe("loadEvidenceWindows", () => {
   });
 });
 
-describe("loadAnalysisMonthTimeline", () => {
-  function timelineClient(rows: { start: string | null; end: string | null }[]) {
-    const queries: { table: string; filters: [string, unknown][]; order: string[] }[] = [];
-    let call = 0;
-    const supabase = {
-      from(table: string) {
-        const filters: [string, unknown][] = [];
-        const order: string[] = [];
-        queries.push({ table, filters, order });
-        const builder = {
-          select: () => builder,
-          eq: (column: string, value: unknown) => {
-            filters.push([column, value]);
-            return builder;
-          },
-          not: () => builder,
-          order: (column: string) => {
-            order.push(column);
-            return builder;
-          },
-          limit: () => builder,
-          then: (
-            onFulfilled: (value: QueryResult) => unknown,
-            onRejected?: (reason: unknown) => unknown,
-          ) => {
-            // First read takes the earliest declared start, the second the
-            // latest declared end: the horizon is two bounded rows, never a
-            // full package listing.
-            const row = rows[Math.min(call, rows.length - 1)];
-            call += 1;
-            const data =
-              row && row.start !== null && row.end !== null
-                ? [{ declared_period_start: row.start, declared_period_end: row.end }]
-                : [];
-            return Promise.resolve({ data, error: null } as QueryResult).then(
-              onFulfilled,
-              onRejected,
-            );
-          },
-        };
-        return builder;
-      },
-    } as unknown as SupabaseClient<Database>;
-    return { supabase, queries };
-  }
+const ORGANIZATION_ID = "org-1";
+const CHANNEL_ID = "channel-1";
 
-  it("derives the horizon from declared package dates, not from evidence rows", async () => {
-    const { supabase } = timelineClient([
-      { start: "2026-01-05", end: "2026-01-31" },
-      { start: "2026-01-05", end: "2026-03-20" },
+/** A repository whose `loadCoverageSegments` reads exactly these declared packages. */
+function createRepositoryWithPackages(
+  packages: { declared_period_start: string; declared_period_end: string }[],
+) {
+  const { supabase } = stubClient({
+    integration_report_packages: { data: packages, error: null },
+  });
+  return createAuthenticatedChannelAnalysisRepository(supabase);
+}
+
+/**
+ * A repository wired for `resolveWindowInput`: declared packages back
+ * `loadCoverageSegments` through its real query, and the organization's zone
+ * comes from a stubbed `organizations` row. `loadEvidenceWindows` is replaced
+ * outright with the windows the test wants to vote over -- its own real path is
+ * five tables deep and is already exercised on its own in
+ * `describe("loadEvidenceWindows")` above, so reproducing that chain here would
+ * pin nothing this suite doesn't already pin.
+ */
+function createRepositoryWithCoverage(input: {
+  packages: { declared_period_start: string; declared_period_end: string }[];
+  timeZone: string;
+  windows: readonly CoverageWindow[];
+}) {
+  const { supabase } = stubClient({
+    integration_report_packages: { data: input.packages, error: null },
+    organizations: { data: [{ default_timezone: input.timeZone }], error: null },
+  });
+  const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+  repository.loadEvidenceWindows = vi.fn().mockResolvedValue(input.windows);
+  return repository;
+}
+
+describe("loadCoverageSegments", () => {
+  it("merges the channel's declared package periods into stretches", async () => {
+    const repository = createRepositoryWithPackages([
+      { declared_period_start: "2026-01-01", declared_period_end: "2026-01-31" },
+      { declared_period_start: "2026-02-01", declared_period_end: "2026-02-28" },
+      { declared_period_start: "2026-05-01", declared_period_end: "2026-08-31" },
     ]);
 
-    const timeline = await createAuthenticatedChannelAnalysisRepository(
-      supabase,
-    ).loadAnalysisMonthTimeline({ organizationId: "org-1", channelId: "channel-1" });
-
-    expect(timeline).toEqual({ firstMonth: "2026-01", lastMonth: "2026-03" });
+    await expect(
+      repository.loadCoverageSegments({ organizationId: ORGANIZATION_ID, channelId: CHANNEL_ID }),
+    ).resolves.toEqual([
+      { start: "2026-01-01", end: "2026-02-28" },
+      { start: "2026-05-01", end: "2026-08-31" },
+    ]);
   });
 
-  it("reports no timeline when the channel has no projected package", async () => {
-    const { supabase } = timelineClient([{ start: null, end: null }]);
+  it("returns nothing for a channel with no projected packages", async () => {
+    const repository = createRepositoryWithPackages([]);
 
-    const timeline = await createAuthenticatedChannelAnalysisRepository(
-      supabase,
-    ).loadAnalysisMonthTimeline({ organizationId: "org-1", channelId: "channel-1" });
-
-    expect(timeline).toBeNull();
+    await expect(
+      repository.loadCoverageSegments({ organizationId: ORGANIZATION_ID, channelId: CHANNEL_ID }),
+    ).resolves.toEqual([]);
   });
+});
 
-  it("resolves a month to the window, zone, and finest written grain", async () => {
-    const calls: string[] = [];
-    const supabase = {
-      from(table: string) {
-        calls.push(table);
-        const step = calls.filter((entry) => entry === table).length;
-        const builder = {
-          select: () => builder,
-          eq: () => builder,
-          is: () => builder,
-          not: () => builder,
-          in: () => builder,
-          order: () => builder,
-          limit: () => builder,
-          then: (
-            onFulfilled: (value: QueryResult) => unknown,
-            onRejected?: (reason: unknown) => unknown,
-          ) => {
-            let data: unknown[] = [];
-            if (table === "integration_report_packages" && step === 1) {
-              data = [{ declared_period_start: "2026-01-05" }];
-            } else if (table === "integration_report_packages" && step === 2) {
-              data = [{ declared_period_end: "2026-03-20" }];
-            } else if (table === "organizations") {
-              data = [{ default_timezone: "Asia/Dubai" }];
-            } else if (table === "integration_report_packages" && step === 3) {
-              data = [
-                {
-                  id: "package-1",
-                  channel_id: "channel-1",
-                  branch_id: null,
-                  declared_period_start: "2026-02-01",
-                  declared_period_end: "2026-02-28",
-                  period_timezone: "Asia/Dubai",
-                  original_filename: "February.xlsx",
-                  uploaded_at: "2026-03-01T00:00:00Z",
-                },
-              ];
-            } else if (table === "integration_report_projection_runs") {
-              data = [{ id: "run-1", report_package_id: "package-1" }];
-            } else if (table === "report_projection_lineage") {
-              data = [{ normalized_metric_id: "metric-1", projection_run_id: "run-1" }];
-            } else if (table === "normalized_metrics") {
-              data = [{ id: "metric-1", period_grain: "day" }];
-            }
-            return Promise.resolve({ data, error: null } as QueryResult).then(
-              onFulfilled,
-              onRejected,
-            );
-          },
-        };
-        return builder;
-      },
-    } as unknown as SupabaseClient<Database>;
-
-    const resolved = await createAuthenticatedChannelAnalysisRepository(supabase).resolveMonthInput(
-      { organizationId: "org-1", channelId: "channel-1", month: "2026-02" },
-    );
-
-    expect(resolved).toEqual({
-      windowStart: "2026-02-01",
-      windowEnd: "2026-02-28",
+describe("resolveWindowInput", () => {
+  it("refuses a range that leaves the declared coverage", async () => {
+    const repository = createRepositoryWithCoverage({
+      packages: [{ declared_period_start: "2026-01-01", declared_period_end: "2026-02-28" }],
       timeZone: "Asia/Dubai",
+      windows: [
+        { windowStart: "2026-01-01", windowEnd: "2026-02-28", grain: "day", governedRowCount: 100 },
+      ],
+    });
+
+    await expect(
+      repository.resolveWindowInput({
+        organizationId: ORGANIZATION_ID,
+        channelId: CHANNEL_ID,
+        from: "2026-02-25",
+        to: "2026-03-05",
+      }),
+    ).resolves.toBeNull();
+  });
+
+  it("resolves a covered range to its window, zone and evidence-voted grain", async () => {
+    const repository = createRepositoryWithCoverage({
+      packages: [{ declared_period_start: "2026-01-01", declared_period_end: "2026-02-28" }],
+      timeZone: "Asia/Dubai",
+      windows: [
+        { windowStart: "2026-01-01", windowEnd: "2026-02-28", grain: "day", governedRowCount: 554 },
+        { windowStart: "2026-01-01", windowEnd: "2026-02-28", grain: "span", governedRowCount: 2 },
+      ],
+    });
+
+    await expect(
+      repository.resolveWindowInput({
+        organizationId: ORGANIZATION_ID,
+        channelId: CHANNEL_ID,
+        from: "2026-01-01",
+        to: "2026-01-04",
+      }),
+    ).resolves.toEqual({
+      windowStart: "2026-01-01",
+      windowEnd: "2026-01-04",
+      timeZone: "Asia/Dubai",
+      // The daily package carries 554 governed rows against the span's 2, so
+      // the grain is day. The operator never chooses this.
       grain: "day",
     });
   });
+});
 
-  it("resolves nothing when the month falls outside the known timeline", async () => {
-    const { supabase } = timelineClient([
-      { start: "2026-01-05", end: "2026-01-31" },
-      { start: "2026-01-05", end: "2026-01-31" },
-    ]);
+type AggregateFilterLog = {
+  table: string;
+  eq: [string, unknown][];
+  in: [string, unknown[]][];
+  is: [string, unknown][];
+  not: [string, unknown][];
+  range: [string, string, unknown][];
+};
 
-    const resolved = await createAuthenticatedChannelAnalysisRepository(supabase).resolveMonthInput(
-      { organizationId: "org-1", channelId: "channel-1", month: "2026-04" },
-    );
+/**
+ * Answers the three aggregate queries the way PostgREST would: `eq`, `in`,
+ * `is`, and `not(... is null)` filters actually remove rows, so a query that
+ * drops one of them sees rows it must not. Range and ordering filters are
+ * recorded but not applied -- the rows are already scoped to the window and
+ * the day-clipping under test happens in application code.
+ */
+function aggregateStub(input: {
+  definitions?: Record<string, unknown>[];
+  metrics?: Record<string, unknown>[];
+  spans?: Record<string, unknown>[];
+}) {
+  const queries: AggregateFilterLog[] = [];
+  const from = (table: string) => {
+    const log: AggregateFilterLog = { table, eq: [], in: [], is: [], not: [], range: [] };
+    queries.push(log);
+    const builder = {
+      select: () => builder,
+      eq: (column: string, value: unknown) => {
+        log.eq.push([column, value]);
+        return builder;
+      },
+      in: (column: string, values: unknown[]) => {
+        log.in.push([column, [...values]]);
+        return builder;
+      },
+      is: (column: string, value: unknown) => {
+        log.is.push([column, value]);
+        return builder;
+      },
+      not: (column: string, operator: string, value?: unknown) => {
+        log.not.push([column, `${operator}${value === null ? ":null" : ""}`]);
+        return builder;
+      },
+      gte: (column: string, value: unknown) => {
+        log.range.push(["gte", column, value]);
+        return builder;
+      },
+      lt: (column: string, value: unknown) => {
+        log.range.push(["lt", column, value]);
+        return builder;
+      },
+      lte: (column: string, value: unknown) => {
+        log.range.push(["lte", column, value]);
+        return builder;
+      },
+      order: () => builder,
+      limit: () => builder,
+      then: (
+        onFulfilled: (value: QueryResult) => unknown,
+        onRejected?: (reason: unknown) => unknown,
+      ) => {
+        let rows: Record<string, unknown>[] =
+          table === "metric_definitions"
+            ? [...(input.definitions ?? [])]
+            : table === "normalized_metrics"
+              ? [...(input.metrics ?? [])]
+              : table === "exact_range_metric_observations"
+                ? [...(input.spans ?? [])]
+                : [];
+        for (const [column, value] of log.eq) {
+          rows = rows.filter((row) => row[column] === value);
+        }
+        for (const [column, values] of log.in) {
+          rows = rows.filter((row) => values.includes(row[column]));
+        }
+        for (const [column, value] of log.is) {
+          rows = rows.filter((row) =>
+            value === null
+              ? row[column] === null || row[column] === undefined
+              : row[column] === value,
+          );
+        }
+        for (const [column, operator] of log.not) {
+          if (operator === "is:null") {
+            rows = rows.filter((row) => row[column] !== null && row[column] !== undefined);
+          }
+        }
+        return Promise.resolve({ data: rows, error: null }).then(onFulfilled, onRejected);
+      },
+    };
+    return builder;
+  };
+  return {
+    supabase: { from } as unknown as SupabaseClient<Database>,
+    queries,
+  };
+}
 
-    expect(resolved).toBeNull();
-  });
+const AGGREGATE_DEFINITIONS: Record<string, unknown>[] = [
+  { id: "def-gross", key: "revenue.gross", organization_id: null, is_active: true },
+  { id: "def-gross-org", key: "revenue.gross", organization_id: ORGANIZATION, is_active: true },
+  { id: "def-orders", key: "listing.placed_orders", organization_id: null, is_active: true },
+  { id: "def-views", key: "listing.menu_views", organization_id: null, is_active: true },
+  {
+    id: "def-cancelled",
+    key: "order.avoidable_cancellation_count",
+    organization_id: null,
+    is_active: true,
+  },
+];
 
-  it("scopes the horizon to the named channel", async () => {
-    const { supabase, queries } = timelineClient([
-      { start: "2026-02-01", end: "2026-02-28" },
-      { start: "2026-02-01", end: "2026-02-28" },
-    ]);
+/** One Dubai day: local midnight to local midnight, stated as instants. */
+function dubaiDayMetric(overrides: Record<string, unknown> = {}) {
+  return {
+    organization_id: ORGANIZATION,
+    channel_id: "channel-1",
+    metric_definition_id: "def-gross-org",
+    period_grain: "day",
+    period_start: "2026-01-31T20:00:00Z",
+    period_end: "2026-02-01T20:00:00Z",
+    period_timezone: "Asia/Dubai",
+    value_numerator: 10000,
+    currency: "AED",
+    reconciliation_state: "current",
+    reconciliation_digest: "digest-1",
+    superseded_by_id: null,
+    ...overrides,
+  };
+}
 
-    await createAuthenticatedChannelAnalysisRepository(supabase).loadAnalysisMonthTimeline({
-      organizationId: "org-1",
-      channelId: "channel-9",
+function exactSpan(overrides: Record<string, unknown> = {}) {
+  return {
+    organization_id: ORGANIZATION,
+    channel_id: "channel-1",
+    metric_definition_id: "def-orders",
+    period_start: "2026-02-02",
+    period_end: "2026-02-02",
+    value_numerator: 7,
+    currency: null,
+    reconciliation_state: "current",
+    reconciliation_digest: "digest-1",
+    superseded_by_id: null,
+    ...overrides,
+  };
+}
+
+const AGGREGATE_INPUT = {
+  organizationId: ORGANIZATION,
+  from: "2026-02-01",
+  to: "2026-02-03",
+  metricKeys: ["revenue.gross", "listing.placed_orders"],
+};
+
+describe("loadDailyMetricAggregates", () => {
+  it("sums same-day rows per channel and metric, preferring the organization's own definition", async () => {
+    const { supabase, queries } = aggregateStub({
+      definitions: AGGREGATE_DEFINITIONS,
+      metrics: [
+        dubaiDayMetric({ value_numerator: 10000 }),
+        dubaiDayMetric({ value_numerator: 2500 }),
+        dubaiDayMetric({ channel_id: "channel-2", value_numerator: 5000 }),
+        dubaiDayMetric({
+          metric_definition_id: "def-orders",
+          value_numerator: 40,
+          currency: null,
+        }),
+        dubaiDayMetric({
+          period_start: "2026-02-01T20:00:00Z",
+          period_end: "2026-02-02T20:00:00Z",
+          value_numerator: 7000,
+        }),
+      ],
     });
 
-    const packageQueries = queries.filter((query) => query.table === "integration_report_packages");
-    expect(packageQueries.length).toBe(2);
-    for (const query of packageQueries) {
-      expect(query.filters).toContainEqual(["organization_id", "org-1"]);
-      expect(query.filters).toContainEqual(["channel_id", "channel-9"]);
-    }
+    const aggregates =
+      await createAuthenticatedChannelAnalysisRepository(supabase).loadDailyMetricAggregates(
+        AGGREGATE_INPUT,
+      );
+
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "listing.placed_orders",
+        totalNumerator: 40,
+        currency: null,
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 12500,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-2",
+        metricKey: "revenue.gross",
+        totalNumerator: 5000,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-02",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-02",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 7000,
+        currency: "AED",
+      },
+    ]);
+
+    const metricsQuery = queries.find((query) => query.table === "normalized_metrics");
+    expect(metricsQuery?.eq).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(metricsQuery?.eq).toContainEqual(["reconciliation_state", "current"]);
+    // Day, week, and month rows arrive together; the builder picks the grain.
+    const grainFilter = metricsQuery?.in.find(([column]) => column === "period_grain");
+    expect(grainFilter?.[1]).toEqual(["day", "week", "month"]);
+    const definitionFilter = metricsQuery?.in.find(([column]) => column === "metric_definition_id");
+    // The organization's own revenue definition wins over the shared one, so
+    // the shared id must never reach the ledger query.
+    expect(definitionFilter?.[1]).toContain("def-gross-org");
+    expect(definitionFilter?.[1]).not.toContain("def-gross");
+  });
+
+  it("clips to the range in each row's own timezone and carries longer rows whole", async () => {
+    const { supabase, queries } = aggregateStub({
+      definitions: AGGREGATE_DEFINITIONS,
+      metrics: [
+        // The previous local day: its UTC instant touches the fetch window,
+        // but its calendar day sits before `from`.
+        dubaiDayMetric({
+          period_start: "2026-01-30T20:00:00Z",
+          period_end: "2026-01-31T20:00:00Z",
+          value_numerator: 999,
+        }),
+        dubaiDayMetric({ value_numerator: 9000 }),
+        // A UTC day at the far edge of the range.
+        dubaiDayMetric({
+          period_start: "2026-02-03T00:00:00Z",
+          period_end: "2026-02-04T00:00:00Z",
+          period_timezone: "UTC",
+          value_numerator: 3000,
+        }),
+        // A week row reaching past the range edge never arrives clipped:
+        // stating its week total for the in-range days alone would invent a
+        // part nobody reported.
+        dubaiDayMetric({
+          period_grain: "week",
+          period_start: "2026-01-25T20:00:00Z",
+          period_end: "2026-02-01T20:00:00Z",
+          value_numerator: 77777,
+        }),
+      ],
+      spans: [
+        // A three-day span fully inside the range arrives whole, tagged so
+        // the builder adds it once to its totals and never as daily bars.
+        exactSpan({
+          metric_definition_id: "def-gross-org",
+          period_start: "2026-02-01",
+          period_end: "2026-02-03",
+          value_numerator: 60000,
+          currency: "AED",
+        }),
+        exactSpan({ value_numerator: 7 }),
+      ],
+    });
+
+    const aggregates =
+      await createAuthenticatedChannelAnalysisRepository(supabase).loadDailyMetricAggregates(
+        AGGREGATE_INPUT,
+      );
+
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 9000,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-03",
+        grain: "span",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 60000,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-02",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-02",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "listing.placed_orders",
+        totalNumerator: 7,
+        currency: null,
+      },
+      {
+        day: "2026-02-03",
+        spanStart: "2026-02-03",
+        spanEnd: "2026-02-03",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 3000,
+        currency: "AED",
+      },
+    ]);
+
+    const spansQuery = queries.find((query) => query.table === "exact_range_metric_observations");
+    expect(spansQuery?.eq).toContainEqual(["organization_id", ORGANIZATION]);
+    expect(spansQuery?.eq).toContainEqual(["reconciliation_state", "current"]);
+  });
+
+  it("excludes superseded, held, undigested, channel-less, foreign and inactive-definition rows", async () => {
+    const { supabase } = aggregateStub({
+      definitions: [
+        ...AGGREGATE_DEFINITIONS,
+        { id: "def-stale", key: "operations.closed_days", organization_id: null, is_active: false },
+      ],
+      metrics: [
+        dubaiDayMetric({ value_numerator: 8000 }),
+        dubaiDayMetric({ superseded_by_id: "newer-row" }),
+        dubaiDayMetric({ reconciliation_state: "blocked_overlap" }),
+        dubaiDayMetric({ reconciliation_state: "excluded" }),
+        dubaiDayMetric({ reconciliation_digest: null }),
+        dubaiDayMetric({ channel_id: null }),
+        dubaiDayMetric({ organization_id: "org-2" }),
+        dubaiDayMetric({ metric_definition_id: "def-stale", value_numerator: 11 }),
+      ],
+      spans: [
+        // A sound row for a key nobody asked for stays out as well.
+        exactSpan({ period_start: "2026-02-01" }),
+        exactSpan({
+          metric_definition_id: "def-gross-org",
+          period_start: "2026-02-01",
+          superseded_by_id: "newer-span",
+        }),
+      ],
+    });
+
+    const aggregates = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadDailyMetricAggregates({
+      ...AGGREGATE_INPUT,
+      metricKeys: ["revenue.gross", "operations.closed_days"],
+    });
+
+    // Only the one current, digested, channel-carrying row of this tenant.
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 8000,
+        currency: "AED",
+      },
+    ]);
+  });
+
+  it("nulls the currency when a day group mixes currencies or carries none", async () => {
+    const { supabase } = aggregateStub({
+      definitions: AGGREGATE_DEFINITIONS,
+      metrics: [
+        dubaiDayMetric({ value_numerator: 100 }),
+        dubaiDayMetric({ value_numerator: 200 }),
+        dubaiDayMetric({
+          metric_definition_id: "def-orders",
+          value_numerator: 10,
+          currency: null,
+        }),
+        dubaiDayMetric({
+          metric_definition_id: "def-orders",
+          value_numerator: 5,
+          currency: null,
+        }),
+        dubaiDayMetric({ channel_id: "channel-2", value_numerator: 100 }),
+        dubaiDayMetric({ channel_id: "channel-2", value_numerator: 50, currency: "USD" }),
+      ],
+    });
+
+    const aggregates = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadDailyMetricAggregates({ ...AGGREGATE_INPUT, to: "2026-02-01" });
+
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "listing.placed_orders",
+        totalNumerator: 15,
+        currency: null,
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 300,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-01",
+        grain: "day",
+        channelId: "channel-2",
+        metricKey: "revenue.gross",
+        totalNumerator: 150,
+        currency: null,
+      },
+    ]);
+  });
+
+  it("reads fully-inside week and month rows whole and drops rows past either edge", async () => {
+    const { supabase } = aggregateStub({
+      definitions: AGGREGATE_DEFINITIONS,
+      metrics: [
+        // Monday 2026-02-02 to Sunday 2026-02-08 in Dubai: a week fully inside.
+        dubaiDayMetric({
+          period_grain: "week",
+          period_start: "2026-02-01T20:00:00Z",
+          period_end: "2026-02-08T20:00:00Z",
+          value_numerator: 70000,
+        }),
+        // February in Dubai: a month fully inside.
+        dubaiDayMetric({
+          period_grain: "month",
+          period_start: "2026-01-31T20:00:00Z",
+          period_end: "2026-02-28T20:00:00Z",
+          value_numerator: 250000,
+        }),
+        // A week reaching past the range start: out, never clipped.
+        dubaiDayMetric({
+          period_grain: "week",
+          period_start: "2026-01-25T20:00:00Z",
+          period_end: "2026-02-01T20:00:00Z",
+          value_numerator: 77777,
+        }),
+        // January: out on both sides of a February range.
+        dubaiDayMetric({
+          period_grain: "month",
+          period_start: "2025-12-31T20:00:00Z",
+          period_end: "2026-01-31T20:00:00Z",
+          value_numerator: 88888,
+        }),
+        // A day-grain row spanning two calendar days is corrupt input, not a
+        // wider fact: it stays out rather than landing on either day.
+        dubaiDayMetric({
+          period_start: "2026-02-01T20:00:00Z",
+          period_end: "2026-02-03T20:00:00Z",
+          value_numerator: 11111,
+        }),
+      ],
+      spans: [
+        // A multi-day span reaching past the range start stays out with the
+        // period rows: fully inside or nothing.
+        exactSpan({
+          metric_definition_id: "def-gross-org",
+          period_start: "2026-01-30",
+          period_end: "2026-02-02",
+          value_numerator: 22222,
+          currency: "AED",
+        }),
+      ],
+    });
+
+    const aggregates = await createAuthenticatedChannelAnalysisRepository(
+      supabase,
+    ).loadDailyMetricAggregates({
+      ...AGGREGATE_INPUT,
+      from: "2026-02-01",
+      to: "2026-02-28",
+      metricKeys: ["revenue.gross"],
+    });
+
+    expect(aggregates).toEqual([
+      {
+        day: "2026-02-01",
+        spanStart: "2026-02-01",
+        spanEnd: "2026-02-28",
+        grain: "month",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 250000,
+        currency: "AED",
+      },
+      {
+        day: "2026-02-02",
+        spanStart: "2026-02-02",
+        spanEnd: "2026-02-08",
+        grain: "week",
+        channelId: "channel-1",
+        metricKey: "revenue.gross",
+        totalNumerator: 70000,
+        currency: "AED",
+      },
+    ]);
+  });
+
+  it("returns nothing without querying when the input names no keys or no days", async () => {
+    const first = aggregateStub({ definitions: AGGREGATE_DEFINITIONS });
+    await expect(
+      createAuthenticatedChannelAnalysisRepository(first.supabase).loadDailyMetricAggregates({
+        ...AGGREGATE_INPUT,
+        metricKeys: [],
+      }),
+    ).resolves.toEqual([]);
+    expect(first.queries).toEqual([]);
+
+    const second = aggregateStub({ definitions: AGGREGATE_DEFINITIONS });
+    await expect(
+      createAuthenticatedChannelAnalysisRepository(second.supabase).loadDailyMetricAggregates({
+        ...AGGREGATE_INPUT,
+        from: "2026-02-05",
+        to: "2026-02-01",
+      }),
+    ).resolves.toEqual([]);
+    expect(second.queries).toEqual([]);
   });
 });

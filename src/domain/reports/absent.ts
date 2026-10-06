@@ -16,7 +16,9 @@
 /** Structurally empty: no cell, or a cell holding only whitespace. */
 export function isEmptyCell(value: unknown): boolean {
   return (
-    value === null || value === undefined || (typeof value === "string" && value.trim().length === 0)
+    value === null ||
+    value === undefined ||
+    (typeof value === "string" && value.trim().length === 0)
   );
 }
 

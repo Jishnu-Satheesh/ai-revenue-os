@@ -1,3 +1,5 @@
+import { z } from "zod";
+
 import type { PlanPromptPurpose } from "@/ai/model-router";
 
 /**
@@ -27,33 +29,97 @@ export type CampaignGenerationInput = {
   prompt: string;
   /** The JSON shape the model is asked to produce, as a description. */
   outputContract: string;
-  /** Optional governed visual context for a multimodal planning call. */
-  references?: readonly CampaignImageReference[];
+  /**
+   * Optional governed visual context for a multimodal planning call. The
+   * planning stage MAY see rejected designs — that is the evidence it reasons
+   * over — so this is the wider `BlueprintEvidenceReference` set.
+   */
+  references?: readonly BlueprintEvidenceReference[];
   planPurpose?: PlanPromptPurpose;
 };
 
-export type CampaignImageReferenceRole =
-  | "subject"
-  | "brand_mark"
-  | "setting"
-  | "style_exemplar"
-  | "palette"
-  | "typography"
-  | "avoid";
-
-export type CampaignImageReference = {
-  role: CampaignImageReferenceRole;
-  /** Position inside this role. The adapter sorts role first, then ordinal. */
+/**
+ * The retired shared reference shape.
+ *
+ * This carried one flat array with an `avoid` role to BOTH the planning stage
+ * and the final image stage, which is how rejected creative bytes reached the
+ * model that draws the finished picture. The runtime no longer uses it: the
+ * two stages now take `BlueprintEvidenceReference` and `FinalImageReference`
+ * respectively, and `avoid` no longer exists as a role anywhere.
+ *
+ * It remains only so historical generation receipts written under the old
+ * contract stay readable. Nothing may construct one for a live call.
+ *
+ * @deprecated Historical receipts only. Use the two separated types.
+ */
+export type LegacyCampaignImageReference = {
+  role:
+    | "subject"
+    | "brand_mark"
+    | "setting"
+    | "style_exemplar"
+    | "palette"
+    | "typography"
+    | "avoid";
   ordinal: number;
   mimeType: "image/png" | "image/jpeg" | "image/webp";
   bytes: Uint8Array;
 };
 
+const imageReferencePartsSchema = z.strictObject({
+  ordinal: z.number().int().nonnegative(),
+  mimeType: z.enum(["image/png", "image/jpeg", "image/webp"]),
+  // `z.instanceof(Uint8Array)` infers `Uint8Array<ArrayBuffer>`, which the
+  // platform's own `Uint8Array` (an `ArrayBufferLike` view) is not assignable
+  // to. Validate the same way, but infer the type the rest of the code uses.
+  bytes: z.custom<Uint8Array>((value) => value instanceof Uint8Array, {
+    message: "Expected image bytes.",
+  }),
+});
+
+/** Corrected-path grounding has no legacy avoid role. */
+export const groundingReferenceSchema = imageReferencePartsSchema.extend({
+  role: z.enum(["subject", "brand_mark", "setting", "style_exemplar", "palette", "typography"]),
+});
+export const approvedCreativeReferenceSchema = imageReferencePartsSchema.extend({
+  role: z.literal("approved_creative"),
+});
+export const rejectedCreativeReferenceSchema = imageReferencePartsSchema.extend({
+  role: z.literal("rejected_creative"),
+  reasonCodes: z.array(z.string().min(1)).min(1).max(15),
+});
+
+/** Blueprint may inspect both independently pinned Creative History evidence sets. */
+export const blueprintEvidenceReferenceSchema = z.discriminatedUnion("role", [
+  groundingReferenceSchema,
+  approvedCreativeReferenceSchema,
+  rejectedCreativeReferenceSchema,
+]);
+
+/**
+ * The corrected final-image contract deliberately has no `avoid` or
+ * `rejected_creative` variant. Task 7 moves the runtime adapter to this port.
+ */
+export const finalImageReferenceSchema = z.discriminatedUnion("role", [
+  groundingReferenceSchema,
+  approvedCreativeReferenceSchema,
+]);
+
+export type GroundingReference = z.infer<typeof groundingReferenceSchema>;
+export type ApprovedCreativeReference = z.infer<typeof approvedCreativeReferenceSchema>;
+export type RejectedCreativeReference = z.infer<typeof rejectedCreativeReferenceSchema>;
+export type BlueprintEvidenceReference = z.infer<typeof blueprintEvidenceReferenceSchema>;
+export type FinalImageReference = z.infer<typeof finalImageReferenceSchema>;
+
 export type CampaignImageGenerationInput = {
   context: CampaignGenerationCallContext;
   prompt: string;
-  /** Governed positive references followed by the separately bounded avoid set. */
-  references?: readonly CampaignImageReference[];
+  /**
+   * What the image model may look at. `FinalImageReference` has no
+   * `rejected_creative` variant, so a refused design cannot be handed to the
+   * model that draws the finished picture. See ADR 0049 and contract C06.
+   */
+  references?: readonly FinalImageReference[];
   /** Pixel dimensions the placement requires. */
   widthPx: number;
   heightPx: number;

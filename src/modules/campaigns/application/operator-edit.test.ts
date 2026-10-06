@@ -89,10 +89,11 @@ describe("typing it by hand is not a way around the rules", () => {
     expect(result.reason).toBe("content_policy");
   });
 
-  it("refuses newly added hashtags while no provider contract proves a limit", () => {
-    // Generation produces empty tag sets today, precisely because no verified
-    // contract states a limit. Adding tags by hand is a new violation, and is
-    // refused exactly as a model proposing them would be.
+  it("allows hashtags the provider contract proves are within the limit", () => {
+    // This used to be a refusal, because no contract proved any limit and an
+    // unprovable limit is never replaced by a plausible one. The 2026-09-15
+    // re-verification read 30 hashtags straight out of Meta's own media
+    // reference, so two tags are now simply inside the rules.
     const manifest = baseManifest();
     for (const direction of manifest.directions) {
       for (const set of direction.hashtagSets) set.tags = [];
@@ -104,6 +105,28 @@ describe("typing it by hand is not a way around the rules", () => {
         directionId: manifest.directions[0]!.id,
         hashtagSetIndex: 0,
         tags: ["#lunch", "#dubai"],
+      }),
+      restrictedTerms: [],
+    });
+
+    expect(result.outcome).toBe("accepted");
+  });
+
+  it("still refuses hashtags past the limit the contract proves", () => {
+    // The rule did not go away, it got a number. Instagram documents a maximum
+    // of 30, so a thirty-first typed by hand is refused exactly as a model
+    // proposing it would be.
+    const manifest = baseManifest();
+    for (const direction of manifest.directions) {
+      for (const set of direction.hashtagSets) set.tags = [];
+    }
+
+    const result = applyOperatorEdit({
+      base: manifest,
+      edit: editFor({
+        directionId: manifest.directions[0]!.id,
+        hashtagSetIndex: 0,
+        tags: Array.from({ length: 31 }, (_unused, index) => `#tag${index}`),
       }),
       restrictedTerms: [],
     });

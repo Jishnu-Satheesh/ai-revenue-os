@@ -410,7 +410,7 @@ export function createCampaignPlanner(
             hardConstraints: input.context.hardConstraints,
             blueprint,
           }),
-          references: input.imageGuidance.references,
+          references: input.imageGuidance.finalImageReferences,
           widthPx: size.widthPx,
           heightPx: size.heightPx,
         });

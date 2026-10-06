@@ -1,0 +1,28 @@
+# ADR 0075: Durable agent turns use source-owned capabilities
+
+## Status
+
+Accepted for the approved Universal Agent governed-workflows release, 2026-10-01. Amends the original Universal Agent design §2 and §7–10, ADR 0071's per-message completion assumption, and ADR 0072's SSE-end completion assumption. ADRs 0071/0072 continue to govern provisional token transport and validated answer text where compatible with this decision.
+
+## Context
+
+The live agent can route and stream an answer, but its evidence and Memory readers are not connected to the full answer path, and the answer writer is not given the user's actual question. A message row and an SSE stream do not represent a report upload, a channel analysis, a pending clarification, or recovery after a worker interruption. The report and analysis modules already own their own admission, cache, permission, and worker rules. Moving those rules into model prompts or a general agent would give two conflicting answers about what was done.
+
+The approved product request asks for one-month business advice, a Talabat assessment that performs missing analysis, and an XLSX/CSV report attached in chat. These are different source workflows but one conversation turn to the user.
+
+## Decision
+
+1. An organization-scoped `agent_turns` row is the durable unit of work for one user message. It has an idempotency key, bounded objective and state, pending server-owned Questionnaire challenge, lease/fence, and one final assistant message reference. Existing `agent_threads` and `agent_messages` remain the conversation record. Append-only `agent_turn_events` are the facts displayed as action and period markers. `agent_attachments` hold private staging identity, verified digest, declared scope, expiry, and package lineage. RLS and fenced database transitions govern all three new tables.
+2. The router classifies; a finite capability registry maps validated objective inputs to source-owned services and typed outcomes. The registry grants no arbitrary SQL, browser control, publication, spending, or approval ability. The agent can read authorized evidence and advise freely. It rechecks current grants before each source action; viewers receive read-only advice. Reports, analysis, Memory, and TinyFish retain their own authority, quality gates, and budgets.
+3. The answer synthesizer receives the actual bounded question, permitted thread history, goals/constraints, source-owned evidence, and permitted Memory content. Deterministic selectors choose scope and verify citation IDs. If an empty requested period causes a move to earlier comparable evidence, an append-only dated `period_switched` event records the actual switch. A failed or forbidden read cannot be reclassified as an empty period.
+4. A channel-assessment capability resolves organization channel identity, checks current evidence digest and exact scope, reuses a valid analysis even with zero recommendations, or dispatches through the existing rate-limited analysis service. A completed detector result with absent narration resumes the recommendations path. The final answer waits for source-module terminal state and links the exact run ID.
+5. A report-intake capability verifies staged bytes before reuse. Exact reuse requires digest plus all declared report scope fields. A changed same-scope file or ambiguous identity creates a pending server-owned Questionnaire. The governed report service creates and advances a new package; financial mapping, standing admission, and correction decisions remain with the authorized person. Interrupted storage promotion is reconciled on retry.
+6. Trigger.dev continuation carries identifiers and observes source-module state. Only a fenced terminal transition may create the final assistant message, once per turn. SSE tokens are provisional display; their `end` marker alone cannot assert completion of a report, analysis, or research task. Reconnect and history restore durable events, pending questions, attachments, and the final answer. Bound tool steps, model calls, research spend, and analysis dispatches.
+7. Shared-thread answer context includes only preceding user questions, bounded active goals/constraints, and Memory at or below `internal` sensitivity. A privileged initiating actor cannot make restricted content visible through organization-readable history. Model outages preserve permitted source findings in a deterministic answer. Attached-report assessment preserves exact declared scope; period switching belongs to comparable historical advice, never to silent replacement of the supplied report.
+
+## Consequences
+
+- The original `+` attachment non-goal is superseded for one CSV/XLSX report per turn. The original thread/message history remains readable.
+- ADR 0071's durable assistant row remains the final answer medium; its message-digest key alone is insufficient for a long workflow with retries. ADR 0072's SSE route remains a provisional transport and its `end` signal no longer settles a governed turn. The database terminal transition is authoritative.
+- The drawer derives `report_uploaded`, `analysis_started`, `research_completed`, `period_switched`, failure, and links from recorded events. A queued task never appears as completed. The audit page needs an exact run-ID lookup independent of its latest-ten list.
+- Additive schema, RLS, pgTAP, hand-maintained types, and a first call of every new PL/pgSQL reader of existing tables are release gates. Rollback disables the new orchestrator path, retains audit history, and reconciles or cancels unfinished turns without deleting governed report packages.

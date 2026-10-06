@@ -84,6 +84,26 @@ export function createMemoryWorkerServiceClient(): SupabaseClient<Database> {
   });
 }
 
+/** Revenue snapshot worker client, constructed only after strict payload parsing. */
+export function createRevenueWorkerServiceClient(): SupabaseClient<Database> {
+  const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Revenue snapshot workers");
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}
+
+/**
+ * Public lead-capture client, constructed only after the anonymous payload has
+ * passed strict Zod validation. The route has no session and no tenant, so the
+ * write goes through the fenced record RPC and nowhere else.
+ */
+export function createPublicLeadsServiceClient(): SupabaseClient<Database> {
+  const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Public lead capture");
+  return createClient<Database>(env.NEXT_PUBLIC_SUPABASE_URL, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+}
+
 /** Decision-cycle worker client, constructed only after strict payload parsing. */
 export function createDecisionWorkerServiceClient(): SupabaseClient<Database> {
   const key = assertServiceRoleKey(env.SUPABASE_SERVICE_ROLE_KEY, "Decision workers");

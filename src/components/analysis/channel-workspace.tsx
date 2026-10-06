@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -19,8 +19,10 @@ import {
   CancellationImpact,
   RetentionVisual,
 } from "@/components/analysis/operations-visuals";
-import { MonthYearPicker } from "@/components/analysis/month-year-picker";
+import { AnalysisProgress } from "@/components/analysis/analysis-progress";
+import { WindowRangePicker } from "@/components/analysis/window-range-picker";
 import { RecommendationControls } from "@/components/analysis/recommendation-controls";
+import type { ContextUsedData } from "@/components/memory/context-used";
 import {
   figureToneClass,
   findingValueLabel,
@@ -42,8 +44,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { enumerateAnalysisMonths, formatAnalysisMonth } from "@/domain/analysis/calendar";
 import type { AnalysisGrain } from "@/domain/analysis/types";
+import type {
+  AnalysisWindowSelection,
+  CoverageSegment,
+  CoverageWindow,
+} from "@/domain/analysis/window-selection";
 import type {
   ChannelWorkspaceView,
   WorkspaceChapterView,
@@ -190,17 +196,16 @@ function PotentialLostEarnedScale({
     value: { minorUnits: number; currency: string } | null;
     tone: "neutral" | "danger" | "success";
   }[] = [
-    { label: "Potential", value: potential, tone: "neutral" },
-    { label: "Lost", value: figures.lost, tone: "danger" },
-    { label: "Earned", value: figures.earned, tone: "success" },
-  ];
+      { label: "Potential", value: potential, tone: "neutral" },
+      { label: "Lost", value: figures.lost, tone: "danger" },
+      { label: "Earned", value: figures.earned, tone: "success" },
+    ];
 
   return (
     <div
       role="img"
-      aria-label={`Potential ${formatMoney(potential.minorUnits, potential.currency)}${
-        figures.lost ? `; lost ${formatMoney(figures.lost.minorUnits, figures.lost.currency)}` : ""
-      }${figures.earned ? `; earned ${formatMoney(figures.earned.minorUnits, figures.earned.currency)}` : ""}.`}
+      aria-label={`Potential ${formatMoney(potential.minorUnits, potential.currency)}${figures.lost ? `; lost ${formatMoney(figures.lost.minorUnits, figures.lost.currency)}` : ""
+        }${figures.earned ? `; earned ${formatMoney(figures.earned.minorUnits, figures.earned.currency)}` : ""}.`}
       className="relative flex h-56 w-full items-end gap-3 px-6 pb-4"
     >
       <span aria-hidden="true" className="absolute bottom-8 left-0 right-0 h-px bg-border" />
@@ -212,13 +217,12 @@ function PotentialLostEarnedScale({
         return (
           <div key={bar.label} className="flex flex-1 flex-col items-center gap-3">
             <span
-              className={`text-sm font-mono font-bold ${
-                bar.tone === "danger"
+              className={`text-sm font-mono font-bold ${bar.tone === "danger"
                   ? "text-destructive"
                   : bar.tone === "success"
                     ? "text-emerald-600"
                     : "text-foreground"
-              }`}
+                }`}
             >
               {bar.value ? formatWholeMoney(bar.value.minorUnits, bar.value.currency) : "—"}
             </span>
@@ -226,13 +230,12 @@ function PotentialLostEarnedScale({
                 real pixel height instead of an auto-sized flex column. */}
             <div className="flex h-40 w-full items-end">
               <div
-                className={`w-full rounded-t-[2px] ${
-                  bar.tone === "danger"
+                className={`w-full rounded-t-[2px] ${bar.tone === "danger"
                     ? "bg-destructive"
                     : bar.tone === "success"
                       ? "bg-emerald-500"
                       : "bg-slate-200"
-                }`}
+                  }`}
                 style={{ height: `${share}%` }}
               />
             </div>
@@ -282,9 +285,8 @@ function RatioSplitBar({
         className="flex h-8 w-full overflow-hidden rounded-lg bg-muted"
       >
         <div
-          className={`flex h-full items-center bg-chart-2 px-3 ${
-            labelInside ? "justify-start" : "justify-end"
-          }`}
+          className={`flex h-full items-center bg-chart-2 px-3 ${labelInside ? "justify-start" : "justify-end"
+            }`}
           style={{ width: `${percent}%` }}
         >
           {labelInside ? (
@@ -308,7 +310,22 @@ function RatioSplitBar({
  * recomputed: impressions is the top pair's denominator, and each later stage is
  * the previous pair's numerator. A width is always a stored amount's share of
  * the window's impressions, never an invented intermediate figure.
+ *
+ * Bar colour is display-only and follows the step conversion: below 5% red,
+ * below 20% amber, otherwise green. Impressions is the base and stays green.
  */
+function funnelStageTone(fromPrevious: number | null): { bar: string; label: string } {
+  if (fromPrevious === null) return { bar: "bg-emerald-100", label: "text-emerald-700" };
+  if (fromPrevious < 5) return { bar: "bg-destructive/70", label: "text-destructive" };
+  if (fromPrevious < 20) return { bar: "bg-warning/60", label: "text-warning" };
+  return { bar: "bg-emerald-100", label: "text-emerald-700" };
+}
+
+function funnelOverallTone(overall: number): string {
+  if (overall < 5) return "bg-destructive text-destructive-foreground";
+  if (overall < 20) return "bg-warning text-foreground";
+  return "bg-emerald-500 text-white";
+}
 function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] }) {
   const pairs = findings.filter((finding) => finding.code === "FUNNEL_STAGE_CONVERSION");
   const endToEnd = findings.find(
@@ -336,13 +353,13 @@ function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] 
     fromPrevious: number | null;
     findingId: string | null;
   }[] = [
-    {
-      label: "Impressions",
-      count: impressions,
-      fromPrevious: null,
-      findingId: firstPair?.id ?? null,
-    },
-  ];
+      {
+        label: "Impressions",
+        count: impressions,
+        fromPrevious: null,
+        findingId: firstPair?.id ?? null,
+      },
+    ];
 
   for (const meta of stageMeta) {
     const pair = pairs.find((finding) => finding.metricKey === meta.metricKey);
@@ -368,11 +385,16 @@ function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] 
       <div className="flex items-end gap-3">
         {stages.map((stage) => {
           const heightPercent = Math.max(Math.round((stage.count / impressions) * 100), 4);
+          const tone = funnelStageTone(stage.fromPrevious);
           return (
             <div
               key={stage.label}
               className="flex flex-1 flex-col items-center gap-2"
-              title={`${stage.count} ${stage.label}`}
+              title={
+                stage.fromPrevious === null
+                  ? `${stage.count} ${stage.label}`
+                  : `${stage.count} ${stage.label}, ${stage.fromPrevious}% from prior step`
+              }
             >
               <span className="text-sm font-mono font-bold tabular-nums">
                 {formatCount(stage.count)}
@@ -382,21 +404,32 @@ function FunnelStages({ findings }: { findings: readonly WorkspaceFindingView[] 
               <div className="flex h-40 w-full items-end">
                 <div
                   role="img"
-                  aria-label={`${stage.label}: ${formatCount(stage.count)}.`}
-                  className="w-full rounded-t-md bg-emerald-100"
+                  aria-label={
+                    stage.fromPrevious === null
+                      ? `${stage.label}: ${formatCount(stage.count)}.`
+                      : `${stage.label}: ${formatCount(stage.count)}, ${stage.fromPrevious}% from prior step.`
+                  }
+                  className={`w-full rounded-t-md ${tone.bar}`}
                   style={{ height: `${heightPercent}%` }}
                 />
               </div>
-              <span className="text-[9px] font-bold uppercase tracking-widest text-emerald-700">
+              <span className={`text-[9px] font-bold uppercase tracking-widest ${tone.label}`}>
                 {stage.label}
               </span>
+              {stage.fromPrevious !== null ? (
+                <span className={`text-[10px] tabular-nums ${tone.label}`}>
+                  {stage.fromPrevious}% of prior step
+                </span>
+              ) : null}
             </div>
           );
         })}
       </div>
 
       {overall !== null ? (
-        <div className="flex items-center justify-between rounded-lg bg-emerald-500 px-4 py-2 text-white shadow-card">
+        <div
+          className={`flex items-center justify-between rounded-lg px-4 py-2 shadow-card ${funnelOverallTone(overall)}`}
+        >
           <span className="text-[10px] font-bold uppercase tracking-wider">Overall conversion</span>
           <span className="text-xs font-mono font-bold tabular-nums">{overall}%</span>
         </div>
@@ -444,34 +477,105 @@ function ChapterVisual({
 }
 
 // ---------------------------------------------------------------------------
+// Chapter nav
+// ---------------------------------------------------------------------------
+
+type ChapterNavItem = {
+  id: string;
+  label: string;
+};
+
+/**
+ * The chapter map, pinned while the story scrolls.
+ *
+ * Sticky because the narrative is long: without it the operator scrolls back
+ * up to jump chapters. The active link follows the section in view via an
+ * IntersectionObserver, so the bar reads as tabs on a folder rather than a
+ * static list. Purely presentational -- every href matches a rendered section
+ * id, and with no observer (tests, old browsers) it degrades to plain anchor
+ * links.
+ */
+function ChapterNav({ items }: { items: readonly ChapterNavItem[] }) {
+  const [activeId, setActiveId] = useState<string | null>(() => items[0]?.id ?? null);
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined" || items.length === 0) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => left.boundingClientRect.top - right.boundingClientRect.top);
+        if (visible.length > 0) setActiveId(visible[0].target.id);
+      },
+      // A section counts as "in view" when it crosses the upper-middle of the
+      // scroll area, so the highlight moves as the new chapter takes over
+      // rather than flickering at boundaries.
+      { rootMargin: "-30% 0px -60% 0px", threshold: 0 },
+    );
+    for (const item of items) {
+      const section = document.getElementById(item.id);
+      if (section) observer.observe(section);
+    }
+    return () => observer.disconnect();
+  }, [items]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <nav
+      aria-label="Workspace chapters"
+      className="sticky top-0 z-20 -mx-1 border-b border-border/60 bg-background/95 px-1 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80"
+    >
+      <ul className="flex flex-wrap items-center gap-x-1 gap-y-1">
+        {items.map((item) => {
+          const active = item.id === activeId;
+          return (
+            <li key={item.id}>
+              <a
+                href={`#${item.id}`}
+                aria-current={active ? "location" : undefined}
+                onClick={() => setActiveId(item.id)}
+                className={
+                  active
+                    ? "block whitespace-nowrap rounded-md bg-muted px-2.5 py-1.5 text-xs font-semibold text-foreground transition-colors"
+                    : "block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                }
+              >
+                {item.label}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Verdict band
 // ---------------------------------------------------------------------------
 
 function VerdictBand({
   view,
   coverageChip,
-  monthHorizon,
-  selectedMonth,
-  onSelectMonth,
+  segments,
+  coverageWindows,
+  selectedWindow,
+  today,
   timeZone,
   canRunAnalysis,
-  pending,
-  onRunAnalysis,
+  onApplyWindow,
 }: {
   view: ChannelWorkspaceView;
   coverageChip: string | null;
-  monthHorizon: { firstMonth: string; lastMonth: string } | null;
-  selectedMonth: string | null;
-  onSelectMonth: (month: string) => void;
+  segments: readonly CoverageSegment[];
+  coverageWindows: readonly CoverageWindow[];
+  selectedWindow: AnalysisWindowSelection | null;
+  today: string;
   timeZone: string | null;
   canRunAnalysis: boolean;
-  pending: boolean;
-  onRunAnalysis: () => void;
+  onApplyWindow: (selection: AnalysisWindowSelection) => void;
 }) {
-  const months = useMemo(
-    () => (monthHorizon ? enumerateAnalysisMonths(monthHorizon) : []),
-    [monthHorizon],
-  );
   return (
     <section
       aria-label="Marketplace audit verdict"
@@ -532,36 +636,29 @@ function VerdictBand({
           <PotentialLostEarnedScale figures={view.verdict.verdictFigures} />
 
           <div className="mt-auto flex flex-col gap-2">
-            {months.length > 0 && selectedMonth ? (
+            {selectedWindow ? (
               <>
-                <MonthYearPicker
-                  months={months}
-                  selectedMonth={selectedMonth}
-                  onSelectMonth={onSelectMonth}
+                <WindowRangePicker
+                  segments={segments}
+                  windows={coverageWindows}
+                  selected={selectedWindow}
+                  today={today}
+                  onApply={onApplyWindow}
+                  disabled={!canRunAnalysis}
                 />
+                {/* Approved reports declare these dates. Days
+                  the provider left blank are counted as absent, not as zero. A range with no
+                  governed evidence analyses as exactly that, not as zero. */}
                 <p className="text-[11px] leading-snug text-muted-foreground">
-                  {formatAnalysisMonth(selectedMonth)}
-                  {timeZone ? `, in ${timeZone}` : null}. An approved report declared this month.
-                  Days the provider left blank are counted as absent, not as zero. A month with no
-                  governed evidence analyses as exactly that, not as zero.
+                  {formatWindow(selectedWindow.from, selectedWindow.to)}
+                  {timeZone ? `, in ${timeZone}` : null}.
                 </p>
-                {canRunAnalysis ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    className="self-start"
-                    disabled={pending}
-                    onClick={onRunAnalysis}
-                  >
-                    {pending ? "Starting…" : "Run analysis"}
-                  </Button>
-                ) : null}
               </>
             ) : (
               // Not a disabled button. An operator staring at one cannot tell
               // whether the platform is busy, broken, or waiting on them.
               <p className="text-[11px] leading-snug text-muted-foreground">
-                There is no reported month to analyse yet. An approved report has to declare a
+                There is no reported range to analyse yet. An approved report has to declare a
                 period for this channel before an analysis has anything to run over.
               </p>
             )}
@@ -663,16 +760,16 @@ function CompactFindingRow({
   const storedRatio = ratioOf(finding);
   const bar = storedRatio
     ? {
-        numerator: storedRatio.numerator,
-        denominator: storedRatio.denominator,
-        label: `Measured ratio: ${storedRatio.numerator} of ${storedRatio.denominator}.`,
-      }
+      numerator: storedRatio.numerator,
+      denominator: storedRatio.denominator,
+      label: `Measured ratio: ${storedRatio.numerator} of ${storedRatio.denominator}.`,
+    }
     : finding.coverage && finding.coverage.expected > 0
       ? {
-          numerator: finding.coverage.observed,
-          denominator: finding.coverage.expected,
-          label: `Evidence coverage: ${finding.coverage.observed} of ${finding.coverage.expected} periods.`,
-        }
+        numerator: finding.coverage.observed,
+        denominator: finding.coverage.expected,
+        label: `Evidence coverage: ${finding.coverage.observed} of ${finding.coverage.expected} periods.`,
+      }
       : null;
   const barPercent = bar
     ? Math.min(Math.max((bar.numerator / bar.denominator) * 100, 0), 100)
@@ -928,15 +1025,14 @@ function chapterRailSummary(chapter: WorkspaceChapterView): {
  *
  * One object rather than six props because every chapter is handed the same
  * set unchanged, and because the ask itself belongs to the run, not to the
- * chapter: the fence files one narration per run, so a press in Cancellations
- * and a press in Funnel are the same press. The workspace owns the state and
- * every gap reads it, which is why pressing one button settles them all.
+ * chapter: a press in Cancellations and a press in Funnel are the same press
+ * — the gap-fill narration reads every uncovered chapter together. The
+ * workspace owns the state and every gap reads it, which is why pressing one
+ * button settles them all.
  */
 type NarrationRequestState = "idle" | "pending" | "requested" | "failed";
 
 type AdviceGapState = {
-  /** True when the run carries any narration at all. */
-  runHasNarrations: boolean;
   /** True when this member may ask for one and there is a run to ask about. */
   canRequest: boolean;
   requestState: NarrationRequestState;
@@ -948,9 +1044,10 @@ type AdviceGapState = {
  * chapter. Never a recommendation: where the chapter itself says its inputs
  * are missing, the detector's own sentence is the explanation, and where a
  * narration exists but skipped the chapter, the gap is named rather than
- * papered over. A button appears only when the run has no narrations at all,
- * because the fence files one narration per run and a second submission for
- * the same run is refused -- pressing it then could never fill anything.
+ * papered over. A button appears whenever the member may ask and the chapter
+ * holds findings with data — on an unnarrated run it wakes the first
+ * narration, on a narrated one it wakes the gap-fill that reads every
+ * uncovered chapter together.
  */
 function AdviceGap({
   chapter,
@@ -991,7 +1088,7 @@ function AdviceGap({
     );
   }
 
-  if (!gap.runHasNarrations && gap.canRequest) {
+  if (gap.canRequest) {
     return (
       <div className="flex flex-col gap-2">
         <Button
@@ -1010,12 +1107,12 @@ function AdviceGap({
         </Button>
         {gap.requestState === "requested" ? (
           // Said plainly because it is not this section that was asked for.
-          // The narrator reads the whole run at once and decides which
-          // sections it can cite, so it may fill this one, several, or none.
+          // The narrator reads the run's uncovered sections together and
+          // writes only what it can cite, so it may not reach this one.
           <p className="text-xs leading-relaxed text-muted-foreground">
-            Advice requested for this analysis. The narrator reads every section&apos;s findings
-            together and writes only what it can cite, so it may not reach this one. Refresh in a
-            moment to see what it wrote.
+            Advice requested for this analysis. The narrator reads every section still missing
+            advice together and writes only what it can cite, so it may not reach this one.
+            Refresh in a moment to see what it wrote.
           </p>
         ) : null}
         {gap.requestState === "failed" ? (
@@ -1046,12 +1143,15 @@ function ChapterRail({
   onInspect,
   organizationId,
   adviceGap,
+  memoryContexts,
 }: {
   chapter: WorkspaceChapterView;
   recommendations: readonly WorkspaceRecommendationView[];
   onInspect: (findingId: string) => void;
   organizationId: string;
   adviceGap: AdviceGapState;
+  /** Per-recommendation context provenance, once the read model carries it. */
+  memoryContexts?: Readonly<Record<string, ContextUsedData>>;
 }) {
   const summary = chapterRailSummary(chapter);
   // The green box is the advice slot, so only advice goes in it. Narration
@@ -1104,7 +1204,11 @@ function ChapterRail({
       </div>
 
       {advice ? (
-        <RecommendationControls organizationId={organizationId} recommendation={advice} />
+        <RecommendationControls
+          organizationId={organizationId}
+          recommendation={advice}
+          memoryContext={memoryContexts?.[advice.id]}
+        />
       ) : (
         <AdviceGap chapter={chapter} railReason={summary.reason} gap={adviceGap} />
       )}
@@ -1130,43 +1234,54 @@ export function ChannelWorkspace({
   organizationId,
   channel,
   view,
-  monthHorizon,
-  selectedMonth,
+  segments,
+  coverageWindows,
+  selectedWindow,
   timeZone,
   canRunAnalysis,
   channelsHref,
   economicsHref,
+  memoryContexts,
 }: {
   organizationId: string;
   channel: WorkspaceChannel;
   view: ChannelWorkspaceView;
   /**
-   * The contiguous month horizon this channel's declared packages cover.
-   * Offered instead of spans counted back from today, because evidence
-   * arrives as uploaded reports covering periods already past: "the last
-   * thirty days" reaches an imported January only by coincidence.
+   * The unbroken stretches of dates this channel's projected packages
+   * declare. Offered instead of spans counted back from today, because
+   * evidence arrives as uploaded reports covering periods already past: "the
+   * last thirty days" reaches an imported January only by coincidence.
    */
-  monthHorizon: { firstMonth: string; lastMonth: string } | null;
-  /** The canonical month the page URL selected. */
-  selectedMonth: string | null;
+  segments: readonly CoverageSegment[];
+  /** The declared package windows behind those stretches, for the grain warning. */
+  coverageWindows: readonly CoverageWindow[];
+  /** The range the page URL selected, or null when nothing is declared at all. */
+  selectedWindow: AnalysisWindowSelection | null;
   /** The organization's zone, for the caption under the picker. */
   timeZone: string | null;
   canRunAnalysis: boolean;
   channelsHref: string;
   economicsHref: string;
+  /** Per-recommendation context provenance, once the read model carries it. Absent renders the previous workspace exactly. */
+  memoryContexts?: Readonly<Record<string, ContextUsedData>>;
 }) {
   const router = useRouter();
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
   const [message, setMessage] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+  /**
+   * The range whose run is in flight, once the server has accepted it. The
+   * loader polls that range's status until it is ready; clearing this is
+   * what takes the loader back down.
+   */
+  const [appliedWindow, setAppliedWindow] = useState<AnalysisWindowSelection | null>(null);
 
-  // Month navigation is a history change, never a relabel: the evidence
-  // periods under every figure stay exactly what the run recorded.
-  const selectMonth = useCallback(
-    (month: string) => {
-      router.push(`?month=${month}`);
-    },
-    [router],
+  // Today in the organization's own calendar, for the picker's presets. Read
+  // on the client in the organization's zone rather than handed down, so the
+  // control never disagrees with the calendar beside it about what "last
+  // seven days" means.
+  const today = useMemo(
+    () => new Intl.DateTimeFormat("en-CA", timeZone ? { timeZone } : {}).format(new Date()),
+    [timeZone],
   );
 
   /**
@@ -1174,10 +1289,10 @@ export function ChannelWorkspace({
    *
    * Held here, not in each chapter's slot, for two reasons. One press narrates
    * the whole run, so every gap must show the same answer rather than five
-   * buttons that still look unpressed. And the month picker is a soft history
-   * change -- this component is not remounted -- so the run the ask was made
-   * for is stored beside it. Switching months therefore shows an idle button
-   * again instead of February inheriting March's "Advice requested".
+   * buttons that still look unpressed. And a refresh is not a remount -- this
+   * component keeps its state -- so the run the ask was made for is stored
+   * beside it. Switching windows therefore shows an idle button again instead
+   * of the new window inheriting the old one's "Advice requested".
    */
   const runId = view.run?.id ?? null;
   const [narrationRequest, setNarrationRequest] = useState<{
@@ -1209,12 +1324,11 @@ export function ChannelWorkspace({
 
   const adviceGap = useMemo<AdviceGapState>(
     () => ({
-      runHasNarrations: view.recommendations.length > 0,
       canRequest: canRunAnalysis && runId !== null,
       requestState: narrationState,
       onRequest: requestNarration,
     }),
-    [canRunAnalysis, narrationState, requestNarration, runId, view.recommendations.length],
+    [canRunAnalysis, narrationState, requestNarration, runId],
   );
 
   const allFindings = useMemo<WorkspaceFindingView[]>(
@@ -1281,6 +1395,22 @@ export function ChannelWorkspace({
     [recommendationsByFindingId],
   );
 
+  // The sticky bar mirrors exactly what the page renders below: one link per
+  // inline chapter, then the shelves, only when they exist. Memoised so the
+  // scroll-spy does not reset its highlight on every render.
+  const navItems = useMemo<ChapterNavItem[]>(
+    () => [
+      ...inlineChapters.map((chapter) => ({ id: chapter.id, label: chapter.navLabel })),
+      ...(recommendationsByFindingId.further.length > 0
+        ? [{ id: "further-noted", label: "Further noted" }]
+        : []),
+      ...(deferredChapters.length > 0
+        ? [{ id: "awaiting-other-reports", label: "Awaiting other reports" }]
+        : []),
+    ],
+    [inlineChapters, deferredChapters, recommendationsByFindingId],
+  );
+
   const trustChapter = view.chapters.find((chapter) => chapter.id === "trust");
   const coverageFinding = trustChapter?.findings.find(
     (finding) => finding.detectorKey === "evidence.period_coverage",
@@ -1299,47 +1429,125 @@ export function ChannelWorkspace({
     ? `${coverageRatio.numerator} of ${coverageRatio.denominator} ${coverageUnit} carry evidence`
     : view.verdict.badges[2];
 
-  async function runAnalysis() {
-    if (!selectedMonth) return;
-    setPending(true);
-    setMessage(null);
-    try {
-      const response = await fetch(
-        `/api/organizations/${organizationId}/channels/${channel.id}/analysis`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          // The month alone. The server resolves the window, the zone, and
-          // the grain from the channel's declared packages, so no caller
-          // date, grain, or branch can bypass the resolver.
-          body: JSON.stringify({ month: selectedMonth }),
-        },
-      );
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => null)) as {
-          error?: { message?: string };
-        } | null;
-        setMessage({
-          tone: "error",
-          text: payload?.error?.message ?? "The analysis could not be started.",
-        });
+  /**
+   * Asking for an analysis of the picked range.
+   *
+   * The range alone. The server resolves the window, the zone, and the grain
+   * from the channel's declared packages, so no caller date, grain, or branch
+   * can bypass the resolver. On a successful `202` the loader below takes
+   * over: it polls the range's status and refreshes the page when the run --
+   * findings first, narration after -- is ready to read.
+   */
+  // One place decides what "open this range" means: a range that differs
+  // from the URL's window navigates to it so the page displays the run for
+  // that range; a same-window open keeps today's behavior exactly (refresh,
+  // with no extra history entry). Both the instant guard below and the
+  // loader's ready path go through here, so they can never disagree.
+  const goToReadyWindow = useCallback(
+    (selection: AnalysisWindowSelection) => {
+      if (
+        selectedWindow === null ||
+        selection.from !== selectedWindow.from ||
+        selection.to !== selectedWindow.to
+      ) {
+        router.push(
+          `?from=${encodeURIComponent(selection.from)}&to=${encodeURIComponent(selection.to)}`,
+        );
         return;
       }
-      setMessage({
-        tone: "info",
-        // Honest about the shape of the work: the run is queued, not finished.
-        text: `Analysis started for ${formatAnalysisMonth(selectedMonth)}. It runs in the background; refresh in a moment to see the result.`,
-      });
       router.refresh();
-    } catch {
-      setMessage({
-        tone: "error",
-        text: "The analysis could not be started. Check your connection.",
-      });
-    } finally {
-      setPending(false);
+    },
+    [router, selectedWindow],
+  );
+
+  const applyWindow = useCallback(
+    (selection: AnalysisWindowSelection) => {
+      setMessage(null);
+      void (async () => {
+        // A range that is already analysed opens at once: when the status
+        // route reports it ready, a narrated run is waiting to be read, so
+        // going there directly skips starting a duplicate run. Anything else
+        // -- still narrating, still running, failed, nothing yet, or the
+        // check itself failing -- falls through to the POST below, which is
+        // today's behavior with the loader. Only `ready` counts: a
+        // half-narrated run must never open as final.
+        try {
+          const status = await fetch(
+            `/api/organizations/${organizationId}/channels/${channel.id}/analysis/status?from=${encodeURIComponent(selection.from)}&to=${encodeURIComponent(selection.to)}`,
+          );
+          const statusPayload = (await status.json().catch(() => null)) as {
+            stage?: string;
+          } | null;
+          if (status.ok && statusPayload?.stage === "ready") {
+            goToReadyWindow(selection);
+            return;
+          }
+        } catch {
+          // Fail-open to the POST below: the check is a shortcut, never a gate.
+        }
+        try {
+          const response = await fetch(
+            `/api/organizations/${organizationId}/channels/${channel.id}/analysis`,
+            {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ from: selection.from, to: selection.to }),
+            },
+          );
+          if (!response.ok) {
+            const payload = (await response.json().catch(() => null)) as {
+              error?: { message?: string };
+            } | null;
+            // A 429 carries the server's own allowance message, which says
+            // what happened in plain words; anything else falls back to the
+            // generic failure the operator can act on by retrying.
+            setMessage({
+              tone: "error",
+              text: payload?.error?.message ?? "The analysis could not be started.",
+            });
+            return;
+          }
+          const started = (await response.json().catch(() => null)) as {
+            cached?: boolean;
+          } | null;
+          // A cached disposition names the run already on screen: opening it
+          // needs no loader either.
+          if (started?.cached === true) {
+            goToReadyWindow(selection);
+            return;
+          }
+          setAppliedWindow(selection);
+        } catch {
+          setMessage({
+            tone: "error",
+            text: "The analysis could not be started. Check your connection.",
+          });
+        }
+      })();
+    },
+    [channel.id, goToReadyWindow, organizationId],
+  );
+
+  // The loader is done when the applied range is ready. When the applied
+  // range differs from the URL's window, navigate to it so the page displays
+  // the run that just finished; a same-window ready keeps today's behavior
+  // exactly (refresh, with no extra history entry).
+  const handleLoaderReady = useCallback(() => {
+    const ready = appliedWindow;
+    setAppliedWindow(null);
+    if (ready === null) {
+      router.refresh();
+      return;
     }
-  }
+    goToReadyWindow(ready);
+  }, [appliedWindow, goToReadyWindow, router]);
+
+  // The loader covers the whole page, so a run that failed has to be able to
+  // let go of it. Ready dismisses itself; failed cannot, and without this the
+  // operator is left staring at a sheet that will never advance.
+  const handleLoaderDismiss = useCallback(() => {
+    setAppliedWindow(null);
+  }, []);
 
   return (
     // Sized to its content, not to the viewport: the shell's `main` scrolls,
@@ -1364,13 +1572,13 @@ export function ChannelWorkspace({
       <VerdictBand
         view={view}
         coverageChip={coverageChip}
-        monthHorizon={monthHorizon}
-        selectedMonth={selectedMonth}
-        onSelectMonth={selectMonth}
+        segments={segments}
+        coverageWindows={coverageWindows}
+        selectedWindow={selectedWindow}
+        today={today}
         timeZone={timeZone}
         canRunAnalysis={canRunAnalysis}
-        pending={pending}
-        onRunAnalysis={runAnalysis}
+        onApplyWindow={applyWindow}
       />
 
       {message ? (
@@ -1380,7 +1588,21 @@ export function ChannelWorkspace({
         </Alert>
       ) : null}
 
-      {/* What is on screen, stated exactly. The month names the question;
+      {/* The run just asked for, watched until it is ready to read. Rendered
+          over the workspace region rather than tucked beside the picker, so
+          the operator watches the work instead of being told to refresh. */}
+      {appliedWindow ? (
+        <AnalysisProgress
+          key={`${appliedWindow.from}:${appliedWindow.to}`}
+          organizationId={organizationId}
+          channelId={channel.id}
+          window={appliedWindow}
+          onReady={handleLoaderReady}
+          onDismiss={handleLoaderDismiss}
+        />
+      ) : null}
+
+      {/* What is on screen, stated exactly. The window names the question;
           the run below names the evidence window it actually analysed. */}
       <div
         aria-label="Run status"
@@ -1416,43 +1638,13 @@ export function ChannelWorkspace({
         ) : null}
       </div>
 
-      {/* A compact, accessible map of the story instead of a sticky tracker:
-          the narrative is meant to be scrolled, not navigated around. */}
-      <nav aria-label="Workspace chapters">
-        <ul className="flex flex-wrap items-center gap-x-1 gap-y-1">
-          {inlineChapters.map((chapter) => (
-            <li key={chapter.id}>
-              <a
-                href={`#${chapter.id}`}
-                className="block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                {chapter.navLabel}
-              </a>
-            </li>
-          ))}
-          {recommendationsByFindingId.further.length > 0 ? (
-            <li>
-              <a
-                href="#further-noted"
-                className="block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                Further noted
-              </a>
-            </li>
-          ) : null}
-
-          {deferredChapters.length > 0 ? (
-            <li>
-              <a
-                href="#awaiting-other-reports"
-                className="block whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                Awaiting other reports
-              </a>
-            </li>
-          ) : null}
-        </ul>
-      </nav>
+      {/* Pinned chapter map: stays on screen while the story scrolls, with the
+          section in view marked. The key remounts it when the chapter list
+          changes, so the highlight restarts on the first chapter. */}
+      <ChapterNav
+        key={navItems.map((item) => item.id).join(",")}
+        items={navItems}
+      />
 
       <section aria-label="Findings & recommendations" className="flex flex-col gap-10">
         {inlineChapters.map((chapter) => {
@@ -1470,6 +1662,7 @@ export function ChannelWorkspace({
               adviceGap={adviceGap}
               allFindings={allFindings}
               run={view.run}
+              memoryContexts={memoryContexts}
             />
           );
         })}
@@ -1508,6 +1701,7 @@ export function ChannelWorkspace({
                 key={recommendation.id}
                 organizationId={organizationId}
                 recommendation={recommendation}
+                memoryContext={memoryContexts?.[recommendation.id]}
               />
             ))}
           </div>
@@ -1603,6 +1797,7 @@ function ChapterShell({
   adviceGap,
   allFindings,
   run,
+  memoryContexts,
 }: {
   chapter: WorkspaceChapterView;
   /** The finding ordinal, or null for a supplementary chapter. */
@@ -1615,6 +1810,8 @@ function ChapterShell({
   adviceGap: AdviceGapState;
   allFindings: readonly WorkspaceFindingView[];
   run: WorkspaceRunView | null;
+  /** Per-recommendation context provenance, once the read model carries it. */
+  memoryContexts?: Readonly<Record<string, ContextUsedData>>;
 }) {
   const coverageRatio =
     coverageFinding && coverageFinding.kind !== "needs_data" ? ratioOf(coverageFinding) : null;
@@ -1666,8 +1863,8 @@ function ChapterShell({
           )}
           {/* All findings need data -> the card body is the explanation. */}
           {chapter.state === "needs_data" &&
-          chapter.findings.length > 0 &&
-          chapter.findings.every((finding) => finding.kind === "needs_data") ? (
+            chapter.findings.length > 0 &&
+            chapter.findings.every((finding) => finding.kind === "needs_data") ? (
             <ChapterUnavailableBody chapter={chapter} />
           ) : null}
           {heldFinding && heldFinding.kind === "finding" ? (
@@ -1688,6 +1885,7 @@ function ChapterShell({
         onInspect={onInspect}
         organizationId={organizationId}
         adviceGap={adviceGap}
+        memoryContexts={memoryContexts}
       />
     </section>
   );

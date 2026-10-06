@@ -378,4 +378,10 @@ describe("refusal reporting", () => {
     expect(message).toContain("the approval expired");
     expect(message).toContain("credentials need reconnecting");
   });
+
+  it("names an uncovered stamped action rather than a generic failure", () => {
+    const message = explainRefusal(["launch_authority_action_not_covered"]);
+
+    expect(message).toContain("does not cover this action");
+  });
 });

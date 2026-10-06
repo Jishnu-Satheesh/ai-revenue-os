@@ -58,6 +58,7 @@ function readPort(overrides: Partial<CampaignReadPort> = {}): CampaignReadPort {
     listVersions: vi.fn(async () => [summaryOf(detail)]),
     getVersion: vi.fn(async () => detail),
     getLiveApproval: vi.fn(async () => null),
+    getLatestApproval: vi.fn(async () => null),
     latestGenerationRun: vi.fn(async () => null),
     ...overrides,
   };
@@ -88,6 +89,8 @@ describe("reading the portfolio", () => {
         status: "claimed",
         failureCode: null,
         leaseExpiresAt: "2026-08-17T12:00:00.000Z",
+        sourceSnapshotId: "aa000000-0000-4000-8000-000000000001",
+        updatedAt: "2026-08-17T10:55:00.000Z",
       })),
     });
 
@@ -107,6 +110,8 @@ describe("reading the portfolio", () => {
         status: "claimed",
         failureCode: null,
         leaseExpiresAt: "2026-08-17T10:00:00.000Z",
+        sourceSnapshotId: "aa000000-0000-4000-8000-000000000001",
+        updatedAt: "2026-08-17T10:55:00.000Z",
       })),
     });
 
@@ -122,13 +127,17 @@ describe("reading the portfolio", () => {
         status: "failed",
         failureCode: "needs_data:brand_voice,objective",
         leaseExpiresAt: null,
+        sourceSnapshotId: "aa000000-0000-4000-8000-000000000001",
+        updatedAt: "2026-08-17T10:55:00.000Z",
       })),
     });
 
     const [row] = await readCampaignList(read, ORGANIZATION_ID, () => "2026-08-17T11:00:00.000Z");
 
     expect(row?.generation.status).toBe("failed");
-    expect(row?.generation.detail).toContain("brand_voice");
+    expect(row?.generation.detail).toContain("Brand voice");
+    // And the keys travel as data, so the card can offer to collect them.
+    expect(row?.generation.missingDetails).toEqual(["brand_voice", "objective"]);
   });
 
   it("does not read a generation run for a campaign that already has a version", async () => {
@@ -155,6 +164,38 @@ describe("reading one campaign", () => {
     });
 
     expect(view).toMatchObject({ versionNumber: 1, digest: "a".repeat(64) });
+  });
+
+  it("explains a superseded approval instead of claiming none ever existed", async () => {
+    // The operator approved version 1, then edited a plate. The approval was
+    // revoked as superseded, and the Studio read the live-only approval, so the
+    // page said "nothing has been approved for this campaign yet" beside a
+    // panel saying an approval had just been invalidated. A reviewer cannot act
+    // on a screen that contradicts itself.
+    const detail = version();
+    const superseded = {
+      id: "a0000000-0000-4000-8000-000000000001",
+      campaignId: manifestIds.campaign,
+      bundleVersionId: "b0000000-0000-4000-8000-000000000009",
+      bundleDigest: "b".repeat(64),
+      approvedBy: "u0000000-0000-4000-8000-000000000001",
+      approvedAt: "2026-08-14T10:00:00.000Z",
+      expiresAt: "2026-08-21T10:00:00.000Z",
+      actionKeys: [],
+      revokedAt: "2026-08-15T09:00:00.000Z",
+      revokedReason: "superseded_by_new_version" as const,
+    };
+    const read = readPort({
+      getVersion: vi.fn(async () => detail),
+      getLatestApproval: vi.fn(async () => superseded),
+    });
+
+    const view = await readStudioView(read, ORGANIZATION_ID, manifestIds.campaign, { clock: NOW });
+
+    expect(view?.approval).toMatchObject({ status: "revoked" });
+    // The authorization read stays untouched, so nothing can mistake this for
+    // permission to execute.
+    expect(read.getLiveApproval).not.toHaveBeenCalled();
   });
 
   it("returns nothing for a campaign the session cannot see", async () => {

@@ -1,6 +1,7 @@
 import { ImageOff } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { AssetThumbFigure } from "@/components/assets/asset-thumb-figure";
 import {
   conditioningRoleLabel,
   ownershipChoice,
@@ -30,7 +31,12 @@ import type {
  * **Rejection is not deletion.** A rejected reference is still doing work: spec
  * 019 routes it into the bounded `avoid` slot, so the model learns what this
  * client does not want. Styling rejection as removal would make an operator
- * delete the very thing that was teaching.
+ * delete the very thing that was teaching. Its picture is shown for the same
+ * reason.
+ *
+ * **The picture is the point.** A card without one asks somebody to approve or
+ * reject an image by its filename. The signed URL has reached this component
+ * since previews were fixed at the page; it was simply never drawn.
  */
 
 export type LibraryReference = {
@@ -81,6 +87,36 @@ function VerdictBadge({ reference }: { reference: LibraryReference }) {
   );
 }
 
+/**
+ * The reference itself.
+ *
+ * Two ways there is no picture, and they are told apart on purpose. The URL
+ * can be absent because signing failed at the page, and it can stop working
+ * mid-session because a signed URL has a bounded life. Both end as a plain
+ * "preview unavailable"; neither is allowed to become a broken-image icon,
+ * which reads as a damaged asset rather than a preview that expired.
+ */
+function ReferencePreview({ reference }: { reference: LibraryReference }) {
+  return (
+    <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-md bg-muted/50">
+      <AssetThumbFigure
+        src={reference.previewUrl}
+        alt={reference.label}
+        imgClassName="size-full object-contain"
+        // The grid never re-mints a URL in place: keep the prior sticky flag
+        // so this renders the exact prior DOM through the shared figure.
+        forgetFailureOnSrcChange={false}
+        fallback={
+          <span className="flex flex-col items-center gap-1.5 p-3 text-center text-xs text-muted-foreground">
+            <ImageOff className="size-5" aria-hidden="true" />
+            Preview unavailable
+          </span>
+        }
+      />
+    </div>
+  );
+}
+
 export function AssetLibraryGrid({
   references,
   renderActions,
@@ -95,8 +131,8 @@ export function AssetLibraryGrid({
           </span>
           <h3 className="text-lg font-semibold">No references yet</h3>
           <p className="max-w-md text-sm text-muted-foreground">
-            Upload a photograph of a dish you sell. One good picture teaches more than a long
-            description, and the platform will draw from it instead of guessing.
+            Upload a photograph of something you sell. One good picture teaches more than a
+            long description, and the platform will draw from it instead of guessing.
           </p>
           {emptyAction}
         </CardContent>
@@ -111,6 +147,8 @@ export function AssetLibraryGrid({
         return (
           <Card key={reference.brandAssetVersionId} className="overflow-hidden">
             <CardContent className="flex flex-col gap-3 p-4">
+              <ReferencePreview reference={reference} />
+
               <div className="flex items-start justify-between gap-2">
                 <OperatorText className="text-base font-semibold leading-tight">
                   {reference.label}

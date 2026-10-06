@@ -44,6 +44,18 @@ export type SynthesisBusinessFinding = {
   severity: "critical" | "high" | "medium" | "low";
   headline: string;
   limitations: string[];
+  // Branch business-evidence lineage. The loader scopes rows to the exact
+  // request branch: other named branches are excluded, organization-wide
+  // rows arrive only as broader_context, and every row carries the analysis
+  // run, periods, currency and units that produced it.
+  analysisRunId: string;
+  branchId: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  currency: string | null;
+  valueKind: "money" | "count" | "ratio" | null;
+  scope: "branch" | "broader_context";
+  stale: boolean;
 };
 
 export type SynthesisMarketClaim = {
@@ -56,6 +68,10 @@ export type SynthesisMarketClaim = {
   supportGrade: "primary" | "corroborated" | "single_source" | "contextual";
   freshness: "current" | "stale";
   limitations: string[];
+  // Research lineage: the run that produced the claim and the branch that
+  // run researched. The loader admits exact branch/profile/run claims only.
+  researchRunId: string;
+  branchId: string | null;
 };
 
 export type SynthesisApprovedGoal = { ref: string };
@@ -76,17 +92,35 @@ export type ExistingSynthesisItem = {
   evidenceFingerprint: string;
 };
 
+export type SynthesisFindingCoverage = {
+  scoped: number;
+  broaderContext: number;
+  excludedOutOfWindow: number;
+};
+
+export type SynthesisEvidenceWindow = {
+  start: string;
+  end: string;
+};
+
 export type SynthesisServiceDependencies = {
   findings: {
     load(input: {
       organizationId: string;
+      branchId: string | null;
       channelId: string | null;
-    }): Promise<{ findings: SynthesisBusinessFinding[]; fresh: boolean }>;
+      evidenceWindow: SynthesisEvidenceWindow | null;
+    }): Promise<{
+      findings: SynthesisBusinessFinding[];
+      fresh: boolean;
+      coverage: SynthesisFindingCoverage;
+    }>;
   };
   claims: {
     load(input: {
       organizationId: string;
       profileVersionId: string;
+      branchId: string | null;
     }): Promise<SynthesisMarketClaim[]>;
   };
   goals: {
@@ -105,14 +139,40 @@ export type SynthesisServiceDependencies = {
   signal?: AbortSignal;
 };
 
+export type SynthesizeContextInput = {
+  manifestId: string;
+  contextDigest: string;
+  status: "ready" | "empty" | "partial" | "unavailable" | "disabled";
+  contextRefs: readonly string[];
+  parentBriefManifestId: string | null;
+};
+
 export type SynthesizeInput = {
   organizationId: string;
   requestId: string;
   claimToken: string;
+  // Exact synthesis scope, threaded from the request row: a set branch
+  // synthesizes that branch only, null is the legacy organization scope.
+  // Loaders, the run fingerprint, the provider input, and every persisted
+  // item carry this same value; the fenced RPCs check it again.
+  branchId: string | null;
   channelId: string | null;
   profileVersionId: string;
   profile: SynthesisProfileContext;
   preferences?: { pinnedRefs: string[] };
+  // Requested business-evidence window. Null means no requested window: the
+  // loader returns all in-scope current findings and the cited-set rules
+  // below still refuse mixed measures and overlapping runs. Requests carry
+  // no explicit evidence window, so nothing here infers one.
+  evidenceWindow?: SynthesisEvidenceWindow | null;
+  /**
+   * Optional current synthesis pack (Swarm 3). Built from a current
+   * revalidation — an expired parent brief is never blindly reused — and
+   * retained beside the parent brief ref. Recorded by reference in the run
+   * fingerprint and provider input; it never changes candidate priority or
+   * eligibility, which still decide on eligible claims + business freshness.
+   */
+  context?: SynthesizeContextInput | null;
   correlationId: string;
 };
 
@@ -224,6 +284,83 @@ function matchGoals(
     .map((goal) => ({ ref: goal.ref, alignment: "indirect" as const }));
 }
 
+function findingMoneyness(finding: SynthesisBusinessFinding): "money" | "other" {
+  return finding.valueKind === "money" || finding.currency !== null ? "money" : "other";
+}
+
+function findingWindowsOverlap(
+  left: SynthesisBusinessFinding,
+  right: SynthesisBusinessFinding,
+): boolean {
+  if (left.analysisRunId === right.analysisRunId) return false;
+  if (!left.periodStart || !left.periodEnd || !right.periodStart || !right.periodEnd) {
+    return false;
+  }
+  return left.periodStart <= right.periodEnd && right.periodStart <= left.periodEnd;
+}
+
+/**
+ * Cited business-finding compatibility. Unknown finding ids are skipped
+ * here: the item assembly below still fails closed on them. Every rule
+ * demands an explicit declared limitation rather than silent use:
+ * - broader_context rows are organization-wide context, never branch
+ *   measurements (BROADER_MARKET_INFERENCE, shared with the claims rule);
+ * - mixed currencies, units, or money/non-money measures cannot be
+ *   totalled (MIXED_MEASURE_EVIDENCE); a missing unit counts as unknown, so
+ *   a known unit cited beside an unknown one still demands the limitation
+ *   rather than a guess about compatibility;
+ * - a partial-quality finding is stale on its own (STALE_BUSINESS_EVIDENCE);
+ * - findings from different analysis runs with overlapping periods would
+ *   double-count the overlap (OVERLAPPING_EVIDENCE_WINDOWS).
+ */
+function checkCitedFindings(
+  candidate: SynthesisProviderCandidate,
+  cited: SynthesisBusinessFinding[],
+): string[] {
+  const issues: string[] = [];
+  if (
+    cited.some((finding) => finding.scope === "broader_context") &&
+    !candidate.limitations.includes("BROADER_MARKET_INFERENCE")
+  ) {
+    issues.push("BROADER_INFERENCE_UNDECLARED");
+  }
+  const currencies = new Set(
+    cited
+      .map((finding) => finding.currency)
+      .filter((currency): currency is string => currency !== null),
+  );
+  const moneyness = new Set(cited.map(findingMoneyness));
+  // Unit identity is compared exactly: count-vs-ratio and same-currency
+  // kind mismatches (both collapse to one moneyness bucket) still demand
+  // the limitation, since values in different units cannot be totalled.
+  const kinds = new Set(cited.map((finding) => finding.valueKind ?? "unknown"));
+  if (
+    (currencies.size > 1 || moneyness.size > 1 || kinds.size > 1) &&
+    !candidate.limitations.includes("MIXED_MEASURE_EVIDENCE")
+  ) {
+    issues.push("MIXED_MEASURE_UNDECLARED");
+  }
+  if (
+    cited.some((finding) => finding.stale) &&
+    !candidate.limitations.includes("STALE_BUSINESS_EVIDENCE")
+  ) {
+    issues.push("STALE_FINDING_UNDECLARED");
+  }
+  let overlap = false;
+  for (let left = 0; left < cited.length && !overlap; left += 1) {
+    for (let right = left + 1; right < cited.length; right += 1) {
+      if (findingWindowsOverlap(cited[left]!, cited[right]!)) {
+        overlap = true;
+        break;
+      }
+    }
+  }
+  if (overlap && !candidate.limitations.includes("OVERLAPPING_EVIDENCE_WINDOWS")) {
+    issues.push("OVERLAPPING_WINDOW_UNDECLARED");
+  }
+  return issues;
+}
+
 export function createSynthesisService(dependencies: SynthesisServiceDependencies) {
   const now = dependencies.now ?? (() => new Date());
   const provider = dependencies.provider;
@@ -252,25 +389,33 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
         await Promise.all([
           dependencies.findings.load({
             organizationId: input.organizationId,
+            branchId: input.branchId,
             channelId: input.channelId,
+            evidenceWindow: input.evidenceWindow ?? null,
           }),
           dependencies.claims.load({
             organizationId: input.organizationId,
             profileVersionId: input.profileVersionId,
+            branchId: input.branchId,
           }),
           dependencies.goals.load({ organizationId: input.organizationId }),
           dependencies.existingItems.load({ organizationId: input.organizationId }),
         ]);
 
       const eligible = eligibleContext(marketClaims);
+      const findingsById = new Map(findings.map((finding) => [finding.id, finding]));
+      const context = input.context ?? null;
       const runFingerprint = sha256(
         canonicalize({
           requestId: input.requestId,
           claimToken: input.claimToken,
+          branchId: input.branchId,
           profileVersionId: input.profileVersionId,
           findingDigests: findings.map((finding) => finding.digest).sort(),
           claimDigests: marketClaims.map((claim) => claim.digest).sort(),
           synthesisVersion: dependencies.synthesisVersion,
+          contextDigest: context?.contextDigest ?? null,
+          parentBriefManifestId: context?.parentBriefManifestId ?? null,
         }),
       );
 
@@ -307,6 +452,7 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
       let compact: CompactSynthesisInput;
       try {
         compact = dependencies.buildCompactInput({
+          branchId: input.branchId,
           findings: findings.map((finding) => ({
             id: finding.id,
             digest: finding.digest,
@@ -314,6 +460,14 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
             severity: finding.severity,
             headline: finding.headline,
             limitations: finding.limitations,
+            analysisRunId: finding.analysisRunId,
+            branchId: finding.branchId,
+            periodStart: finding.periodStart,
+            periodEnd: finding.periodEnd,
+            currency: finding.currency,
+            valueKind: finding.valueKind,
+            scope: finding.scope,
+            stale: finding.stale,
           })),
           claims: marketClaims.map((claim) => ({
             id: claim.id,
@@ -325,12 +479,25 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
             supportGrade: claim.supportGrade,
             freshness: claim.freshness,
             limitations: claim.limitations,
+            researchRunId: claim.researchRunId,
+            branchId: claim.branchId,
           })),
           goals: approvedGoals.map((goal) => ({ ref: goal.ref })),
           profile: input.profile,
           preferences: input.preferences ?? { pinnedRefs: [] },
           activityMonth: activityMonthFor(now()),
           businessEvidenceFresh: businessFresh,
+          ...(context
+            ? {
+                context: {
+                  manifestId: context.manifestId,
+                  contextDigest: context.contextDigest,
+                  status: context.status,
+                  contextRefs: [...context.contextRefs].slice(0, 24),
+                  parentBriefManifestId: context.parentBriefManifestId,
+                },
+              }
+            : {}),
         });
       } catch {
         return failRun(SAFE_FAILURE_CODES.CANDIDATE_INVALID);
@@ -359,12 +526,28 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
         const validationIssues: string[] = [];
         const valid: SynthesisProviderCandidate[] = [];
         for (const candidate of parsed.candidates) {
-          const verdict = validateSynthesisCandidate(candidate as SynthesisCandidate, {
+          // Memory refs ride beside evidence, never inside it: strip
+          // contextRefs before deterministic validation so memory can neither
+          // rescue nor sink eligibility. Claim/finding ids stay the only
+          // evidence fields the validator reads.
+          const { contextRefs: _memoryRefs, ...evidenceOnly } = candidate as SynthesisProviderCandidate & {
+            contextRefs?: unknown;
+          };
+          void _memoryRefs;
+          const verdict = validateSynthesisCandidate(evidenceOnly as SynthesisCandidate, {
             eligibleClaims: eligible,
             businessEvidenceFresh: businessFresh,
           });
-          if (verdict.outcome === "valid") valid.push(candidate);
-          else validationIssues.push(verdict.reasonCode);
+          if (verdict.outcome !== "valid") {
+            validationIssues.push(verdict.reasonCode);
+            continue;
+          }
+          const citedFindings = candidate.businessFindingIds
+            .map((id) => findingsById.get(id))
+            .filter((finding): finding is SynthesisBusinessFinding => finding !== undefined);
+          const findingIssues = checkCitedFindings(candidate, citedFindings);
+          if (findingIssues.length === 0) valid.push(candidate);
+          else validationIssues.push(...findingIssues);
         }
         if (valid.length > 0) {
           accepted = valid;
@@ -376,7 +559,6 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
       if (!accepted) return failRun(SAFE_FAILURE_CODES.CANDIDATE_INVALID);
 
       const claimsById = new Map(marketClaims.map((claim) => [claim.id, claim]));
-      const findingsById = new Map(findings.map((finding) => [finding.id, finding]));
       const activityMonth = activityMonthFor(now());
       const items: Array<{
         payload: SynthesisItemPayload;
@@ -409,6 +591,7 @@ export function createSynthesisService(dependencies: SynthesisServiceDependencie
             narrative: candidate.narrative,
             itemFingerprint: identity.itemFingerprint,
             evidenceFingerprint: identity.evidenceFingerprint,
+            branchId: input.branchId,
             geographicLayer: candidate.geographicLayer,
             geographyRef: candidate.geographyRef,
             supportGrade: deriveSupportGrade(resolvedClaims),

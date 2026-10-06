@@ -48,7 +48,8 @@ describe("buildOpportunityFeed", () => {
     ]);
   });
 
-  it("omits a tier that has no opportunity rather than showing an empty heading", () => {    const feed = buildOpportunityFeed({
+  it("omits a tier that has no opportunity rather than showing an empty heading", () => {
+    const feed = buildOpportunityFeed({
       items: [item({ evidenceTier: "observed" })],
       role: "operator",
       now: NOW,

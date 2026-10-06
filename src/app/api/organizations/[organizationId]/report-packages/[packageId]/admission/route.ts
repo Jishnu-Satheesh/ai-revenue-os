@@ -14,6 +14,7 @@ import {
   reportRequest,
   runReportRoute,
 } from "@/modules/reports/application/api";
+import { requestReportPackageValidation } from "@/modules/reports/application/dispatch";
 
 /**
  * What "Approve" submits: the same mapping-and-projection vocabulary the
@@ -26,15 +27,23 @@ import {
 const contractContentSchema = z.discriminatedUnion("source", [
   z.object({ source: z.literal("human"), mappingDocument: reportContractDocumentSchema }).strict(),
   z
-    .object({ source: z.literal("library"), providerDefinitionKey: z.string().trim().min(2).max(80) })
+    .object({
+      source: z.literal("library"),
+      providerDefinitionKey: z.string().trim().min(2).max(80),
+    })
     .strict(),
   z.object({ source: z.literal("guided"), guided: guidedReportMappingSchema }).strict(),
 ]);
 
 const projectionContentSchema = z.discriminatedUnion("source", [
-  z.object({ source: z.literal("human"), projectionDocument: reportProjectionDocumentSchema }).strict(),
   z
-    .object({ source: z.literal("library"), providerDefinitionKey: z.string().trim().min(2).max(80) })
+    .object({ source: z.literal("human"), projectionDocument: reportProjectionDocumentSchema })
+    .strict(),
+  z
+    .object({
+      source: z.literal("library"),
+      providerDefinitionKey: z.string().trim().min(2).max(80),
+    })
     .strict(),
   z.object({ source: z.literal("guided") }).strict(),
 ]);
@@ -120,7 +129,28 @@ export async function POST(
           correlationId: context.correlationId,
         });
 
-        return { status: 200, body: { admission } };
+        // And start the upload the operator was actually looking at.
+        //
+        // Every *later* upload of this structure is carried by profiling,
+        // which finds the standing admission and dispatches validation
+        // itself (`continueAdmittedReportPackage`, Link A). This one was
+        // profiled before the admission existed, so nothing in that path
+        // ever reaches it. Without this call the package that earned the
+        // grant sits at `awaiting_validation` with no run, no failure, and
+        // nothing on the page to say why -- the approval appears to have
+        // done nothing at all.
+        //
+        // The same call the manual contract-decision route makes, with the
+        // same contract version. Its feature-flag guard and idempotency key
+        // are its own; nothing is duplicated here.
+        const validationQueued = await requestReportPackageValidation({
+          organizationId: context.organizationId,
+          packageId,
+          contractVersionId: contractVersion.id,
+          correlationId: context.correlationId,
+        });
+
+        return { status: 200, body: { admission, validationQueued } };
       } catch (error) {
         // Named plainly rather than left to fall through to the generic 422
         // every other grant failure gets: the operator's next move is to

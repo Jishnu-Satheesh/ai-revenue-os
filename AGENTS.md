@@ -70,6 +70,7 @@ and `DATABASE_URL` in `.env.local`. Everything below follows from that:
 - **Problem Reporting:** Always explain code issues or missing logic using a brief, real-world analogy to highlight the actual impact.
 - **Clarity over Complexity:** Prioritize clear, scannable bullet points over dense paragraphs of engineering theory.
 - **Workflow:** Propose a lean plan -> Explain real-world impact -> Get approval -> Write code -> Run tests.
+- **Decision authority:** Product policy decisions belong to the user. The agent's job is to lay out consequences and blast radius plainly, keep execution inside fences (deterministic gateways, policy checks, audit trails), and then build what was approved. A user decision does not waive how execution is fenced: money-moving and destructive effects still pass through the Tool Gateway and policy checks, and standing prohibitions (bypassing RLS, hard-coding secrets, corrupting shared governance) still hold unless explicitly redesigned through a spec/ADR.
 
 
 ## 4. Spec-First Blueprinting

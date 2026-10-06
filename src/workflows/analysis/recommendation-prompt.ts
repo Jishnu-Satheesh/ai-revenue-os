@@ -4,6 +4,7 @@ import {
   MAX_RECOMMENDATIONS_PER_RUN,
   RECOMMENDATION_PROMPT_VERSION,
 } from "@/domain/analysis/recommendations";
+import { WORKSPACE_CHAPTERS } from "@/domain/analysis/copy";
 
 /**
  * Builds the narration prompt: one bounded folder and the hard rules.
@@ -39,6 +40,49 @@ export type NarrationPromptInput = {
   windowEnd: string;
   periodGrain: string;
   findings: readonly NarrationPromptFinding[];
+  /** Stored channel identity; absent renders the v4 shape (plus the global plain-language rules). */
+  channelContext?: NarrationChannelContext | null;
+  /**
+   * Consent-gated shared business context (Spec 024). Only entries the
+   * domain allowlist already approved ever arrive here; the renderer only
+   * reads the whitelisted title and summary. Absent or empty renders no
+   * block at all, so every run without shareable entries stays
+   * byte-identical to what earlier versions built.
+   */
+  sharedContext?: readonly SharedContextEntry[] | null;
+  /**
+   * Gap-fill rounds only: how many items this run already filed. Absent, the
+   * prompt stays byte-identical to a full narration, so full rounds never see
+   * gap-fill rules. Present, the uncovered chapters are counted against the
+   * free slots, and a round whose chapters outnumber its slots gets one
+   * binding line with the exact item budget instead of the standing
+   * per-chapter coverage rule the fence's run-total cap would then refuse.
+   */
+  gapFill?: { filedCount: number } | null;
+};
+
+/**
+ * Stored channel identity the worker may widen the folder with.
+ *
+ * Every field is optional so a partial row still renders, and only these
+ * whitelisted fields ever reach the prompt: display names, keys, template
+ * keys, categories, industry, country, timezone, currency. Anything else the
+ * loader knows — service areas, contact details, addresses, phones, emails —
+ * has no slot here, and the renderer below never reads undeclared keys, so
+ * such values cannot leak no matter what the caller passes.
+ */
+export type NarrationChannelContext = {
+  organizationName?: string | null;
+  industry?: string | null;
+  countryCode?: string | null;
+  baseCurrency?: string | null;
+  organizationTimezone?: string | null;
+  channelKey?: string | null;
+  channelDisplayName?: string | null;
+  channelCategory?: string | null;
+  templateKey?: string | null;
+  branchName?: string | null;
+  branchTimezone?: string | null;
 };
 
 export type NarrationPrompt = {
@@ -91,6 +135,26 @@ const ADVICE_MANDATE = [
 ].join("\n");
 
 /**
+ * Every section with data gets advice (Amendment C, ADR 0053).
+ *
+ * The March Talabat run filed five items citing four chapters and left the
+ * funnel and retention chapters blank although both held real findings and a
+ * free slot remained: nothing told the narrator each chapter must be covered.
+ * The finding-to-chapter map is derived from the same `WORKSPACE_CHAPTERS`
+ * the page renders, so the prompt and the workspace can never disagree about
+ * which detector belongs where. Deferred chapters carry no detector keys and
+ * are excluded by construction.
+ */
+const COVERAGE_RULES = [
+  "Cover every section with data. A chapter whose findings state observations and no item cites is a section left blank. Do not leave one.",
+  "File at least one item citing each of these chapters wherever its findings appear above as observations:",
+  ...WORKSPACE_CHAPTERS.filter((chapter) => chapter.detectorKeys.length > 0).map(
+    (chapter) => `${chapter.navLabel} (${chapter.id}): ${chapter.detectorKeys.join(", ")}`,
+  ),
+  "Where one item cites findings from several chapters, every cited chapter counts as covered.",
+].join("\n");
+
+/**
  * One worked contrast, because the rules above describe a shape the model has
  * to recognise and a single example teaches it faster than another paragraph.
  * Deliberately built on a metric no detector in this registry emits, so it can
@@ -129,6 +193,58 @@ const ADVICE_RULES = [
 ].join("\n");
 
 /**
+ * How the advice should sound. A busy shop owner with basic English reads
+ * this, so every item uses short common words, one idea per sentence, and no
+ * idioms or figures of speech. Global: these lines render on every run, with
+ * or without stored channel context, for any detector.
+ */
+const PLAIN_RULES = [
+  "Write every field in plain, everyday English a busy shop owner with basic English reads fast.",
+  "Use short, common words. One idea per sentence. Keep most sentences under about 15 words.",
+  "No idioms or figures of speech. Say what to do in direct words.",
+  'No jargon: write "money lost to cancelled orders", not "cancellation-loss attribution detracted from gross".',
+  "Write numbers as figures (6%, AED 300), never spelled out in words.",
+].join("\n");
+
+/**
+ * The pilot chapters: cancellations and availability.
+ *
+ * Retired as a gate by Amendment B, which rolled stored channel context and
+ * grounding out to every audit section. Kept as documentation of where the
+ * rollout started, and still exported so older callers compile. Nothing in
+ * this module reads it anymore: the channel block renders whenever stored
+ * context survived the loader, for any detector key.
+ */
+export const PILOT_NARRATION_DETECTOR_KEYS: ReadonlySet<string> = new Set([
+  "orders.cancellation_loss",
+  "orders.cancellation_attribution",
+  "operations.closed_share",
+]);
+
+/**
+ * Channel-grounding rules, added to the system prompt when the fenced channel
+ * block renders. Runs without stored context never see them, which is what
+ * the loader-failure fallback preserves: no channel block, no grounding
+ * rules. The global plain-language rules above still render, so the fallback
+ * is the v4 shape plus that block and nothing else.
+ * Grounding (Amendment A) replaced the curated playbooks: the model searches
+ * the live web itself, so these rules say where to look first, what
+ * grounding may never become, and what the operator is allowed to read.
+ * Amendment B widened them from the three pilot detectors to every run with
+ * context; the wording is unchanged apart from that scope.
+ */
+const CHANNEL_GROUNDING_RULES = [
+  "The fenced channel context names the channel, category, and operating window. Let it choose the lever: advise about this channel in this window, not about any business.",
+  "You may draw on grounded web knowledge to shape supportedActions. Prefer the channel's own docs, forums, and merchant discussions first, then other sources.",
+  "Grounding never creates evidence: the fenced findings remain the only cited evidence. Cite at least one finding id in every item, and never cite a web source.",
+  "Never emit a URL, link, domain, or anything shaped like one, in any field. The output shape has no URL field.",
+  "Portal and device how-to steps are allowed when grounding supports them. Phrase them as actions the operator performs in their own portal or on their own tablet. Never claim a menu path, button name, or portal structure.",
+  "File one problem per item and put 3 to 5 concrete steps in supportedActions.",
+  "Phrase every step as an action a human supervises. Never propose an automatic price, budget, or availability change.",
+  "Write headline and detail from cited findings only. Grounded knowledge may shape supportedActions, never the headline or the detail.",
+].join("\n");
+
+/**
  * The shape of the reply, matching `narrationSubmissionSchema` exactly. It is
  * placed into the system prompt twice: once as part of the framing, and again
  * as the last thing the model reads. Recency measurably improves contract
@@ -147,6 +263,42 @@ const OUTPUT_CONTRACT = [
 ].join("\n");
 
 const OUTPUT_CONTRACT_BLOCK = ["<output_contract>", OUTPUT_CONTRACT, "</output_contract>"];
+
+/**
+ * Coverage units the folder still asks to cover: distinct detector keys in
+ * hand. Keys, not chapters: the model files one item per key left to itself
+ * (four samples, four one-key items), while chapters undercount — keys like
+ * revenue.window_gross belong to no chapter yet still cost a slot each when
+ * the model covers them. Counting keys binds the budget against what the
+ * model will actually file.
+ */
+function uncoveredDetectorKeys(findings: readonly NarrationPromptFinding[]): string[] {
+  return [...new Set(findings.map((finding) => finding.detectorKey))].sort();
+}
+
+/**
+ * The binding budget for a gap-fill round whose finding groups outnumber its
+ * slots.
+ *
+ * A standing "one item per chapter" habit plus a run-total cap is how a filed
+ * five with four keys uncovered refused 5+4>8 on every attempt: the model
+ * complied with coverage and the fence complied with the cap. Null whenever
+ * no budget binds — no gap-fill input, a non-positive slot count the workflow
+ * fails before generating, or groups that already fit — so those prompts
+ * stay byte-identical to what earlier versions built.
+ */
+function gapFillHeadroomLine(input: NarrationPromptInput): string | null {
+  const filed = input.gapFill?.filedCount;
+  if (filed === undefined || filed === null) return null;
+  const headroom = MAX_RECOMMENDATIONS_PER_RUN - filed;
+  if (headroom < 1) return null;
+  const keys = uncoveredDetectorKeys(input.findings);
+  if (keys.length <= headroom) return null;
+  return [
+    `This is a gap-fill: ${filed} items are already filed, so you may file at most ${headroom} more.`,
+    `Cover all ${keys.length} detector_keys below within those ${headroom} items: where one problem touches findings from more than one key, put them in a single item instead of one item per key.`,
+  ].join("\n");
+}
 
 /**
  * Codepoint order, not locale order. A locale table update between two
@@ -171,6 +323,79 @@ function renderFinding(finding: NarrationPromptFinding): string {
   return lines.join("\n");
 }
 
+function cleanText(value: string | null | undefined): string {
+  return (value ?? "").trim();
+};
+
+/**
+ * Renders only the whitelisted identity fields, in a fixed order. Extra keys
+ * on the input object — addresses, phones, anything the type does not declare
+ * — are never read, so they cannot leak no matter what the caller passes.
+ * Returns null when nothing whitelisted survived, so an empty context renders
+ * no block at all.
+ */
+/**
+ * One consent-gated shared entry as the prompt may carry it.
+ *
+ * Only these two whitelisted fields ever reach the prompt, in a fixed order.
+ * Extra keys on the input object are never read, so they cannot leak no
+ * matter what the caller passes — the same fence as the channel renderer.
+ */
+export type SharedContextEntry = {
+  title: string;
+  summary: string;
+};
+
+function renderChannelContext(context: NarrationChannelContext): string | null {
+  const lines: string[] = [];
+  const push = (label: string, value: string | null | undefined): void => {
+    const text = cleanText(value);
+    if (text) lines.push(`${label}: ${text}`);
+  };
+  push("organization", context.organizationName);
+  push("industry", context.industry);
+  push("country", context.countryCode);
+  push("currency", context.baseCurrency);
+  push("organization_timezone", context.organizationTimezone);
+  const channelName = cleanText(context.channelDisplayName);
+  const channelKey = cleanText(context.channelKey);
+  if (channelName || channelKey) {
+    lines.push(`channel: ${channelName || "(unnamed)"} (key: ${channelKey || "(unknown)"})`);
+  }
+  push("channel_category", context.channelCategory);
+  push("template_key", context.templateKey);
+  push("branch", context.branchName);
+  push("branch_timezone", context.branchTimezone);
+  if (lines.length === 0) return null;
+  return ["<channel_context>", ...lines, "</channel_context>"].join("\n");
+}
+
+/**
+ * Renders the consent-gated shared block (Spec 024). Entries arrive
+ * pre-allowlisted, bounded to 8 entries by the domain subset, each summary
+ * already capped upstream. Titles and summaries render trimmed; blank entries
+ * are dropped, and an empty list renders no block at all. Shared entries may
+ * inform the wording of supportedActions only: findings remain the only cited
+ * evidence, and a shared entry is never cited as one.
+ */
+function renderSharedContext(entries: readonly SharedContextEntry[]): string | null {
+  const blocks = entries
+    .map((entry) => {
+      const title = cleanText(entry.title);
+      const summary = cleanText(entry.summary);
+      if (!title && !summary) return null;
+      return [`<shared_entry title="${title || "(untitled)"}">`, summary || "(none)", "</shared_entry>"].join("\n");
+    })
+    .filter((block): block is string => block !== null);
+  if (blocks.length === 0) return null;
+  return ["<shared_business_context>", ...blocks, "</shared_business_context>"].join("\n");
+}
+
+const SHARED_CONTEXT_RULES = [
+  "The fenced shared business context holds organization-approved notes the operator consented to share. Let it inform the wording of supportedActions only.",
+  "Shared entries are never evidence: cite only finding ids, never a shared entry, and never let a shared entry override, contradict, or complete a finding.",
+].join("\n");
+
 /**
  * Builds the narrator's system and user prompts for one analysis run.
  *
@@ -182,6 +407,23 @@ function renderFinding(finding: NarrationPromptFinding): string {
 export function buildNarrationPrompt(input: NarrationPromptInput): NarrationPrompt {
   const sortedFindings = [...input.findings].sort(byId);
 
+  // The channel block renders for any detector key whenever stored context
+  // survived the loader. Anything else — context absent, empty, or a loader
+  // miss that failed open to null — renders the v4 shape below (plus the
+  // global plain-language rules). Grounding is decided worker-side from the
+  // run having findings at all, not from this block, so a context miss never
+  // silently disables it.
+  const channelBlock = input.channelContext
+    ? renderChannelContext(input.channelContext)
+    : null;
+  const hasChannel = channelBlock !== null;
+  const sharedBlock =
+    input.sharedContext && input.sharedContext.length > 0
+      ? renderSharedContext(input.sharedContext)
+      : null;
+  const hasShared = sharedBlock !== null;
+  const headroomLine = gapFillHeadroomLine(input);
+
   const system = [
     "You narrate the findings of one channel-analysis run for a business operator.",
     "You translate deterministic detector findings into plain language, group related findings, and suggest bounded actions those findings already support.",
@@ -192,7 +434,14 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     "",
     ADVICE_MANDATE,
     "",
+    COVERAGE_RULES,
+    ...(headroomLine ? ["", headroomLine] : []),
+    "",
     ADVICE_RULES,
+    "",
+    PLAIN_RULES,
+    ...(hasChannel ? ["", CHANNEL_GROUNDING_RULES] : []),
+    ...(hasShared ? ["", SHARED_CONTEXT_RULES] : []),
     "",
     ADVICE_EXAMPLE,
     "",
@@ -215,6 +464,8 @@ export function buildNarrationPrompt(input: NarrationPromptInput): NarrationProm
     "<findings>",
     ...sortedFindings.map(renderFinding),
     "</findings>",
+    ...(channelBlock ? ["", channelBlock] : []),
+    ...(sharedBlock ? ["", sharedBlock] : []),
     "",
     "Cite only finding ids listed above. Nothing outside this list exists.",
     "Respond under the output contract given in your instructions.",

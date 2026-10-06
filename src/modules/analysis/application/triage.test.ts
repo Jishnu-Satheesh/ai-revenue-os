@@ -4,7 +4,11 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { DomainError } from "@/lib/errors";
 import type { Database } from "@/lib/supabase/database.types";
-import { recordFeedback, triageRecommendation, type TriageAnswer } from "@/modules/analysis/application/triage";
+import {
+  recordFeedback,
+  triageRecommendation,
+  type TriageAnswer,
+} from "@/modules/analysis/application/triage";
 
 vi.mock("server-only", () => ({}));
 

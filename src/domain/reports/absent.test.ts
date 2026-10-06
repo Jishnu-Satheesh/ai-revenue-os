@@ -50,7 +50,13 @@ function contractWith(absentMarkers: unknown) {
           allowFormula: false,
           allowMergedCells: false,
           fields: [
-            { canonicalField: "valid_orders", sourceHeader: "valid_orders", parser: "integer", required: true, absentMarkers },
+            {
+              canonicalField: "valid_orders",
+              sourceHeader: "valid_orders",
+              parser: "integer",
+              required: true,
+              absentMarkers,
+            },
           ],
         },
       ],

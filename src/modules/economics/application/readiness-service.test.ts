@@ -49,7 +49,13 @@ function observations(): ReadinessObservation[] {
 const coverage: ReadinessCostCoverage = {
   outcome: "checked",
   components: [
-    { key: "commission", label: "Commission", covered: true, tier: "measured", operatorCanResolve: true },
+    {
+      key: "commission",
+      label: "Commission",
+      covered: true,
+      tier: "measured",
+      operatorCanResolve: true,
+    },
     { key: "food_cost", label: "Food cost", covered: false, tier: null, operatorCanResolve: true },
     {
       key: "promotion_funding",
@@ -90,7 +96,11 @@ describe("evidence readiness service", () => {
       expect(view.tuples).toHaveLength(1);
     });
 
-    for (const role of ["operator", "admin", "owner"] as const satisfies readonly OrganizationRole[]) {
+    for (const role of [
+      "operator",
+      "admin",
+      "owner",
+    ] as const satisfies readonly OrganizationRole[]) {
       it(`lets an ${role} read readiness`, async () => {
         const { subject } = service();
 
@@ -143,7 +153,10 @@ describe("evidence readiness service", () => {
         loadEvidence: vi.fn(async () => ({ observations: [], channels: [], branches: [] })),
       });
 
-      const view = await subject.loadReadiness({ organizationId: OTHER_ORGANIZATION, role: "owner" });
+      const view = await subject.loadReadiness({
+        organizationId: OTHER_ORGANIZATION,
+        role: "owner",
+      });
 
       expect(view.tuples).toEqual([]);
     });
@@ -204,8 +217,20 @@ describe("evidence readiness service", () => {
       expect(view.costCoverage).toEqual({
         outcome: "checked",
         components: [
-          { key: "commission", label: "Commission", covered: true, tier: "measured", operatorCanResolve: true },
-          { key: "food_cost", label: "Food cost", covered: false, tier: null, operatorCanResolve: true },
+          {
+            key: "commission",
+            label: "Commission",
+            covered: true,
+            tier: "measured",
+            operatorCanResolve: true,
+          },
+          {
+            key: "food_cost",
+            label: "Food cost",
+            covered: false,
+            tier: null,
+            operatorCanResolve: true,
+          },
           {
             key: "promotion_funding",
             label: "Promotion funding",

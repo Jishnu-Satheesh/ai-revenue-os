@@ -1,8 +1,17 @@
+"use client";
+
 import Link from "next/link";
+import { useId, useState } from "react";
+
+import { ChevronDown, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { CARD_CHIP_CLASSNAME, CardFootnote, CardQuote } from "@/components/ui/card-accents";
 import { CampaignDraftAction } from "@/components/growth-intelligence/campaign-draft-action";
+import { IntelligenceActions } from "@/components/growth-intelligence/intelligence-actions";
+import { RecommendationWhyDialog } from "@/components/growth-intelligence/recommendation-why-dialog";
 import type {
   DataGapCard,
   InsightCard,
@@ -10,12 +19,29 @@ import type {
   RecommendationCard,
 } from "@/modules/growth-intelligence/application/read-model";
 
+export type IntelligenceCardContextProvenance = {
+  briefManifestId: string | null;
+  briefStatus: "ready" | "empty" | "partial" | "unavailable" | "disabled" | null;
+  synthesisManifestId: string | null;
+  synthesisStatus: "ready" | "empty" | "partial" | "unavailable" | "disabled" | null;
+};
+
 export type IntelligenceCardProps = {
   card: OpportunityCard | RecommendationCard | InsightCard | DataGapCard;
   organizationId: string;
   timeZone: string;
   /** Managers see owning-surface links; viewers see state with words, never a control. */
   canManage: boolean;
+  /** Already-loaded channel display names for honest scope labels; missing falls back to generic. */
+  channelNames?: ReadonlyMap<string, string>;
+  /** Already-loaded branch names for honest scope labels; missing falls back to channel only. */
+  branchNames?: ReadonlyMap<string, string>;
+  /**
+   * Optional governed memory provenance (Swarm 3). Brief and synthesis
+   * manifests stay distinguishable; degraded states render honest copy.
+   * Absent means the caller carries no manifest lineage for this card.
+   */
+  contextProvenance?: IntelligenceCardContextProvenance | null;
 };
 
 const EVIDENCE_LABELS = {
@@ -160,12 +186,215 @@ function DataGapRepair({ card, organizationId }: { card: DataGapCard; organizati
   );
 }
 
+function isRecommendationCard(
+  card: IntelligenceCardProps["card"],
+): card is RecommendationCard {
+  // Data gaps carry missingInput, insights carry supportGrade, and
+  // opportunities carry impactLowMinor; all three keep their existing layouts.
+  // A recommendation is the only card with myFeedback and no other marker,
+  // so the check cannot drift when display fields are added later.
+  if ("missingInput" in card || "supportGrade" in card || "impactLowMinor" in card) return false;
+  return "myFeedback" in card;
+}
+
+function joinLimitation(fragments: readonly string[]): string | null {
+  const sentences = fragments
+    .map((fragment) => fragment.trim())
+    .filter((fragment) => fragment.length > 0)
+    .map((fragment) => (/[.!?…]$/.test(fragment) ? fragment : `${fragment}.`));
+  return sentences.length > 0 ? sentences.join(" ") : null;
+}
+
+function recommendationTag(card: RecommendationCard): string {
+  return card.source.kind === "channel_recommendation" ? "Channel recommendation" : "Recommendation";
+}
+
+function ContextProvenanceBadges({
+  provenance,
+}: {
+  provenance: IntelligenceCardContextProvenance;
+}) {
+  const degraded =
+    (provenance.briefStatus && provenance.briefStatus !== "ready") ||
+    (provenance.synthesisStatus && provenance.synthesisStatus !== "ready");
+  return (
+    <div className="flex flex-wrap items-center gap-1.5" aria-label="Memory context provenance">
+      {provenance.briefManifestId ? <Badge variant="outline">Research brief</Badge> : null}
+      {provenance.synthesisManifestId ? <Badge variant="outline">Synthesis context</Badge> : null}
+      {degraded ? (
+        <span className="text-[11px] text-muted-foreground">
+          Some context was unavailable; shown on cited refs only.
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function recommendationScope(
+  card: RecommendationCard,
+  channelNames?: ReadonlyMap<string, string>,
+  branchNames?: ReadonlyMap<string, string>,
+): string {
+  // A null channel means cross-market synthesis, never one channel: the
+  // neutral organization-wide label keeps the card honest where the
+  // prototype's illustrative channel names would invent a scope.
+  if (!card.channelId) return "Organization-wide";
+  const channel = channelNames?.get(card.channelId) ?? "Channel details unavailable";
+  if (!card.branchId) return channel;
+  const branch = branchNames?.get(card.branchId);
+  return branch ? `${channel} · ${branch}` : channel;
+}
+
+function recommendationEvidence(card: RecommendationCard, timeZone: string): string {
+  const window = card.evidenceWindow
+    ? `${formatDay(card.evidenceWindow.start, timeZone)} to ${formatDay(card.evidenceWindow.end, timeZone)}`
+    : "No evidence window";
+  return `${window} · generated ${formatDay(card.generatedAt, timeZone)}`;
+}
+
+function RecommendationBody({
+  card,
+  organizationId,
+  timeZone,
+  canManage,
+  channelNames,
+  branchNames,
+}: {
+  card: RecommendationCard;
+  organizationId: string;
+  timeZone: string;
+  canManage: boolean;
+  channelNames?: ReadonlyMap<string, string>;
+  branchNames?: ReadonlyMap<string, string>;
+}) {
+  const scopeLabel = recommendationScope(card, channelNames, branchNames);
+  const evidenceText = recommendationEvidence(card, timeZone);
+  const limitation = joinLimitation(card.limitations);
+  const channelHref = card.channelId
+    ? `/organizations/${organizationId}/channels/${card.channelId}`
+    : null;
+  const [expanded, setExpanded] = useState(false);
+  const contentId = useId();
+  // Deliberate token deviation from the Superdesign prototype (which uses
+  // primary/sage): emerald matches the approved channel-workspace advice block
+  // in recommendation-controls.tsx, so both surfaces read as one product.
+  // The card stays compact by default — title plus a two-line preview — and
+  // the limitation, evidence, Why dialog, provenance, and decision controls
+  // wait inside the expander. Nothing is removed, only collapsed.
+  return (
+    <section
+      data-testid={`intelligence-card-${card.id}`}
+      aria-label={`Recommendation: ${card.title}`}
+      className="flex h-full flex-col gap-4 rounded-xl border border-emerald-100 bg-emerald-50/70 p-4 sm:p-5"
+    >
+      <Collapsible open={expanded} onOpenChange={setExpanded} className="flex flex-1 flex-col">
+        <div className="flex items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-500 text-white"
+          >
+            <Zap className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+              <span className="font-semibold text-primary">{recommendationTag(card)}</span>
+              <span aria-hidden="true">·</span>
+              <span className={CARD_CHIP_CLASSNAME}>{scopeLabel}</span>
+            </div>
+            <h3 className="mt-1.5 text-[15px] font-bold leading-snug">{card.title}</h3>
+            <div className="mt-2 flex items-end gap-2">
+              <p className="flex-1 line-clamp-2 max-w-4xl text-sm leading-relaxed text-muted-foreground">
+                {card.detail}
+              </p>
+              <CollapsibleTrigger asChild>
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={contentId}
+                  className="inline-flex shrink-0 items-center gap-1 self-end rounded text-xs font-medium text-primary underline-offset-4 hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-none"
+                >
+                  {expanded ? "Show less" : "Read more"}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={
+                      expanded
+                        ? "size-3.5 rotate-180 transition-transform"
+                        : "size-3.5 transition-transform"
+                    }
+                  />
+                </button>
+              </CollapsibleTrigger>
+            </div>
+            <DecisionLine card={card} timeZone={timeZone} />
+          </div>
+        </div>
+        <CollapsibleContent id={contentId} className="flex flex-1 flex-col">
+          <div className="flex flex-1 flex-col gap-4 pt-2">
+            <CardQuote testId={`intelligence-card-${card.id}-quote`}>{card.detail}</CardQuote>
+            {limitation ? <CardFootnote>{limitation}</CardFootnote> : null}
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+              <span>{evidenceText}</span>
+              <RecommendationWhyDialog
+                title={card.title}
+                detail={card.detail}
+                scopeLabel={scopeLabel}
+                evidenceText={evidenceText}
+                limitation={limitation}
+                supportedActions={card.supportedActions}
+                channelHref={channelHref}
+                canManage={canManage}
+                citationCount={card.citationFindingIds?.length ?? 0}
+              />
+            </div>
+            {card.researchProvenance ? (
+              <div className="flex flex-wrap items-center gap-2 text-xs">
+                <Badge variant="outline">From market research</Badge>
+                <Link
+                  className="font-medium text-primary underline-offset-4 hover:underline"
+                  href={card.researchProvenance.statusPath}
+                >
+                  View supporting outcomes
+                </Link>
+              </div>
+            ) : null}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
+      <div data-testid={`intelligence-card-${card.id}-actions-footer`} className="mt-auto">
+        <IntelligenceActions card={card} organizationId={organizationId} canManage={canManage} />
+      </div>
+    </section>
+  );
+}
+
 export function IntelligenceCard({
   card,
   organizationId,
   timeZone,
   canManage,
+  channelNames,
+  branchNames,
+  contextProvenance,
 }: IntelligenceCardProps) {
+  if (isRecommendationCard(card)) {
+    return (
+      <>
+        {contextProvenance?.briefManifestId || contextProvenance?.synthesisManifestId ? (
+          <div className="mb-2">
+            <ContextProvenanceBadges provenance={contextProvenance} />
+          </div>
+        ) : null}
+        <RecommendationBody
+          card={card}
+          organizationId={organizationId}
+          timeZone={timeZone}
+          canManage={canManage}
+          channelNames={channelNames}
+          branchNames={branchNames}
+        />
+      </>
+    );
+  }
   const sourceLabel =
     card.source.kind === "opportunity"
       ? "Opportunity"
@@ -179,6 +408,9 @@ export function IntelligenceCard({
           <CardTitle className="text-base">{card.title}</CardTitle>
           <div className="flex shrink-0 flex-wrap gap-1.5">
             <Badge variant="secondary">{sourceLabel}</Badge>
+            {"researchProvenance" in card && card.researchProvenance ? (
+              <Badge variant="outline">From market research</Badge>
+            ) : null}
             {"evidenceTier" in card ? (
               <Badge variant="outline">
                 {EVIDENCE_LABELS[card.evidenceTier as keyof typeof EVIDENCE_LABELS] ??
@@ -186,6 +418,12 @@ export function IntelligenceCard({
               </Badge>
             ) : null}
             {"supportGrade" in card ? <Badge variant="outline">{card.supportGrade}</Badge> : null}
+            {contextProvenance?.briefManifestId ? (
+              <Badge variant="outline">Research brief</Badge>
+            ) : null}
+            {contextProvenance?.synthesisManifestId ? (
+              <Badge variant="outline">Synthesis context</Badge>
+            ) : null}
           </div>
         </div>
         <p className="text-sm text-muted-foreground">{card.detail}</p>
@@ -225,6 +463,9 @@ export function IntelligenceCard({
           <DataGapRepair card={card} organizationId={organizationId} />
         ) : "channelId" in card && card.channelId ? (
           <ChannelFooter card={card} organizationId={organizationId} canManage={canManage} />
+        ) : null}
+        {"myFeedback" in card ? (
+          <IntelligenceActions card={card} organizationId={organizationId} canManage={canManage} />
         ) : null}
       </CardFooter>
     </Card>

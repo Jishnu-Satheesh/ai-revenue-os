@@ -26,9 +26,7 @@ const bodySchema = z
 
 export async function POST(
   request: Request,
-  {
-    params,
-  }: { params: Promise<{ organizationId: string; recommendationId: string }> },
+  { params }: { params: Promise<{ organizationId: string; recommendationId: string }> },
 ) {
   const correlationId = request.headers.get("x-correlation-id") ?? crypto.randomUUID();
   try {

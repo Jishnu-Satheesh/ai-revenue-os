@@ -52,6 +52,49 @@ export function parseCampaignRevisionPayload(payload: unknown): CampaignRevision
 }
 
 /**
+ * What a campaign research task is allowed to carry.
+ *
+ * Identifiers only, like generation — and pointedly not the staged question.
+ * The question is the requester's business intent in their own words, so it
+ * lives on the admitted run row and reaches the worker through the
+ * claim-bound loader, never through queue storage, dashboards, or logs.
+ */
+/**
+ * What preparing the approved creative may spend, carried to the worker.
+ *
+ * The amount is the platform-configured dispatch figure
+ * (`generationCostCeilingMinor()`); the currency is the admitting policy's
+ * own (`campaign_research_policies.allowance_currency` for the run's bound
+ * version). The planner must copy it exactly into
+ * `document.generationCostCeiling` — a post-parse equality check refuses any
+ * drift, so a proposal-born campaign never reaches generation with a purse
+ * the dispatch will not honour.
+ */
+export const preparationAllowanceSchema = z.strictObject({
+  amountMinor: z.number().int().nonnegative().max(10_000_000),
+  currency: z.string().regex(/^[A-Z]{3}$/),
+});
+export type PreparationAllowance = z.infer<typeof preparationAllowanceSchema>;
+
+export const campaignResearchPayloadSchema = z.strictObject({
+  organizationId: uuidSchema,
+  runId: uuidSchema,
+  correlationId: uuidSchema,
+  /**
+   * Resolved from the binding policy by the scheduler or route that admitted
+   * the run. Required here so the worker never falls back to a default for
+   * what counts as a numeric operating limit (D06).
+   */
+  evidenceMaxAgeDays: z.number().int().positive().max(365),
+  preparationAllowance: preparationAllowanceSchema,
+});
+export type CampaignResearchPayload = z.infer<typeof campaignResearchPayloadSchema>;
+
+export function parseCampaignResearchPayload(payload: unknown): CampaignResearchPayload {
+  return campaignResearchPayloadSchema.parse(payload);
+}
+
+/**
  * The fingerprint of what was asked for.
  *
  * Two enqueues sharing an idempotency key must describe the same work. This is
@@ -123,6 +166,12 @@ export function parseCampaignVariantPayload(payload: unknown): CampaignVariantPa
  * It is bounded here and refused by `checkOperatorSlotText` before it is drawn.
  * Everything else the worker needs, it reads from the database under its own
  * credentials.
+ *
+ * `placement`, `language`, `format` and `ordinal` are the deliverable identity
+ * the finished output is recorded under. They are resolved by the renders route
+ * from the approved poster plan -- never guessed by the worker, which records
+ * them verbatim -- so a retry of the same request files under the same slot
+ * and the database reuses rather than duplicating.
  */
 export const campaignPosterRenderPayloadSchema = z.strictObject({
   organizationId: uuidSchema,
@@ -138,6 +187,10 @@ export const campaignPosterRenderPayloadSchema = z.strictObject({
   script: z.enum(["Latn", "Mlym", "Arab"]),
   directionId: z.string().min(1).max(120),
   channel: z.enum(["instagram", "facebook"]),
+  placement: z.string().trim().min(1).max(60),
+  language: z.string().trim().min(1).max(40),
+  format: z.string().trim().min(1).max(60),
+  ordinal: z.number().int().positive(),
   extra: z.string().max(200).nullable(),
 });
 

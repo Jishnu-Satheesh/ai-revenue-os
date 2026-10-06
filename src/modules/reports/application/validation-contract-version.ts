@@ -54,9 +54,7 @@ export async function resolveValidationContractVersion(
   },
   findAdmissionById: (admissionId: string) => Promise<{ contractVersionId: string } | null>,
 ): Promise<ValidationContractVersionResolution> {
-  const latestRun = input.validationRuns.find(
-    (run) => run.report_package_id === input.packageId,
-  );
+  const latestRun = input.validationRuns.find((run) => run.report_package_id === input.packageId);
   if (latestRun) {
     return { source: "validation_run", contractVersionId: latestRun.report_contract_version_id };
   }

@@ -93,7 +93,12 @@ describe("deterministic report validation", () => {
     ]);
     expect(result.controlResults).toEqual([
       expect.objectContaining({ key: "row_count", passed: true, expectedCount: 3, actualCount: 3 }),
-      expect.objectContaining({ key: "cell_count", passed: true, expectedCount: 11, actualCount: 11 }),
+      expect.objectContaining({
+        key: "cell_count",
+        passed: true,
+        expectedCount: 11,
+        actualCount: 11,
+      }),
     ]);
     expect(JSON.stringify(result)).not.toContain("125.50");
     expect(JSON.stringify(result)).not.toContain("1001");
@@ -109,9 +114,7 @@ describe("deterministic report validation", () => {
     expect(missingHeader.errorCodes).toContain("REQUIRED_SOURCE_HEADER_MISSING");
 
     const invalidValues = await validateCsvBuffer(
-      Buffer.from(
-        "order_id,order_date,net_sales,commission_rate\n1.5,not-a-date,bad,wat\n",
-      ),
+      Buffer.from("order_id,order_date,net_sales,commission_rate\n1.5,not-a-date,bad,wat\n"),
       contract,
       [{ ...profile[0], rowCount: 2, populatedCellCount: 8 }],
     );
@@ -125,7 +128,9 @@ describe("deterministic report validation", () => {
     );
 
     const invalidDecimal = await validateCsvBuffer(
-      Buffer.from("order_id,order_date,net_sales,commission_rate,subtotal\n1,2026-08-01,1,10%,not-a-number\n"),
+      Buffer.from(
+        "order_id,order_date,net_sales,commission_rate,subtotal\n1,2026-08-01,1,10%,not-a-number\n",
+      ),
       {
         ...contract,
         sheets: [
@@ -133,7 +138,12 @@ describe("deterministic report validation", () => {
             ...contract.sheets[0],
             fields: [
               ...contract.sheets[0].fields,
-              { canonicalField: "subtotal", sourceHeader: "subtotal", parser: "decimal", required: true },
+              {
+                canonicalField: "subtotal",
+                sourceHeader: "subtotal",
+                parser: "decimal",
+                required: true,
+              },
             ],
           },
         ],
@@ -153,7 +163,9 @@ describe("deterministic report validation", () => {
           {
             ...contract.sheets[0],
             normalizedSheetName: "optional_notes",
-            fields: [{ canonicalField: "note", sourceHeader: "note", parser: "text", required: false }],
+            fields: [
+              { canonicalField: "note", sourceHeader: "note", parser: "text", required: false },
+            ],
           },
         ],
       },
@@ -171,7 +183,9 @@ describe("deterministic report validation", () => {
           {
             ...contract.sheets[0],
             normalizedSheetName: "required_notes",
-            fields: [{ canonicalField: "note", sourceHeader: "note", parser: "text", required: true }],
+            fields: [
+              { canonicalField: "note", sourceHeader: "note", parser: "text", required: true },
+            ],
           },
         ],
       },

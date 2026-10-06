@@ -1,0 +1,925 @@
+{
+  "projectRef": "proj_wjxnpmlspegvfcymhpxj",
+  "environment": "prod",
+  "database": "existing hosted staging",
+  "app": "authenticated local compiled app; hosted web unchanged",
+  "deployment": {
+    "id": "deployment_5wwxhsbx7u5m37n1f6s1h",
+    "version": "20261004.1",
+    "status": "DEPLOYED",
+    "shortCode": "yqwwg7am",
+    "contentHash": "b7c8125a13d363fde607c4490355ebd9",
+    "previousVersion": "20260928.3",
+    "activeVersionVerified": "20261004.1",
+    "cliVersion": "4.6.0",
+    "sdkVersion": "4.6.0",
+    "variablesChanged": false,
+    "organizationAllowlistChanged": false
+  },
+  "taskParity": {
+    "previousVersion": "20260928.3",
+    "newVersion": "20261004.1",
+    "previousTaskCount": 46,
+    "newTaskCount": 50,
+    "missing": [],
+    "newTasksAdded": [
+      "agent-chat.process-attachment",
+      "agent-chat.process-turn",
+      "agent-chat.purge-thread-retention",
+      "agent-chat.recover-turns"
+    ],
+    "expectedTasks": [
+      "agent-chat.process-turn",
+      "agent-chat.process-attachment",
+      "agent-chat.recover-turns",
+      "agent-chat.purge-thread-retention",
+      "channel-analysis.run",
+      "channel-recommendations.generate",
+      "report-package.profile",
+      "report-package.validate",
+      "report-package.project"
+    ]
+  },
+  "monitoring": {
+    "firstObservedSchedule": "2026-10-04T16:10:00Z",
+    "observedAt": "2026-10-04T16:24:54.583Z",
+    "runStatusCounts": {
+      "COMPLETED": 42
+    },
+    "failedRunCount": 0
+  },
+  "runs": [
+    {
+      "id": "run_06ggfelnu2fs7hgtbdim3ha601",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:24:00.000Z",
+      "finishedAt": "2026-10-04T16:24:12.100Z",
+      "durationMs": 363
+    },
+    {
+      "id": "run_06ggfeb9p8os8t64h4snvv1p01",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:23:00.000Z",
+      "finishedAt": "2026-10-04T16:23:12.146Z",
+      "durationMs": 291
+    },
+    {
+      "id": "run_06ggfe5tcici4227qb6vgug801",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:22:00.000Z",
+      "finishedAt": "2026-10-04T16:22:10.361Z",
+      "durationMs": 307
+    },
+    {
+      "id": "run_06ggfdue3f0r45h8jlijln5701",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:21:00.000Z",
+      "finishedAt": "2026-10-04T16:21:10.213Z",
+      "durationMs": 233
+    },
+    {
+      "id": "run_06ggfdti02i8s3mtdgrspcfs01",
+      "task": "growth-intelligence.monitoring-sweep",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:20:00.000Z",
+      "finishedAt": "2026-10-04T16:20:53.852Z",
+      "durationMs": 701,
+      "outcome": "swept"
+    },
+    {
+      "id": "run_06ggfdsfi3pve2e2jp06nnfn01",
+      "task": "agent-chat.recover-turns",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:20:00.000Z",
+      "finishedAt": "2026-10-04T16:20:48.871Z",
+      "durationMs": 219
+    },
+    {
+      "id": "run_06ggfdrnftq9d7kfjink5dv201",
+      "task": "campaign.research-lease-sweep",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:20:00.000Z",
+      "finishedAt": "2026-10-04T16:20:47.591Z",
+      "durationMs": 262
+    },
+    {
+      "id": "run_06ggfdldltf9pggfcdkudr9801",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:20:00.000Z",
+      "finishedAt": "2026-10-04T16:20:12.206Z",
+      "durationMs": 251
+    },
+    {
+      "id": "run_06ggfdeqr3tpuvpnlimk601v01",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:19:00.000Z",
+      "finishedAt": "2026-10-04T16:19:11.952Z",
+      "durationMs": 290
+    },
+    {
+      "id": "run_06ggfdh4m6c3r717bjijllnpc1",
+      "task": "agent-chat.process-turn",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:18:59.905Z",
+      "finishedAt": "2026-10-04T16:19:08.689Z",
+      "durationMs": 806,
+      "outcome": "turn_unavailable",
+      "canary": "business-advice"
+    },
+    {
+      "id": "run_06ggfd8j3c7tpuikeojdit5601",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:18:00.000Z",
+      "finishedAt": "2026-10-04T16:18:10.039Z",
+      "durationMs": 326
+    },
+    {
+      "id": "run_06ggfd31atuoj2dl4qpnro9i01",
+      "task": "agent-chat.process-attachment",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:17:04.369Z",
+      "finishedAt": "2026-10-04T16:17:39.564Z",
+      "durationMs": 27346,
+      "outcome": "completed",
+      "canary": "report-fully-specified"
+    },
+    {
+      "id": "run_06ggfd2lmptjl4i77o21d1ns01",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:17:00.000Z",
+      "finishedAt": "2026-10-04T16:17:10.026Z",
+      "durationMs": 262
+    },
+    {
+      "id": "run_06ggfcr3pgkdel638cv24dp501",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:16:00.000Z",
+      "finishedAt": "2026-10-04T16:16:10.157Z",
+      "durationMs": 368
+    },
+    {
+      "id": "run_06ggfcnk2n02equu9r2gbs5i01",
+      "task": "agent-chat.process-attachment",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:15:30.870Z",
+      "finishedAt": "2026-10-04T16:16:08.366Z",
+      "durationMs": 27176,
+      "outcome": "completed",
+      "canary": "report-reuse"
+    },
+    {
+      "id": "run_06ggfcl8cg920jcv8sip63gu01",
+      "task": "memory.embed-items",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:15:11.484Z",
+      "finishedAt": "2026-10-04T16:15:19.146Z",
+      "durationMs": 343,
+      "outcome": "succeeded"
+    },
+    {
+      "id": "run_06ggfckctn07cop0k5iik8sk01",
+      "task": "memory-capture.dispatch-org",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:15:04.451Z",
+      "finishedAt": "2026-10-04T16:15:17.630Z",
+      "durationMs": 3820
+    },
+    {
+      "id": "run_06ggfcoigv0hd6l5rlsu594701",
+      "task": "growth-intelligence.monitoring-sweep",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:15:00.000Z",
+      "finishedAt": "2026-10-04T16:15:55.795Z",
+      "durationMs": 582,
+      "outcome": "swept"
+    },
+    {
+      "id": "run_06ggfcmcm78k4k1ne83ooimo01",
+      "task": "agent-chat.recover-turns",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:15:00.000Z",
+      "finishedAt": "2026-10-04T16:15:47.340Z",
+      "durationMs": 290
+    },
+    {
+      "id": "run_06ggfclkoc00t5ln1rbtanp001",
+      "task": "memory-capture.reconcile",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:15:00.000Z",
+      "finishedAt": "2026-10-04T16:15:29.630Z",
+      "durationMs": 721
+    },
+    {
+      "id": "run_06ggfcli02hb5cvda85o4gap01",
+      "task": "campaign.research-lease-sweep",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:15:00.000Z",
+      "finishedAt": "2026-10-04T16:15:46.035Z",
+      "durationMs": 429
+    },
+    {
+      "id": "run_06ggfciv8efhtknfjbu1cb0s01",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:15:00.000Z",
+      "finishedAt": "2026-10-04T16:15:10.598Z",
+      "durationMs": 773
+    },
+    {
+      "id": "run_06ggfce7n893ijm3m44l67v901",
+      "task": "memory.embed-items",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:14:13.969Z",
+      "finishedAt": "2026-10-04T16:14:21.622Z",
+      "durationMs": 319,
+      "outcome": "succeeded"
+    },
+    {
+      "id": "run_06ggfcd6uqp86c1lf4le0mku01",
+      "task": "memory-capture.dispatch-org",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:14:05.580Z",
+      "finishedAt": "2026-10-04T16:14:20.113Z",
+      "durationMs": 6918
+    },
+    {
+      "id": "run_06ggfcajcvm7s08224surdv001",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:14:00.000Z",
+      "finishedAt": "2026-10-04T16:14:11.727Z",
+      "durationMs": 1796
+    },
+    {
+      "id": "run_06ggfc5ovfeatsrcpo7and5501",
+      "task": "memory-capture.dispatch-org",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:13:04.653Z",
+      "finishedAt": "2026-10-04T16:13:17.555Z",
+      "durationMs": 5499
+    },
+    {
+      "id": "run_06ggfc42rqqpg5cstmkb1p7f01",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:13:00.000Z",
+      "finishedAt": "2026-10-04T16:13:10.796Z",
+      "durationMs": 986
+    },
+    {
+      "id": "run_06ggfbudiv100pbgbb4p309801",
+      "task": "memory-capture.dispatch-org",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:12:04.402Z",
+      "finishedAt": "2026-10-04T16:12:17.062Z",
+      "durationMs": 5309
+    },
+    {
+      "id": "run_06ggfbrpsvjabd803gqg50e001",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:12:00.000Z",
+      "finishedAt": "2026-10-04T16:12:10.584Z",
+      "durationMs": 796
+    },
+    {
+      "id": "run_06ggfbnc5k59vtbth354mma601",
+      "task": "memory-capture.dispatch-org",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:11:06.717Z",
+      "finishedAt": "2026-10-04T16:11:19.606Z",
+      "durationMs": 5356
+    },
+    {
+      "id": "run_06ggfbnao5kiv4vrtce26u7c01",
+      "task": "channel-recommendations.generate",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:11:06.330Z",
+      "finishedAt": "2026-10-04T16:11:14.109Z",
+      "durationMs": 222,
+      "outcome": "skipped",
+      "canary": "channel-assessment"
+    },
+    {
+      "id": "run_06ggfblggikqssoe2s5h7ukf01",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:11:00.000Z",
+      "finishedAt": "2026-10-04T16:11:12.866Z",
+      "durationMs": 2923
+    },
+    {
+      "id": "run_06ggfbm0h6heft6htkt79oi401",
+      "task": "channel-recommendations.generate",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:55.519Z",
+      "finishedAt": "2026-10-04T16:11:33.957Z",
+      "durationMs": 29030,
+      "outcome": "completed",
+      "canary": "channel-assessment"
+    },
+    {
+      "id": "run_06ggfblhp2htstmlhqlt6cla01",
+      "task": "agent-chat.process-attachment",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:51.755Z",
+      "finishedAt": "2026-10-04T16:11:02.963Z",
+      "durationMs": 3077,
+      "outcome": "metadata_required",
+      "canary": "report-reuse"
+    },
+    {
+      "id": "run_06ggfbkrkef2orifl1qtp0ql01",
+      "task": "channel-analysis.run",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:46.088Z",
+      "finishedAt": "2026-10-04T16:11:01.681Z",
+      "durationMs": 4968,
+      "outcome": "completed",
+      "canary": "channel-assessment"
+    },
+    {
+      "id": "run_06ggfbk4h4sls1lh025rif0401",
+      "task": "agent-chat.process-turn",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:40.166Z",
+      "finishedAt": "2026-10-04T16:11:59.139Z",
+      "durationMs": 60649,
+      "outcome": "completed",
+      "canary": "channel-assessment"
+    },
+    {
+      "id": "run_06ggfbj06p2c15dnt95m8u8o01",
+      "task": "agent-chat.process-turn",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:30.869Z",
+      "finishedAt": "2026-10-04T16:10:58.314Z",
+      "durationMs": 19412,
+      "outcome": "completed",
+      "canary": "business-advice"
+    },
+    {
+      "id": "run_06ggfbfo5qb9eqf11jh2jaad01",
+      "task": "memory-capture.dispatch-org",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:04.228Z",
+      "finishedAt": "2026-10-04T16:10:18.469Z",
+      "durationMs": 4181
+    },
+    {
+      "id": "run_06ggfbjnpbu7k3vqra6rp76e01",
+      "task": "growth-intelligence.monitoring-sweep",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:00.000Z",
+      "finishedAt": "2026-10-04T16:10:56.148Z",
+      "durationMs": 689,
+      "outcome": "swept"
+    },
+    {
+      "id": "run_06ggfbgqk4aua0tm2346fes201",
+      "task": "campaign.research-lease-sweep",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:00.000Z",
+      "finishedAt": "2026-10-04T16:10:47.403Z",
+      "durationMs": 231
+    },
+    {
+      "id": "run_06ggfbgav57h9t3psug1nhec01",
+      "task": "agent-chat.recover-turns",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:00.000Z",
+      "finishedAt": "2026-10-04T16:10:49.267Z",
+      "durationMs": 275
+    },
+    {
+      "id": "run_06ggfbc5cs3l547pa72rgvl101",
+      "task": "memory-capture.dispatch",
+      "status": "COMPLETED",
+      "version": "20261004.1",
+      "createdAt": "2026-10-04T16:10:00.000Z",
+      "finishedAt": "2026-10-04T16:10:10.379Z",
+      "durationMs": 570
+    }
+  ],
+  "turns": [
+    {
+      "name": "business-advice",
+      "turnId": "dab4ff7b-1899-4a29-8598-05736dfee26b",
+      "threadId": "a4aef56e-8e7b-49e7-a2a8-92505a3642fc",
+      "status": "completed",
+      "attempt": 1,
+      "failureCode": null,
+      "finalMessageId": "cd31feca-4926-4d17-a21c-21e10c2df208",
+      "assistantCount": 1,
+      "questionPending": false,
+      "eventTypes": ["turn_queued", "period_switched", "answer_completed"],
+      "events": [
+        {
+          "seq": 1,
+          "type": "turn_queued",
+          "payload": {},
+          "occurredAt": "2026-10-04T16:10:29.104906+00:00"
+        },
+        {
+          "seq": 2,
+          "type": "period_switched",
+          "payload": {
+            "reason": "The requested period has no usable governed report.",
+            "selectedEnd": "2026-08-30",
+            "requestedEnd": "2026-09-30",
+            "selectedStart": "2026-08-08",
+            "requestedStart": "2026-09-01"
+          },
+          "occurredAt": "2026-10-04T16:10:35.742092+00:00"
+        },
+        {
+          "seq": 3,
+          "type": "answer_completed",
+          "payload": {
+            "messageId": "cd31feca-4926-4d17-a21c-21e10c2df208"
+          },
+          "occurredAt": "2026-10-04T16:10:52.182689+00:00"
+        }
+      ],
+      "attachments": [],
+      "uploadStatuses": null,
+      "answerPresent": true,
+      "auditLinkPresent": null,
+      "packageLinkPresent": null
+    },
+    {
+      "name": "channel-assessment",
+      "turnId": "b9f603ab-03f0-4e6a-a49f-d9dd502c1549",
+      "threadId": "63738679-f84b-4a37-8948-05477e32eafc",
+      "status": "completed",
+      "attempt": 1,
+      "failureCode": null,
+      "finalMessageId": "b2b23805-74da-4fc0-90f2-462711b6dddd",
+      "assistantCount": 1,
+      "questionPending": false,
+      "eventTypes": ["turn_queued", "analysis_started", "analysis_completed", "answer_completed"],
+      "events": [
+        {
+          "seq": 1,
+          "type": "turn_queued",
+          "payload": {},
+          "occurredAt": "2026-10-04T16:10:38.714149+00:00"
+        },
+        {
+          "seq": 2,
+          "type": "analysis_started",
+          "payload": {
+            "runId": "b9f603ab-03f0-4e6a-a49f-d9dd502c1549",
+            "auditHref": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/channels/b4f83dd2-3035-4676-9cf3-cedc9b9e7884?runId=b9f603ab-03f0-4e6a-a49f-d9dd502c1549",
+            "channelId": "b4f83dd2-3035-4676-9cf3-cedc9b9e7884",
+            "periodEnd": "2026-08-29",
+            "periodStart": "2026-08-01"
+          },
+          "occurredAt": "2026-10-04T16:10:46.239485+00:00"
+        },
+        {
+          "seq": 3,
+          "type": "analysis_completed",
+          "payload": {
+            "runId": "b9f603ab-03f0-4e6a-a49f-d9dd502c1549",
+            "auditHref": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/channels/b4f83dd2-3035-4676-9cf3-cedc9b9e7884?runId=b9f603ab-03f0-4e6a-a49f-d9dd502c1549",
+            "channelId": "b4f83dd2-3035-4676-9cf3-cedc9b9e7884"
+          },
+          "occurredAt": "2026-10-04T16:11:37.111345+00:00"
+        },
+        {
+          "seq": 4,
+          "type": "answer_completed",
+          "payload": {
+            "messageId": "b2b23805-74da-4fc0-90f2-462711b6dddd"
+          },
+          "occurredAt": "2026-10-04T16:11:52.797578+00:00"
+        }
+      ],
+      "attachments": [],
+      "uploadStatuses": null,
+      "answerPresent": true,
+      "auditLinkPresent": true,
+      "packageLinkPresent": null
+    },
+    {
+      "name": "report-reuse",
+      "turnId": "6565643b-4654-4aaa-9e63-76b198ae56dc",
+      "threadId": "662571a6-69ac-46be-b598-f401351ba2a0",
+      "status": "completed",
+      "attempt": 2,
+      "failureCode": null,
+      "finalMessageId": "94c56edf-c559-4f2a-8817-c39907fe66cb",
+      "assistantCount": 1,
+      "questionPending": false,
+      "eventTypes": [
+        "turn_queued",
+        "report_uploaded",
+        "challenge_requested",
+        "challenge_answered",
+        "report_processed",
+        "analysis_completed",
+        "answer_completed"
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "type": "turn_queued",
+          "payload": {},
+          "occurredAt": "2026-10-04T16:10:45.604784+00:00"
+        },
+        {
+          "seq": 2,
+          "type": "report_uploaded",
+          "payload": {
+            "attachmentId": "4e909959-ce05-48a1-806c-e68b330a2a5e"
+          },
+          "occurredAt": "2026-10-04T16:10:54.242509+00:00"
+        },
+        {
+          "seq": 3,
+          "type": "challenge_requested",
+          "payload": {
+            "kind": "metadata",
+            "challengeId": "b43bd669-446c-4b7d-ae16-859783dea27c"
+          },
+          "occurredAt": "2026-10-04T16:10:56.850678+00:00"
+        },
+        {
+          "seq": 4,
+          "type": "challenge_answered",
+          "payload": {
+            "challengeId": "b43bd669-446c-4b7d-ae16-859783dea27c",
+            "answersDigest": "ad3868524937677db44cdb6053505091"
+          },
+          "occurredAt": "2026-10-04T16:15:29.161972+00:00"
+        },
+        {
+          "seq": 5,
+          "type": "report_processed",
+          "payload": {
+            "packageId": "25b9208c-d067-49c2-b61a-a977ee2f1350",
+            "attachmentId": "4e909959-ce05-48a1-806c-e68b330a2a5e"
+          },
+          "occurredAt": "2026-10-04T16:15:39.06864+00:00"
+        },
+        {
+          "seq": 6,
+          "type": "analysis_completed",
+          "payload": {
+            "runId": "07c0acb1-204c-449c-a55f-4d1b60ec0d18",
+            "auditHref": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/channels/b4f83dd2-3035-4676-9cf3-cedc9b9e7884?runId=07c0acb1-204c-449c-a55f-4d1b60ec0d18",
+            "channelId": "b4f83dd2-3035-4676-9cf3-cedc9b9e7884"
+          },
+          "occurredAt": "2026-10-04T16:15:45.464432+00:00"
+        },
+        {
+          "seq": 7,
+          "type": "answer_completed",
+          "payload": {
+            "messageId": "94c56edf-c559-4f2a-8817-c39907fe66cb"
+          },
+          "occurredAt": "2026-10-04T16:16:02.122108+00:00"
+        }
+      ],
+      "attachments": [
+        {
+          "id": "4e909959-ce05-48a1-806c-e68b330a2a5e",
+          "status": "promoted",
+          "package_id": "25b9208c-d067-49c2-b61a-a977ee2f1350"
+        }
+      ],
+      "uploadStatuses": [201, 204],
+      "answerPresent": true,
+      "auditLinkPresent": true,
+      "packageLinkPresent": true
+    },
+    {
+      "name": "report-fully-specified",
+      "turnId": "dd62bd65-9dc5-4166-ad0b-5671f1f8ee5d",
+      "threadId": "d07b22dc-5105-45f2-9d85-e5811ac7d2a5",
+      "status": "completed",
+      "attempt": 1,
+      "failureCode": null,
+      "finalMessageId": "53eb6a3a-3c9c-4ded-869e-89fb77653a07",
+      "assistantCount": 1,
+      "questionPending": false,
+      "eventTypes": [
+        "turn_queued",
+        "report_uploaded",
+        "report_processed",
+        "analysis_completed",
+        "answer_completed"
+      ],
+      "events": [
+        {
+          "seq": 1,
+          "type": "turn_queued",
+          "payload": {},
+          "occurredAt": "2026-10-04T16:16:53.745467+00:00"
+        },
+        {
+          "seq": 2,
+          "type": "report_uploaded",
+          "payload": {
+            "attachmentId": "a747cbfd-0f04-4a61-8567-b1114afe7df6"
+          },
+          "occurredAt": "2026-10-04T16:17:06.559178+00:00"
+        },
+        {
+          "seq": 3,
+          "type": "report_processed",
+          "payload": {
+            "packageId": "25b9208c-d067-49c2-b61a-a977ee2f1350",
+            "attachmentId": "a747cbfd-0f04-4a61-8567-b1114afe7df6"
+          },
+          "occurredAt": "2026-10-04T16:17:10.187045+00:00"
+        },
+        {
+          "seq": 4,
+          "type": "analysis_completed",
+          "payload": {
+            "runId": "07c0acb1-204c-449c-a55f-4d1b60ec0d18",
+            "auditHref": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/channels/b4f83dd2-3035-4676-9cf3-cedc9b9e7884?runId=07c0acb1-204c-449c-a55f-4d1b60ec0d18",
+            "channelId": "b4f83dd2-3035-4676-9cf3-cedc9b9e7884"
+          },
+          "occurredAt": "2026-10-04T16:17:17.283862+00:00"
+        },
+        {
+          "seq": 5,
+          "type": "answer_completed",
+          "payload": {
+            "messageId": "53eb6a3a-3c9c-4ded-869e-89fb77653a07"
+          },
+          "occurredAt": "2026-10-04T16:17:33.449444+00:00"
+        }
+      ],
+      "attachments": [
+        {
+          "id": "a747cbfd-0f04-4a61-8567-b1114afe7df6",
+          "status": "promoted",
+          "package_id": "25b9208c-d067-49c2-b61a-a977ee2f1350"
+        }
+      ],
+      "uploadStatuses": [201, 204],
+      "answerPresent": true,
+      "auditLinkPresent": true,
+      "packageLinkPresent": true
+    }
+  ],
+  "sourceProof": {
+    "sourceRun": {
+      "id": "b9f603ab-03f0-4e6a-a49f-d9dd502c1549",
+      "status": "completed",
+      "window_start": "2026-08-01",
+      "window_end": "2026-08-29",
+      "finding_count": 0,
+      "observation_count": 15,
+      "needs_data_count": 4,
+      "safe_failure_code": null,
+      "started_at": "2026-10-04T16:10:54.057492+00:00",
+      "completed_at": "2026-10-04T16:10:54.317102+00:00"
+    },
+    "recommendationCount": 7,
+    "exactReportScopePackages": [
+      {
+        "id": "25b9208c-d067-49c2-b61a-a977ee2f1350",
+        "status": "projected",
+        "created_at": "2026-09-23T05:13:00.450096+00:00"
+      },
+      {
+        "id": "917c1087-82f3-428d-a768-5669b39fa18c",
+        "status": "projection_failed",
+        "created_at": "2026-09-22T13:48:33.158666+00:00"
+      }
+    ],
+    "exactReportScopePackageCount": 2,
+    "noNewPackageDuringCanaries": true
+  },
+  "questionnaire": {
+    "turnId": "6565643b-4654-4aaa-9e63-76b198ae56dc",
+    "challengeId": "b43bd669-446c-4b7d-ae16-859783dea27c",
+    "requestedFields": ["branchId"],
+    "chosenBranchId": "e34e70c8-0314-4b68-94dd-62428efbcd77",
+    "submissionStatus": 200
+  },
+  "reopen": [
+    {
+      "name": "business-advice",
+      "turnId": "dab4ff7b-1899-4a29-8598-05736dfee26b",
+      "replayStatus": 200,
+      "sameTurn": true,
+      "status": "completed",
+      "assistantCount": 1,
+      "eventTypes": ["turn_queued", "period_switched", "answer_completed"],
+      "finalMessageId": "cd31feca-4926-4d17-a21c-21e10c2df208"
+    },
+    {
+      "name": "channel-assessment",
+      "turnId": "b9f603ab-03f0-4e6a-a49f-d9dd502c1549",
+      "replayStatus": 200,
+      "sameTurn": true,
+      "status": "completed",
+      "assistantCount": 1,
+      "eventTypes": ["turn_queued", "analysis_started", "analysis_completed", "answer_completed"],
+      "finalMessageId": "b2b23805-74da-4fc0-90f2-462711b6dddd"
+    },
+    {
+      "name": "report-reuse",
+      "turnId": "6565643b-4654-4aaa-9e63-76b198ae56dc",
+      "replayStatus": 200,
+      "sameTurn": true,
+      "status": "completed",
+      "assistantCount": 1,
+      "eventTypes": [
+        "turn_queued",
+        "report_uploaded",
+        "challenge_requested",
+        "challenge_answered",
+        "report_processed",
+        "analysis_completed",
+        "answer_completed"
+      ],
+      "finalMessageId": "94c56edf-c559-4f2a-8817-c39907fe66cb"
+    },
+    {
+      "name": "report-fully-specified",
+      "turnId": "dd62bd65-9dc5-4166-ad0b-5671f1f8ee5d",
+      "replayStatus": 200,
+      "sameTurn": true,
+      "status": "completed",
+      "assistantCount": 1,
+      "eventTypes": [
+        "turn_queued",
+        "report_uploaded",
+        "report_processed",
+        "analysis_completed",
+        "answer_completed"
+      ],
+      "finalMessageId": "53eb6a3a-3c9c-4ded-869e-89fb77653a07"
+    }
+  ],
+  "workerReplay": {
+    "originalRunId": "run_06ggfbj06p2c15dnt95m8u8o01",
+    "replayedRunId": "run_06ggfdh4m6c3r717bjijllnpc1"
+  },
+  "schedules": [
+    {
+      "id": "sched_rmqd9dgbbkh2rebzkbw46",
+      "task": "agent-chat.purge-thread-retention",
+      "active": true,
+      "cron": "0 3 * * *",
+      "timezone": "UTC",
+      "nextRun": "2026-10-05T03:00:00.000Z",
+      "environments": [
+        {
+          "id": "cmsn8msln009dos0jykp7lge8",
+          "type": "PRODUCTION",
+          "slug": null
+        }
+      ]
+    },
+    {
+      "id": "sched_wv2o2epgnitj1s7i7kmsk",
+      "task": "agent-chat.recover-turns",
+      "active": true,
+      "cron": "*/5 * * * *",
+      "timezone": "UTC",
+      "nextRun": "2026-10-04T16:20:00.000Z",
+      "environments": [
+        {
+          "id": "cmsn8msln009dos0jykp7lge8",
+          "type": "PRODUCTION",
+          "slug": null
+        }
+      ]
+    }
+  ],
+  "traceSummaries": [
+    {
+      "runId": "run_06ggfd31atuoj2dl4qpnro9i01",
+      "spanCount": 4,
+      "warnings": [
+        {
+          "spanId": "a66ae025b68a7b40",
+          "message": "agent_answer.synthesis_failed",
+          "isError": false,
+          "level": "WARN"
+        }
+      ],
+      "synthesisErrorName": "TimeoutError"
+    },
+    {
+      "runId": "run_06ggfbj06p2c15dnt95m8u8o01",
+      "spanCount": 4,
+      "warnings": [
+        {
+          "spanId": "4995e1029c932a51",
+          "message": "agent_answer.synthesis_failed",
+          "isError": false,
+          "level": "WARN"
+        }
+      ],
+      "synthesisErrorName": "TimeoutError"
+    },
+    {
+      "runId": "run_06ggfbk4h4sls1lh025rif0401",
+      "spanCount": 19,
+      "warnings": [
+        {
+          "spanId": "ae62cc242230a6c0",
+          "message": "Waits of 5s or less count towards compute usage.",
+          "isError": false,
+          "level": "WARN"
+        },
+        {
+          "spanId": "5e8e108481a1e991",
+          "message": "Waits of 5s or less count towards compute usage.",
+          "isError": false,
+          "level": "WARN"
+        },
+        {
+          "spanId": "c21a569c4cbe66a3",
+          "message": "Waits of 5s or less count towards compute usage.",
+          "isError": false,
+          "level": "WARN"
+        },
+        {
+          "spanId": "08438c43cbc8735f",
+          "message": "Waits of 5s or less count towards compute usage.",
+          "isError": false,
+          "level": "WARN"
+        },
+        {
+          "spanId": "32c029306f25e1de",
+          "message": "Waits of 5s or less count towards compute usage.",
+          "isError": false,
+          "level": "WARN"
+        }
+      ]
+    },
+    {
+      "runId": "run_06ggfcnk2n02equu9r2gbs5i01",
+      "spanCount": 4,
+      "warnings": [
+        {
+          "spanId": "d8521a558043eafc",
+          "message": "agent_answer.synthesis_failed",
+          "isError": false,
+          "level": "WARN"
+        }
+      ],
+      "synthesisErrorName": "TimeoutError"
+    }
+  ]
+}

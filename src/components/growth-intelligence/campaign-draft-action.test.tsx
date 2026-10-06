@@ -46,6 +46,7 @@ function card(overrides: Partial<OpportunityCard> = {}): OpportunityCard {
     version: 1,
     draftRequest: null,
     ...overrides,
+    itemFingerprint: overrides.itemFingerprint ?? null,
   };
 }
 

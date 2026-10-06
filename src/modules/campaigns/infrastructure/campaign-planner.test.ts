@@ -65,6 +65,12 @@ function generationContext() {
     organizationId: ORGANIZATION_ID,
     campaignId: CAMPAIGN_ID,
     sourceSnapshotId: SNAPSHOT_ID,
+    // Business Memory (Spec 023) added the pinned context pair to the
+    // generation context. Null here is the truthful fixture: this planner suite
+    // generates without a shared-memory pack, and a fabricated manifest id
+    // would assert provenance the run never had.
+    memoryContextManifestId: null,
+    memoryContextDigest: null,
     generationProfile: "brand_guided" as const,
     objective: "Increase weekday lunch covers",
     audience: "Nearby office workers",
@@ -75,6 +81,8 @@ function generationContext() {
     hardConstraints: ["Never imply a health claim."],
     softConventions: [],
     restrictedTerms: [],
+    palette: null,
+    canonicalLogoVersionId: null,
     brandAssetVersionIds: [],
     syntheticAssetsAllowed: true,
     primaryMetricKey: "contribution.incremental_gross_profit",
@@ -116,9 +124,9 @@ function imageGuidance() {
         { code: "wrong_subject" as const, description: "Do not substitute another dish." },
       ],
     },
-    references: [
+    finalImageReferences: [
       {
-        role: "avoid" as const,
+        role: "approved_creative" as const,
         ordinal: 0,
         mimeType: "image/png" as const,
         bytes: new Uint8Array([4, 5, 6]),
@@ -268,7 +276,7 @@ describe("campaign planner", () => {
     expect(call.prompt).toContain("<art_direction_blueprint>");
     expect(call.prompt).toContain("Do not render text of any kind, in any script");
     expect(call.prompt).not.toContain(manifest.assets[0]!.altText);
-    expect(call.references).toEqual(imageGuidance().references);
+    expect(call.references).toEqual(imageGuidance().finalImageReferences);
   });
 
   it("fails closed before image spend when governed image guidance is missing", async () => {

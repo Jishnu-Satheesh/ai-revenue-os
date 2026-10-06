@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup } from "@testing-library/react";
 
 const mocks = vi.hoisted(() => ({
   resolveLandingPath: vi.fn(),
@@ -18,13 +18,12 @@ vi.mock("@/modules/organizations/application/landing", () => ({
 }));
 
 import HomePage from "@/app/page";
-import { hero } from "@/components/marketing/content";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 
 afterEach(cleanup);
 
-describe("root landing split", () => {
+describe("root app entry", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("redirects a signed-in user to whatever the resolver decides", async () => {
@@ -38,21 +37,19 @@ describe("root landing split", () => {
     expect(mocks.resolveLandingPath).toHaveBeenCalledOnce();
   });
 
-  it("renders the public landing page when no session exists", async () => {
+  it("sends a signed-out visit through the resolver to login", async () => {
     mocks.getUser.mockResolvedValue({ data: { user: null }, error: null });
+    mocks.resolveLandingPath.mockResolvedValue("/login");
 
-    const view = await HomePage();
-    render(await view);
-    expect(screen.getByText(hero.headline)).toBeTruthy();
-    expect(mocks.resolveLandingPath).not.toHaveBeenCalled();
+    await expect(HomePage()).rejects.toThrow("REDIRECT:/login");
+    expect(mocks.resolveLandingPath).toHaveBeenCalledOnce();
   });
 
-  it("falls back to the public landing page when the auth probe fails", async () => {
+  it("falls back to login when the resolver fails", async () => {
     mocks.getUser.mockRejectedValue(new Error("network down"));
+    mocks.resolveLandingPath.mockRejectedValue(new Error("network down"));
 
-    render(await HomePage());
-    await waitFor(() => expect(screen.getByText(hero.headline)).toBeTruthy());
-    expect(mocks.resolveLandingPath).not.toHaveBeenCalled();
+    await expect(HomePage()).rejects.toThrow("REDIRECT:/login");
   });
 
   it("does not hardcode a destination of its own", async () => {

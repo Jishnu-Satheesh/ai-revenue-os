@@ -264,7 +264,11 @@ describe("variants are produced inside an approval that already exists", () => {
       expect.objectContaining({
         imageGuidance: expect.objectContaining({
           subjectDescription: "Kingfish curry in a clay pot.",
-          references: [expect.objectContaining({ role: "subject", mimeType: "image/png" })],
+          // The fenced set: a variant draw is a final-image call, so a
+          // rejected design can never appear here. See reference-fence.test.ts.
+          finalImageReferences: [
+            expect.objectContaining({ role: "subject", mimeType: "image/png" }),
+          ],
           blueprint: BLUEPRINT,
         }),
       }),

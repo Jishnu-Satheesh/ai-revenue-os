@@ -1,0 +1,121 @@
+{
+  "viewports": [
+    {
+      "name": "1440x1080",
+      "width": 1440,
+      "height": 1080,
+      "protoFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 30
+      },
+      "implFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 11
+      },
+      "horizontalOverflowPx": 0
+    },
+    {
+      "name": "1200x1080",
+      "width": 1200,
+      "height": 1080,
+      "protoFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 30
+      },
+      "implFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 11
+      },
+      "horizontalOverflowPx": 0
+    },
+    {
+      "name": "980x1080",
+      "width": 980,
+      "height": 1080,
+      "protoFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 30
+      },
+      "implFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 11
+      },
+      "horizontalOverflowPx": 0
+    },
+    {
+      "name": "768x1024",
+      "width": 768,
+      "height": 1024,
+      "protoFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 30
+      },
+      "implFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 11
+      },
+      "horizontalOverflowPx": 0
+    },
+    {
+      "name": "650x1080",
+      "width": 650,
+      "height": 1080,
+      "protoFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 30
+      },
+      "implFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 11
+      },
+      "horizontalOverflowPx": 0
+    },
+    {
+      "name": "390x844",
+      "width": 390,
+      "height": 844,
+      "protoFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 30
+      },
+      "implFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 11
+      },
+      "horizontalOverflowPx": 0
+    },
+    {
+      "name": "320x760",
+      "width": 320,
+      "height": 760,
+      "protoFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 30
+      },
+      "implFonts": {
+        "manrope400": true,
+        "manrope700": true,
+        "count": 11
+      },
+      "horizontalOverflowPx": 0
+    }
+  ],
+  "consoleErrors": [
+    "650x1080: A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:\n\n- A server/client branch `if (typeof window !== 'undefined')`.\n- Variable input such as `Date.now()` or `Math.ra",
+    "390x844: A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:\n\n- A server/client branch `if (typeof window !== 'undefined')`.\n- Variable input such as `Date.now()` or `Math.ran",
+    "320x760: A tree hydrated but some attributes of the server rendered HTML didn't match the client properties. This won't be patched up. This can happen if a SSR-ed Client Component used:\n\n- A server/client branch `if (typeof window !== 'undefined')`.\n- Variable input such as `Date.now()` or `Math.ran"
+  ]
+}

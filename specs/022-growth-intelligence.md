@@ -5,8 +5,38 @@
 Approved on 2026-08-31. The product, architecture, and written specification were approved before
 implementation planning began.
 
+**Amended 2026-09-12 by [Spec 025](025-campaign-experience-and-marketing-loop.md) (Proposed),
+against audit findings F07 and F08.** Section 10.1 eligibility is **unchanged** and continues to
+govern the existing governed-draft Decision playbook and `checkDraftEligibility`. It does **not**
+govern the new Campaign proposal admission introduced by Spec 025, which carries the user's confirmed
+decision D07: a source-backed proposal may be presented and approved for preparation while impact is
+shown as unknown and external market research as unavailable, with those gaps explicit. The two
+admission paths and their action keys are separate and must not be merged; the existing execution
+gates are not removed and no fictitious numeric impact may be generated to populate a list.
+
+Two Growth Intelligence obligations are also recorded here:
+
+- The separately named **Campaign-ready opportunities** section belongs after ordinary
+  recommendations, with **Campaign preparation** in Your actions, with purposeful no-proposal,
+  researching, needs-input and failure states. Illustrative prototype campaigns are never copied into
+  production. "Planned" is not renamed to "Approved".
+- `createGrowthIntelligenceOpportunitySource` is defined and tested but has no production invocation
+  found in source. It is reconciled against actual SQL and worker admission rather than assumed
+  absent or assumed live.
+
 Governed by accepted ADR 0044. Extends specs 005, 007, 016, and 018; ADRs 0026, 0037, 0039, 0040,
 and 0043 remain in force except where ADR 0044 explicitly changes release sequencing.
+
+Verification state after the 2026-09-09 market-monitoring completion pass (Tasks 2–12): the
+branch-scoped research slice is implemented behind fail-closed gates (typecheck and build clean;
+vitest 4822 passed with 2 unrelated pre-existing failures; pgTAP 11/12 slice suites green). Release
+acceptance remains incomplete — provider qualification, the paid canary, and the seeded-browser
+research flow are blocked and documented in the Task 12 report — so new starts stay disabled and no
+production readiness is claimed. The Task 12 gate run also left 9 slice lint errors (direct
+infrastructure imports in the research workflow, prefer-const, React effect/ref patterns) and one
+pgTAP expectation on the renamed DELETE refusal string open; the follow-up fix wave resolved them
+by injecting the claim engines through Trigger, deriving component state during render, and
+correcting the expectation (see the Fix wave section of the Task 12 report).
 
 This is a large Tier-3 feature. It introduces recurring public-market research, new tenant-owned
 records, durable workers, an organization-level read model, and a draft-only Campaign handoff.
@@ -72,7 +102,8 @@ readiness contract in section 10 is satisfied.
 
 ### 4.1 In scope
 
-- An operator-confirmed, versioned Market Profile for each organization, with optional branch scopes.
+- Operator-confirmed, versioned Market Profiles with independent branch identities; existing null-
+  branch organization profiles remain legacy scope.
 - AI-assisted initial discovery of niche, public business identity, geography, likely competitors,
   and research topics.
 - Operator-confirmed proposed changes to the Market Profile; recurring research never changes its
@@ -112,6 +143,12 @@ readiness contract in section 10 is satisfied.
 - A model-generated financial value, confidence value, risk tier, eligibility result, rank, policy
   decision, outcome verdict, or realized-impact claim.
 - A live research call during page rendering.
+- Exception (2026-09-15, live-only preview; narrowed 2026-09-19 by ADR 0065): an explicit
+  manager-clicked preview may show fresh Brave results on screen and then discard them. It stores
+  nothing, creates no evidence, and stays disabled without `growth_intelligence.manage`. Brave
+  remains ONLY this ephemeral preview; the durable research lane is now TinyFish Search behind
+  the staged per-provider qualification. The preview exception stays until preview repointing,
+  which is an explicit follow-up and not part of this change.
 
 ## 5. Domain language
 
@@ -186,14 +223,46 @@ Every claim declares exactly one geographic layer:
 Broader evidence may support a narrower business only when the synthesis states that inference as a
 limitation. A country-level pattern is never presented as proof of branch-level demand.
 
-### 6.4 Source policy
+### 6.4 Operator-started branch research
+
+- The Growth Intelligence **Market monitoring** dialog is an explicit review surface for one
+  branch, research topics, and competitor leads.
+- One operator-started run binds exactly one active organization branch. Selecting a branch changes
+  research scope only; it never edits the canonical branch record.
+- Topics are editable, unique tags capped at 20 per run.
+- Competitors are editable rows capped at five per run. Name is required; public website and a
+  bounded location hint are optional.
+- A competitor without cited relevance evidence is an unverified operator lead. It may guide
+  research but cannot itself support a claim, recommendation, or execution decision.
+- A missing business website does not block research. The approved name, selected branch scope, and
+  topics remain sufficient. Missing locality is explicitly completed in a research-only area group
+  in the dialog; it never changes the official branch or infers a city from timezone.
+- One atomic reviewed start saves/reuses a v2 profile version, records confirmation and starts or
+  returns a durable pipeline. Existing v1 versions and digests remain unchanged.
+- Each branch owns its current profile and cadence. Replacement cancels unfinished work for that
+  branch only. Identical active scopes converge under a database lock; unchanged settings may start
+  a new run after completion without duplicating their immutable version.
+
+### 6.5 Source policy
 
 - Only public, attributable sources and approved APIs are eligible.
 - Research respects authentication, paywalls, CAPTCHAs, robots controls, redirects, and provider
   terms. A blocked source is recorded as unavailable, never bypassed.
 - Operators may exclude a publisher/domain or an approved competitor.
 - The first production adapter must pass commercial, privacy, retention, citation, crawl-failure,
-  and SSRF review before any organization is enabled. This specification remains vendor-neutral.
+  and SSRF review before any organization is enabled.
+- ADR 0047 specified Brave Web Search under explicit account-specific storage/reuse rights and
+  Gemini analysis without Google Search tools. Amended 2026-09-19 by ADR 0065: the durable
+  research provider is now TinyFish Search behind the staged per-provider qualification —
+  `check_research_provider_qualification_for(p_provider)` re-attesting the same six required
+  uses (`snippet_storage`, `commercial_inference`, `organization_display`, `derived_claims`,
+  `synthesis_reuse`, `agreed_retention`), fail-closed and canary-gated (migration
+  `20260919120000`, additive, staging apply owed). Brave remains ONLY the ephemeral live
+  preview that stores nothing. Initial retrieval uses permitted snippets, not
+  returned-page crawling. Ordinary API access does not qualify evidence storage.
+- Record evidence rights and retention; narrowly audited payload erasure withdraws unavailable
+  support while preserving safe lifecycle history. This is an explicit exception to content
+  immutability where retention obligations require it.
 
 ## 7. Market Evidence quality
 
@@ -262,8 +331,8 @@ month receives an independent tenant-scoped request. One channel failure does no
 
 ### 8.2 Recurring cadence
 
-- A database-owned due time represents each organization's daily scan and weekly synthesis in its
-  configured timezone.
+- Database-owned due times represent each enabled branch profile's daily scan and weekly synthesis
+  in its configured timezone; legacy null-branch profiles retain their own cadence.
 - A scheduled dispatcher asks Postgres for due identifiers. It does not infer cadence from Trigger
   run history.
 - New current business evidence creates an immediate request.
@@ -271,6 +340,9 @@ month receives an independent tenant-scoped request. One channel failure does no
 - An approved profile revision or source exclusion creates re-evaluation work for affected current
   intelligence; it does not rewrite prior research.
 - Opening Growth Intelligence performs reads only and never starts research or analysis.
+- Exception (2026-09-15, live-only preview, Brave-only per ADR 0065): the preview button
+  beside Market Watch may fetch fresh results on explicit click only. It stores nothing and
+  creates no research request.
 
 ### 8.3 Durable work identity
 
@@ -282,7 +354,9 @@ The canonical request fingerprint covers:
 - Market Profile version;
 - source-policy and research-rule versions;
 - local daily or weekly time bucket; and
-- synthesis/playbook version tuple where applicable.
+- synthesis/playbook version tuple where applicable; and
+- pipeline identity and phase for reviewed research and its synthesis child, allowing deliberate
+  new runs of unchanged settings while replaying the same run safely.
 
 The same upload, scheduler overlap, retry, or dispatcher replay reuses the same request. Changed
 evidence, profile, source policy, or rule version creates new work.
@@ -291,8 +365,8 @@ evidence, profile, source policy, or rule version creates new work.
 
 - Postgres owns pending state, claims, leases, attempts, cancellation, terminal outcome, and replay.
 - Trigger.dev `schemaTask` workers carry identifiers and correlation metadata only.
-- A model may return a bounded, schema-validated query plan; a deterministic research executor makes
-  the approved search/content calls. The model receives no general browser or side-effect tool.
+- This adapter uses deterministic per-topic/per-competitor query slots; the research executor makes
+  only qualified bounded search calls. Models receive no browser or side-effect tool.
 - An immediate task trigger reduces latency; a scheduled sweeper recovers requests whose dispatch
   was lost or whose lease expired.
 - Workers claim rows atomically, process external calls outside database transactions, and complete
@@ -406,6 +480,107 @@ Unchanged evidence updates the weekly synthesis and does not create a duplicate 
   prior human decisions are not silently copied to new words.
 - Stable fingerprints suppress byte-for-byte or evidence-identical duplicates.
 
+### 9.7 Market monitoring and research outcomes
+
+- The page header and Market Watch use the same **Market monitoring** dialog. The large inline
+  profile-review block is not part of the four-tab workspace.
+- Dialog pre-fill order is the selected branch's latest undecided proposal, active profile, then confirmed
+  branch/onboarding context. A pending AI proposal may be edited or rejected.
+- Starting research is one atomic user action preserving version and confirmation audit records;
+  failure rolls back the start and retains typed input. Legacy proposal APIs remain compatible.
+- The client observes the durable pipeline through Queued, Researching and Preparing insights,
+  refreshing research views on evidence readiness and each terminal transition. Root research
+  success alone does not end observation. Performance metrics retain their manual-refresh rule.
+- The **Insights & market** tab shows current status, branch, scope, finish time, coverage, cited
+  findings, competitor findings, limitations, source inspection, and research history.
+- Recommendations derived from Market Research remain in **Recommendations**, link to their cited
+  findings, and may enter Overview's deterministic Top Recommendations preview.
+- **Your actions** names the research start and terminal outcome without invented progress.
+- One fenced transaction completes research and inserts its unique `market_evidence_changed`
+  child with trigger reason `market_research_completed`. Existing sweeping recovers dispatch.
+  Empty/uncited retrieval ends as No usable findings. Synthesis failure retains findings and supports
+  analysis-only retry when scope, freshness and budget permit.
+- Synthesis loaders and persistence enforce exact branch/profile/research lineage and governed
+  business periods. Other branches are excluded; organization context is never branch measurement.
+- Use the full dated design for per-input coverage and atomic spend limits: 26 primary searches,
+  two additional retry attempts, five competitors, 20 topics, USD 1 per pipeline and USD 5 per
+  organization local day. Quotes must fit before calls; unknown costs remain unknown.
+
+### 9.8 Overview performance filters
+
+- The Overview performance section opens directly on its filter row: a free-range date
+  picker in the Channel Audit style, a channel selector, and a location selector on one
+  end, with Last fetched and Refresh on the other. There is no section heading and no
+  reporting-period line below; the picker names the range and Last fetched sits by Refresh.
+- The picker offers only dates the organization's approved reports cover, with the same
+  grain warnings as the Channel Audit. The card itself reads governed rows for any covered
+  range, with no analysis gate: the exact-window rule below governs analyses (and the
+  picker's resolved state), not the card's figures. A picked range becomes analysis only
+  through exactly one declared window: the grain with a completed analysis wins, ties
+  break toward the coarser grain, and a range matching no exact window states that plainly
+  instead of showing another range's figures.
+- The channel selector narrows rows, totals, and coverage counts to that channel. The
+  location selector keeps channels actively mapped to that branch; channels with no active
+  mapping are excluded while a location is picked. Filter state travels in `from`, `to`,
+  `channel`, and `location` URL parameters; the legacy `window` value still translates.
+
+### 9.9 Business performance card
+
+- The Overview performance section is one business-performance card over the operator's
+  picked covered range, using the same Channel Audit calendar as §9.8. The month-only
+  restriction is retired following the ADR 0048 pattern: the picker offers any range the
+  organization's approved reports cover, with the newest coverage first; dates outside
+  coverage stay unpickable rather than falling back silently.
+- The card reads governed metric rows directly -- no finding, run, or analysis gates any
+  figure. Two aggregate loads (the picked range plus its previous equal-length range)
+  carry sales (`revenue.gross`), orders (`listing.placed_orders`), menu views
+  (`listing.menu_views`), cancellations (`order.avoidable_cancellation_count`), and cost
+  presence (`cost.commission`, the cost line both cost-context detectors read). A covered
+  range with reported rows reads whether or not anyone ever analysed it.
+- Range totals dedup per channel and key: fully-inside period rows read at the finest
+  grain available (day, then week, then month) and fully-inside exact-range rows add once
+  each on top; rows merely overlapping the range never arrive clipped or split. The card
+  header carries a rule-composed headline from measured movement (never
+  a live model call during page rendering), the measured range, the comparison range
+  (the previous equal-length covered period), and the channel/location scope. Four
+  tiles -- reported sales, orders placed, menu views, cancelled orders -- show deltas
+  against the previous equal-length period over the channels reporting in both periods;
+  anything unmeasured stays absent with its reason, never zero. The cancelled share is
+  cancellations over placed orders from the same totals, with its point change.
+- The trend plots daily bars summed per day across the visible channels, with gaps left
+  absent rather than zero-filled. It states its day and channel coverage
+  ("X of Y days · Z of N channels with reported sales"). With fewer than two plottable
+  days, the axes keep their shape with the plain reason in the middle rather than hiding.
+  Past about six buckets the axis and value labels thin to readable ticks while every
+  point stays plotted. Sales, bars, and channel shares all refuse mixed currencies with
+  a reason.
+- The assembled card is cached per organization, range, channel, and location,
+  following ADR 0048: the cache holds answers, never verdicts about whether an answer
+  is current. A new report arrival -- a changed evidence-window list, hashed into the
+  envelope -- rebuilds the cached card; completed analyses are no signal and trigger no
+  rebuild. The "already analysed?" lookup is never cached and fails through to the
+  database, and every key is namespaced by organization id.
+- A picked range with no reported rows states the gap honestly and points at the Channel
+  Audit instead of building: dispatching analyses would not help, because runs read
+  these same rows and write findings, never new figures. Authorization answers who may
+  import and analyse reports; the card itself spends nothing.
+- "View data sources" opens the reporting period, scope, per-metric source
+  notes, and cost context behind the figures. The footer states channel and
+  location coverage, and "Order & fulfillment details" opens order and
+  cancellation totals with the explicit delivery-completion gap.
+
+### 9.10 Page-content loader
+
+- A shared loader covers the page-content viewport while a whole-page action
+  builds: a blurry overlay background with the docs-exact Spinner centered. The
+  side-menu dock and the top navbar are never covered, and any platform page can
+  reuse the component.
+- Sections never spinner-load: while the overlay is up, a loading section holds
+  its shape as quiet skeleton blocks with no figures to misread.
+- The overlay renders only while a polled backend build is outstanding. It never
+  stands in for an honest empty state: no coverage, no permission, and failed
+  builds each keep their own plain message beside the loader's absence.
+
 ## 10. Campaign Opportunity contract
 
 ### 10.1 Eligibility
@@ -494,18 +669,22 @@ where stated.
 
 ### 11.1 New records
 
-- `organization_market_profiles` — stable profile identity, current approved version, enabled state,
-  research due times, and last successful research markers.
+- `organization_market_profiles` — stable organization/branch identity (null branch for legacy),
+  current approved version, enabled state, research due times and last successful research markers.
 - `organization_market_profile_versions` — immutable bounded profile document, digest, proposal
   provenance, model metadata where applicable, and creation time.
 - `organization_market_profile_decisions` — append-only confirmation, rejection, disable, and
   supersession decisions with actor and correlation ID.
 - `growth_intelligence_requests` — durable request fingerprint, trigger reason, bound versions and
   evidence digest, status, lease/fencing token, attempt state, due time, and safe failure code.
+- `growth_intelligence_research_pipelines` — branch/profile lifecycle envelope, root and child
+  request lineage, stage, coverage, timestamps and safe outcome; not a second settings authority.
+- Private research allowance/reservation/attempt ledgers — organization-day and work-scope spend
+  admission, unique call attempts, reported/estimated usage and explicit unknown reconciliation.
 - `market_research_runs` — request execution, adapter/model versions, query/result digests, cost,
   latency, status, and safe counts.
 - `market_evidence_sources` — normalized public source metadata, domain, source class, access state,
-  content digest, and retrieval metadata.
+  content digest, retrieval metadata, qualified rights/retention and bounded excerpt provenance.
 - `market_evidence_claims` — compact claims and the contract in section 7.2.
 - `market_evidence_claim_events` — append-only expiry, withdrawal, exclusion, correction, and
   supersession events. The read model derives current claim state without rewriting the claim.
@@ -755,6 +934,23 @@ precedes Campaign handoff.
 
 ## 19. Acceptance criteria
 
+- The header action matches the approved **Market monitoring** label and icon and opens an
+  accessible review dialog from both the header and Market Watch.
+- The dialog selects one same-organization active branch, edits up to 20 topics and five competitor
+  leads, and never mutates canonical branch data.
+- Operator-entered name-only competitors remain visibly unverified until public citations support
+  a Market Evidence Claim.
+- One Start action creates the immutable scope, activates it, and enqueues exactly one
+  branch-scoped research request; an identical active scope cannot duplicate work.
+- Active research and synthesis update automatically through pipeline completion, preserving the
+  same branch's previous successful result on failure and labelling earlier settings.
+- Concurrent branch starts cannot replace one another; v1 history remains readable; expired worker
+  tokens cannot duplicate children, spend allowance or overwrite completed outcomes.
+- Every topic/competitor has visible coverage; spend is reserved before calls and reconciled
+  honestly. Qualified retention and source deletion paths pass before provider enablement.
+- Completed or partial research with eligible cited claims produces exactly one immediate synthesis
+  handoff and makes resulting Insights, Recommendations, and Data Gaps reachable in their approved
+  tabs.
 - An operator confirms the exact inferred niche, public identity, geographic layers, competitors,
   topics, and source exclusions before recurring research begins.
 - AI-proposed profile changes do not affect research until confirmed.
@@ -795,6 +991,8 @@ precedes Campaign handoff.
 
 ### 20.1 Domain and property tests
 
+- Market monitoring form normalization, branch binding, 20-topic and five-competitor caps,
+  unverified leads, and optional competitor website/location fields.
 - Market Profile schema, digest, version activation, competitor/geography normalization, and source
   exclusion.
 - Research/request fingerprint stability and invalidation for every bound version/evidence change.

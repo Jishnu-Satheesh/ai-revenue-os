@@ -91,7 +91,19 @@ function supabaseWith(rows: Record<string, unknown[]>) {
   };
 }
 
-const manifest = validManifest();
+const manifest = {
+  ...validManifest(),
+  posterPlan: {
+    placements: [
+      {
+        placement: "feed_image" as const,
+        templateKey: "core_feed_headline",
+        templateVersion: 1,
+      },
+    ],
+    scripts: ["Latn" as const],
+  },
+};
 
 function renderBody(overrides: Record<string, unknown> = {}) {
   return {
@@ -246,7 +258,16 @@ describe("queuing a render", () => {
     expect(response.status).toBe(202);
     expect(await response.json()).toEqual({ workerId: "run_worker_1" });
     expect(dispatchPosterRender).toHaveBeenCalledWith(
-      expect.objectContaining({ script: "Latn", templateKey: "core_feed_headline" }),
+      expect.objectContaining({
+        script: "Latn",
+        templateKey: "core_feed_headline",
+        // Resolved from the approved poster plan, never guessed: the worker
+        // files the finished output under exactly this identity.
+        placement: "feed_image",
+        language: "en",
+        format: "feed",
+        ordinal: 1,
+      }),
     );
   });
 
@@ -298,6 +319,52 @@ describe("queuing a render", () => {
     expect(dispatchPosterRender).toHaveBeenCalledWith(
       expect.objectContaining({ extra: "Kingfish curry" }),
     );
+  });
+
+  /**
+   * The deliverable identity is resolved from the approved poster plan, never
+   * guessed. An unknown template would file the finished output where nobody
+   * will review it, so the route names the reason and queues nothing. (They
+   * throw DOMAIN_ERROR, which the real error mapper answers as a 422 -- this
+   * file's mapper stub always says 400, so the assertions pin the named
+   * reason in the body rather than the status.)
+   */
+  it("refuses a template the poster plan never named, with the reason named", async () => {
+    const response = await rendersRoute(
+      jsonRequest(renderBody({ templateKey: "retired_banner" })),
+      { params: params() },
+    );
+
+    const body = await response.json();
+    expect(body.error.message).toMatch(/template_not_in_poster_plan/);
+    expect(dispatchPosterRender).not.toHaveBeenCalled();
+  });
+
+  it("refuses a script the poster plan does not list, with the reason named", async () => {
+    const response = await rendersRoute(jsonRequest(renderBody({ script: "Arab" })), {
+      params: params(),
+    });
+
+    const body = await response.json();
+    expect(body.error.message).toMatch(/script_not_in_poster_plan/);
+    expect(dispatchPosterRender).not.toHaveBeenCalled();
+  });
+
+  it("refuses a version with no poster plan at all, rather than inventing an identity", async () => {
+    // The pristine fixture carries no poster plan: every manifest written
+    // before spec 020 is valid that way, and none of them may render.
+    getVersion.mockResolvedValue({
+      id: VERSION_ID,
+      campaignId: CAMPAIGN_ID,
+      digest: DIGEST,
+      manifest: validManifest(),
+    });
+
+    const response = await rendersRoute(jsonRequest(renderBody()), { params: params() });
+
+    const body = await response.json();
+    expect(body.error.message).toMatch(/poster_plan_missing/);
+    expect(dispatchPosterRender).not.toHaveBeenCalled();
   });
 });
 

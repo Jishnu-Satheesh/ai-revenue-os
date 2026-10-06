@@ -10,7 +10,10 @@ import type { SynthesisRepository } from "@/modules/growth-intelligence/infrastr
  * after the committed outcome and never on failure.
  */
 
-export type GrowthIntelligenceTriageStore = Pick<SynthesisRepository, "decide" | "setPreference">;
+export type GrowthIntelligenceTriageStore = Pick<
+  SynthesisRepository,
+  "decide" | "setPreference" | "recordFeedback"
+>;
 
 export type TriageDecision =
   | "acknowledged"
@@ -39,6 +42,13 @@ export type SetPreferenceInput = {
   sourceId: string;
   pinned: boolean;
   snoozedUntil: string | null;
+};
+
+export type RecordFeedbackInput = {
+  organizationId: string;
+  actorId: string;
+  itemId: string;
+  helpful: boolean;
 };
 
 export type GrowthIntelligenceTriageDependencies = {
@@ -88,6 +98,13 @@ export function createGrowthIntelligenceTriageService(
         pinned: input.pinned,
         snoozedUntil: input.snoozedUntil,
       });
+    },
+
+    async recordFeedback(
+      input: RecordFeedbackInput,
+    ): Promise<{ itemId: string; helpful: boolean }> {
+      // A member-scoped quality signal, not an organization policy change.
+      return triage.recordFeedback(input);
     },
   };
 }

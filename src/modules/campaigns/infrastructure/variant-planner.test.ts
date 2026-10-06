@@ -94,7 +94,7 @@ describe("variant planner image grounding", () => {
           avoidReferences: [],
           negativeRules: [],
         },
-        references,
+        finalImageReferences: references,
         blueprint: {
           composition: "Centered plate.",
           framing: "Tight overhead crop.",

@@ -152,7 +152,10 @@ export type EvidenceReadinessModel = {
 };
 
 /** Absent any of these, no honest per-transaction economics can begin. */
-const REQUIRED_ROLES = ["gross_revenue", "transaction_count"] as const satisfies readonly EconomicsRole[];
+const REQUIRED_ROLES = [
+  "gross_revenue",
+  "transaction_count",
+] as const satisfies readonly EconomicsRole[];
 
 function tupleKeyOf(observation: ReadinessObservation): string {
   return [
@@ -286,10 +289,7 @@ function compareTuples(left: ReadinessTuple, right: ReadinessTuple): number {
  * else available to put in, which is the point: a readiness digest that changed
  * because a number moved would be reporting the number.
  */
-function digestOf(
-  tuples: readonly ReadinessTuple[],
-  coverage: ReadinessCostCoverage,
-): string {
+function digestOf(tuples: readonly ReadinessTuple[], coverage: ReadinessCostCoverage): string {
   const rows = tuples.map((tuple) =>
     [
       tuple.channelId,
@@ -357,9 +357,7 @@ export function classifyEvidenceReadiness(input: {
       periodTimezone: first.periodTimezone,
     };
 
-    const current = group.filter(
-      (observation) => observation.reconciliationState === "current",
-    );
+    const current = group.filter((observation) => observation.reconciliationState === "current");
     const reasons = new Set<EvidenceReadinessReason>();
 
     // Blocked, decided over the whole group rather than the current subset.
@@ -409,7 +407,8 @@ export function classifyEvidenceReadiness(input: {
       missingRoles,
       elsewhere: input.observations.filter(
         (observation) =>
-          observation.reconciliationState === "current" && tupleKeyOf(observation) !== tupleKeyOf(first),
+          observation.reconciliationState === "current" &&
+          tupleKeyOf(observation) !== tupleKeyOf(first),
       ),
     })) {
       reasons.add(reason);
@@ -433,8 +432,8 @@ export function classifyEvidenceReadiness(input: {
 
     const ordered = [...reasons].sort(
       (left, right) =>
-        STATE_ORDER.indexOf(stateForReasons([left])) - STATE_ORDER.indexOf(stateForReasons([right])) ||
-        left.localeCompare(right),
+        STATE_ORDER.indexOf(stateForReasons([left])) -
+          STATE_ORDER.indexOf(stateForReasons([right])) || left.localeCompare(right),
     );
 
     tuples.push({
@@ -444,7 +443,9 @@ export function classifyEvidenceReadiness(input: {
       currency: [...currencies].sort()[0] ?? null,
       rolesPresent: [...byRole.keys()].sort(),
       observationIds: current.map((observation) => observation.observationId).sort(),
-      reportPackageIds: [...new Set(group.map((observation) => observation.reportPackageId))].sort(),
+      reportPackageIds: [
+        ...new Set(group.map((observation) => observation.reportPackageId)),
+      ].sort(),
     });
   }
 

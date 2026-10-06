@@ -4,6 +4,7 @@ import {
   createCampaignCycleReader,
   createDueActionReader,
   createExposureRecorder,
+  createMetaPublishConnectionReader,
   createMetricsGrantReader,
   createMetricSubjectReader,
   type CampaignExecutionPersistence,
@@ -31,6 +32,10 @@ function persistence(options: {
         : { data: options.tables?.[table] ?? [], error: null };
       const chain = {
         eq(column: string, value: string) {
+          filters.push({ table, column, value });
+          return chain;
+        },
+        in(column: string, value: readonly string[]) {
           filters.push({ table, column, value });
           return chain;
         },
@@ -297,10 +302,31 @@ describe("createMetricSubjectReader", () => {
 
   const organization = { base_currency: "AED", default_timezone: "Asia/Dubai" };
 
+  const BUNDLE_VERSION = "e0000000-0000-4000-8000-0000000000b1";
+  const ACTION_KEY = "e0000000-0000-4000-8000-0000000000a1";
+
+  const actionRun = {
+    id: exposure.action_run_id,
+    organization_id: ORGANIZATION_ID,
+    bundle_version_id: BUNDLE_VERSION,
+    action_key: ACTION_KEY,
+  };
+
+  /** No spend ceiling: nothing could ever have been paid for this. */
+  const organicAction = {
+    organization_id: ORGANIZATION_ID,
+    bundle_version_id: BUNDLE_VERSION,
+    action_key: ACTION_KEY,
+    channel: "instagram",
+    spend_ceiling_minor: null,
+  };
+
   it("offers a published action as a metric subject, with the day window it covers", async () => {
     const { reader } = subjectReader({
       campaign_exposures: [exposure],
       organizations: [organization],
+      campaign_action_runs: [actionRun],
+      campaign_channel_actions: [organicAction],
     });
 
     expect(await reader.listDue(50)).toEqual([
@@ -308,7 +334,8 @@ describe("createMetricSubjectReader", () => {
         organizationId: ORGANIZATION_ID,
         campaignId: CAMPAIGN_A,
         subject: { kind: "campaign_action", actionRunId: exposure.action_run_id },
-        channel: null,
+        channel: "instagram",
+        delivery: "organic",
         currency: "AED",
         timezone: "Asia/Dubai",
         providerReference: "post-1",
@@ -316,6 +343,34 @@ describe("createMetricSubjectReader", () => {
         until: "2026-09-06",
       },
     ]);
+  });
+
+  it("calls an action with a spend ceiling paid", async () => {
+    const { reader } = subjectReader({
+      campaign_exposures: [exposure],
+      organizations: [organization],
+      campaign_action_runs: [actionRun],
+      campaign_channel_actions: [{ ...organicAction, spend_ceiling_minor: 50_000 }],
+    });
+
+    // The ceiling is the only thing in the action that says money was ever
+    // allowed to move, which is what separates an ad from a post.
+    const [subject] = await reader.listDue(50);
+    expect(subject?.delivery).toBe("paid");
+  });
+
+  it("skips an exposure whose action cannot be read at all", async () => {
+    const { reader } = subjectReader({
+      campaign_exposures: [exposure],
+      organizations: [organization],
+      campaign_action_runs: [],
+      campaign_channel_actions: [],
+    });
+
+    // Defaulting to either endpoint would query the wrong one for every row it
+    // guessed wrong, and an empty answer from the wrong endpoint is
+    // indistinguishable from a real zero.
+    expect(await reader.listDue(50)).toEqual([]);
   });
 
   /**
@@ -362,5 +417,136 @@ describe("createUnavailableInsightsReader", () => {
       failureCode: "meta.connection_absent",
       retryable: false,
     });
+  });
+});
+
+describe("createMetaPublishConnectionReader", () => {
+  const CAPABILITY = "meta.instagram.publish";
+
+  function grant(overrides: Row = {}): Row {
+    return {
+      connection_id: "a0000000-0000-4000-8000-000000000001",
+      capability_key: CAPABILITY,
+      availability: "available",
+      ...overrides,
+    };
+  }
+
+  function connection(overrides: Row = {}): Row {
+    return {
+      id: "a0000000-0000-4000-8000-000000000001",
+      status: "active",
+      credential_reference: "b0000000-0000-4000-8000-000000000001",
+      ...overrides,
+    };
+  }
+
+  it("returns the connection behind an available grant", async () => {
+    const { client } = persistence({
+      tables: {
+        integration_capability_grants: [grant()],
+        integration_connections: [connection()],
+      },
+    });
+
+    expect(
+      await createMetaPublishConnectionReader(client).read({
+        organizationId: ORGANIZATION_ID,
+        capabilityKey: CAPABILITY,
+      }),
+    ).toEqual({
+      connectionId: "a0000000-0000-4000-8000-000000000001",
+      credentialHandle: { reference: "b0000000-0000-4000-8000-000000000001" },
+    });
+  });
+
+  it("does not publish on a blocked grant", async () => {
+    const { client } = persistence({
+      tables: {
+        integration_capability_grants: [grant({ availability: "blocked" })],
+        integration_connections: [connection()],
+      },
+    });
+
+    expect(
+      await createMetaPublishConnectionReader(client).read({
+        organizationId: ORGANIZATION_ID,
+        capabilityKey: CAPABILITY,
+      }),
+    ).toBeNull();
+  });
+
+  /**
+   * A connection can be granted and still not be usable. Publishing through a
+   * revoked or disconnected one would send a call nobody can answer for.
+   */
+  it("does not publish through a connection that is not active", async () => {
+    for (const status of ["revoked", "disconnected", "pending"]) {
+      const { client } = persistence({
+        tables: {
+          integration_capability_grants: [grant()],
+          integration_connections: [connection({ status })],
+        },
+      });
+
+      expect(
+        await createMetaPublishConnectionReader(client).read({
+          organizationId: ORGANIZATION_ID,
+          capabilityKey: CAPABILITY,
+        }),
+      ).toBeNull();
+    }
+  });
+
+  it("returns nothing when the connection holds no credential reference", async () => {
+    const { client } = persistence({
+      tables: {
+        integration_capability_grants: [grant()],
+        integration_connections: [connection({ credential_reference: null })],
+      },
+    });
+
+    expect(
+      await createMetaPublishConnectionReader(client).read({
+        organizationId: ORGANIZATION_ID,
+        capabilityKey: CAPABILITY,
+      }),
+    ).toBeNull();
+  });
+
+  it("refuses when the grant cannot be read at all", async () => {
+    const { client } = persistence({ tableError: "connection lost" });
+
+    // Same rule as the metrics grant: a failed read is not permission.
+    expect(
+      await createMetaPublishConnectionReader(client).read({
+        organizationId: ORGANIZATION_ID,
+        capabilityKey: CAPABILITY,
+      }),
+    ).toBeNull();
+  });
+
+  it("scopes both reads to the organization it was asked about", async () => {
+    const { client, filters } = persistence({
+      tables: {
+        integration_capability_grants: [grant()],
+        integration_connections: [connection()],
+      },
+    });
+
+    await createMetaPublishConnectionReader(client).read({
+      organizationId: ORGANIZATION_ID,
+      capabilityKey: CAPABILITY,
+    });
+
+    // The worker runs as the service role, so the organization predicate is
+    // the only thing keeping one tenant's publish off another's account.
+    for (const table of ["integration_capability_grants", "integration_connections"]) {
+      expect(filters).toContainEqual({
+        table,
+        column: "organization_id",
+        value: ORGANIZATION_ID,
+      });
+    }
   });
 });

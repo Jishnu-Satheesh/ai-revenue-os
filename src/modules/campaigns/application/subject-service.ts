@@ -6,7 +6,8 @@ import {
   subjectExclusionsSchema,
 } from "@/domain/campaigns/asset-library";
 import type { SubjectProfile } from "@/domain/campaigns/schemas";
-import type { MemoryRetrievalPort, MemoryRetrievalResult } from "@/domain/memory/schemas";
+import { escapeContextText } from "@/domain/memory/context";
+import type { SubjectPackEntry, SubjectPackPort } from "@/modules/memory";
 import { DomainError } from "@/lib/errors";
 
 const uuidSchema = z.string().uuid();
@@ -50,6 +51,7 @@ export const subjectDescriptionProposalSchema = z.strictObject({
 export const subjectDraftRequestSchema = subjectProfileContentSchema
   .omit({ description: true })
   .extend({
+    actorId: uuidSchema,
     correlationId: uuidSchema,
     operatorNotes: z.string().trim().min(1).max(2_000).nullable(),
   });
@@ -81,7 +83,7 @@ export type SubjectDescriptionDrafter = {
 
 export type SubjectServiceDependencies = {
   store: SubjectProfileStore;
-  memory: MemoryRetrievalPort;
+  subjectPack: SubjectPackPort;
   drafter: SubjectDescriptionDrafter;
 };
 
@@ -123,15 +125,15 @@ export function createSubjectService(dependencies: SubjectServiceDependencies) {
 
     async draft(input: z.input<typeof subjectDraftRequestSchema>): Promise<SubjectMutationResult> {
       const request = subjectDraftRequestSchema.parse(input);
-      const memory = await dependencies.memory.retrieve({
+      // Drafts read the shared subject_drafting context, not an ad hoc assist
+      // query. The purpose travels with the pinned manifest so a later review
+      // can see exactly what the model was allowed to read. Human-entered
+      // names win over model suggestions below; the prompt forbids inventing
+      // offers, prices, claims, or business facts.
+      const pack = await dependencies.subjectPack.prepare({
         organizationId: request.organizationId,
-        purpose: "onboarding_assist",
+        actorId: request.actorId,
         query: request.name,
-        memoryTypes: ["structured_fact", "document", "note"],
-        sensitivityAllowance: "internal",
-        includeSuperseded: false,
-        includeExpired: false,
-        limit: 12,
         correlationId: request.correlationId,
       });
 
@@ -140,7 +142,7 @@ export function createSubjectService(dependencies: SubjectServiceDependencies) {
         correlationId: request.correlationId,
         system:
           "You draft a precise, drawable description of a subject the operator has already named. You propose; a human confirms.",
-        prompt: buildSubjectDraftPrompt(request, memory.results),
+        prompt: buildSubjectDraftPrompt(request, pack.entries),
         outputContract: SUBJECT_DESCRIPTION_OUTPUT_CONTRACT,
       });
       const proposal = subjectDescriptionProposalSchema.safeParse(drafted.output);
@@ -148,6 +150,21 @@ export function createSubjectService(dependencies: SubjectServiceDependencies) {
         throw new DomainError(
           "INTEGRATION_ERROR",
           "The drafted subject description could not be validated.",
+        );
+      }
+
+      try {
+        await dependencies.subjectPack.consume({
+          organizationId: request.organizationId,
+          manifestId: pack.manifestId,
+          modelId: drafted.modelId,
+          modelCalledAt: new Date().toISOString(),
+        });
+      } catch (cause) {
+        throw new DomainError(
+          "INTEGRATION_ERROR",
+          "The drafted subject description could not record its context use.",
+          cause,
         );
       }
 
@@ -205,7 +222,7 @@ export function createSubjectService(dependencies: SubjectServiceDependencies) {
 
 function buildSubjectDraftPrompt(
   request: z.infer<typeof subjectDraftRequestSchema>,
-  results: readonly MemoryRetrievalResult[],
+  entries: readonly SubjectPackEntry[],
 ): string {
   const subjectData = safeDataJson({
     name: request.name,
@@ -215,14 +232,13 @@ function buildSubjectDraftPrompt(
     illustratedStyle: request.illustratedStyle,
   });
   const memoryData = safeDataJson(
-    results.map((result) => ({
-      itemId: result.itemId,
-      title: result.title,
-      body: result.body ?? null,
-      structuredValue: result.structuredValue ?? null,
-      verificationState: result.provenance.verificationState,
-      sourceTier: result.provenance.sourceTier,
-      freshness: result.freshness,
+    entries.map((entry) => ({
+      contextRef: entry.contextRef,
+      title: escapeContextText(entry.title),
+      summary: escapeContextText(entry.summary),
+      statementKind: entry.statementKind,
+      trustRank: entry.trustRank,
+      freshness: entry.freshness,
     })),
   );
 

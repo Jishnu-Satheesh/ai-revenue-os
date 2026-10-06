@@ -74,8 +74,7 @@ export const reportPackageUploadIntentSchema = z
         code: "custom",
         path: ["originalFilename"],
         message:
-          namedUnsupportedExtensions[extension] ??
-          "Only CSV, XLSX, and PDF files are accepted.",
+          namedUnsupportedExtensions[extension] ?? "Only CSV, XLSX, and PDF files are accepted.",
       });
       return;
     }
@@ -233,7 +232,8 @@ export function normalizeReportProjectionProposalBody(input: unknown): unknown {
     Array.isArray(nestedBody.projectionDocument) ||
     typeof nestedBody.idempotencyKey !== "string" ||
     typeof body.idempotencyKey !== "string"
-  ) return input;
+  )
+    return input;
   return {
     source: "human",
     projectionDocument: nestedBody.projectionDocument,
@@ -250,7 +250,11 @@ export const decideReportProjectionSchema = z
   .strict()
   .superRefine((value, ctx) => {
     if (value.decision === "rejected" && !value.reason) {
-      ctx.addIssue({ code: "custom", path: ["reason"], message: "A rejection reason is required." });
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "A rejection reason is required.",
+      });
     }
   });
 

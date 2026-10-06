@@ -1,6 +1,177 @@
 export type Database = {
   public: {
     Tables: {
+      agent_turns: {
+        Row: {
+          id: string;
+          organization_id: string;
+          thread_id: string;
+          user_message_id: string;
+          requested_by: string;
+          idempotency_key: string;
+          objective: "business_advice" | "channel_assessment" | "report_intake" | "research" | "other";
+          status: "queued" | "running" | "awaiting_user" | "awaiting_approval" | "completed" | "failed" | "cancelled";
+          pending_challenge: Record<string, unknown> | null;
+          challenge_answers: Record<string, unknown> | null;
+          answered_challenge_kind: "metadata" | "correction" | "scope" | null;
+          pending_approval: Record<string, unknown> | null;
+          lease_token: string | null;
+          lease_expires_at: string | null;
+          attempt: number;
+          next_event_seq: number;
+          final_message_id: string | null;
+          failure_code: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      agent_turn_events: {
+        Row: {
+          id: string;
+          organization_id: string;
+          turn_id: string;
+          seq: number;
+          event_key: string;
+          event_type: string;
+          payload: Record<string, unknown>;
+          occurred_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      agent_attachments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          turn_id: string;
+          created_by: string;
+          idempotency_key: string;
+          file_name: string;
+          media_type: string;
+          byte_size: number;
+          storage_bucket_id: string;
+          storage_path: string;
+          sha256_digest: string | null;
+          declared_scope: Record<string, unknown> | null;
+          status: "awaiting_upload" | "verified" | "promoted" | "failed" | "expired";
+          package_id: string | null;
+          upload_expires_at: string;
+          staging_deleted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /**
+       * Universal-agent conversations (Task 1). One row per thread: title,
+       * mode, status, safe-id links and history timestamps. Written only
+       * through create_agent_thread_keyed / set_thread_links; members read
+       * their own organization rows through RLS.
+       */
+      agent_threads: {
+        Row: {
+          id: string;
+          organization_id: string;
+          title: string;
+          mode: "quick" | "deepthink";
+          status:
+            | "open"
+            | "awaiting_user"
+            | "running"
+            | "completed"
+            | "cancelled";
+          linked_research_project_id: string | null;
+          linked_request_id: string | null;
+          linked_draft_request_id: string | null;
+          linked_campaign_id: string | null;
+          created_by: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["agent_threads"]["Row"],
+          "id" | "created_at" | "updated_at"
+        > & {
+          title?: string;
+          status?: Database["public"]["Tables"]["agent_threads"]["Row"]["status"];
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["agent_threads"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Universal-agent utterances (Task 1). Body stays nullable only so the
+       * retention purge can scrub content while keeping the audit row.
+       * Written only through append_agent_message.
+       */
+      agent_messages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          thread_id: string;
+          turn_id: string | null;
+          role: "user" | "assistant" | "system_note";
+          body: string | null;
+          questionnaire_answers: Record<string, unknown> | null;
+          marker_receipts: Record<string, unknown> | null;
+          citations: Record<string, unknown> | null;
+          created_by: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["agent_messages"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["agent_messages"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Thread-creation idempotency ledger (Task 1). Same key plus same body
+       * replays the kept thread; same key with another body is a conflict.
+       * Written only through create_agent_thread_keyed.
+       */
+      agent_thread_create_keys: {
+        Row: {
+          id: string;
+          organization_id: string;
+          idempotency_key: string;
+          thread_id: string;
+          body_digest: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      /**
+       * Message-append idempotency ledger (Task 1). Same key plus same body
+       * replays the kept message; same key with another body is a conflict.
+       * Written only through append_agent_message.
+       */
+      agent_message_append_keys: {
+        Row: {
+          id: string;
+          organization_id: string;
+          idempotency_key: string;
+          message_id: string;
+          body_digest: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       organizations: {
         Row: {
           id: string;
@@ -68,6 +239,7 @@ export type Database = {
         Row: {
           id: string;
           organization_id: string;
+          branch_id: string | null;
           current_version_id: string | null;
           enabled: boolean;
           next_daily_research_due_at: string | null;
@@ -123,6 +295,205 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      growth_intelligence_acceptances: {
+        Row: {
+          id: string;
+          organization_id: string;
+          acceptance_key: string;
+          report_version_id: string;
+          item_key: string;
+          kind: "action" | "finding";
+          destination: "Recommendations" | "Insights";
+          grants_execution_approval: boolean;
+          accepted_by: string | null;
+          accepted_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_brief_revisions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          project_id: string;
+          revision_number: number;
+          document: Record<string, unknown>;
+          pinned_to_update_id: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_draft_items: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_version_id: string;
+          item_key: string;
+          kind: "action" | "finding";
+          title: string;
+          detail: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_monitoring_active_scopes: {
+        Row: {
+          id: string;
+          organization_id: string;
+          scope_fingerprint: string;
+          project_id: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_monitoring_updates: {
+        Row: {
+          update_id: string;
+          organization_id: string;
+          project_id: string;
+          brief_revision_id: string | null;
+          stage:
+            | "queued"
+            | "researching"
+            | "preparing_insights"
+            | "ready"
+            | "partial"
+            | "empty"
+            | "no_findings"
+            | "research_failed"
+            | "synthesis_failed"
+            | "cancelled";
+          reason_code: string | null;
+          retryable: boolean;
+          coverage: Record<string, unknown> | null;
+          known_cost_micros_usd: number;
+          unknown_cost_count: number;
+          cost_ledger_ref: string | null;
+          lease_token: string | null;
+          lease_expires_at: string | null;
+          attempts: number;
+          extracts_erased_at: string | null;
+          erasure_reason_code: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_organization_competitors: {
+        Row: {
+          id: string;
+          organization_id: string;
+          name: string;
+          normalized_name: string;
+          website: string | null;
+          location_hint: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          organization_id: string;
+          name: string;
+          normalized_name: string;
+          website?: string | null;
+          location_hint?: string | null;
+        };
+        Update: {
+          name?: string;
+          normalized_name?: string;
+          website?: string | null;
+          location_hint?: string | null;
+        };
+        Relationships: [];
+      };
+      growth_intelligence_project_create_keys: {
+        Row: {
+          id: string;
+          organization_id: string;
+          idempotency_key: string;
+          project_id: string;
+          body_digest: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_project_schedule_update_keys: {
+        Row: {
+          id: string;
+          organization_id: string;
+          idempotency_key: string;
+          project_id: string;
+          body_digest: string;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_reports: {
+        Row: {
+          id: string;
+          organization_id: string;
+          project_id: string;
+          branch_id: string;
+          brief_revision_id: string;
+          report_version_id: string;
+          evidence_digest: string;
+          content: Record<string, unknown>;
+          review_state: "pending_review" | "accepted";
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_report_reviews: {
+        Row: {
+          id: string;
+          organization_id: string;
+          report_version_id: string;
+          reviewed_by: string | null;
+          reviewed_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_research_projects: {
+        Row: {
+          id: string;
+          organization_id: string;
+          branch_id: string;
+          title: string;
+          question: string;
+          mode: "one-time" | "recurring";
+          schedule: Record<string, unknown> | null;
+          lifecycle: "active" | "paused" | "archived";
+          agent_lane_opt_in: boolean;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: { agent_lane_opt_in?: boolean };
+        Relationships: [];
+      };
       growth_intelligence_requests: {
         Row: {
           id: string;
@@ -149,6 +520,8 @@ export type Database = {
           business_evidence_digest: string | null;
           market_profile_version_id: string;
           source_policy_digest: string;
+          pipeline_id: string | null;
+          phase: "research" | "synthesis" | null;
           research_rule_version: string;
           local_time_bucket: string;
           synthesis_version_tuple: string | null;
@@ -170,6 +543,36 @@ export type Database = {
           last_transition_actor_type: Database["public"]["Enums"]["audit_actor_type"];
           last_transition_actor_id: string | null;
           correlation_id: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_research_pipelines: {
+        Row: {
+          id: string;
+          organization_id: string;
+          branch_id: string;
+          market_profile_id: string;
+          market_profile_version_id: string;
+          scope_digest: string;
+          research_request_id: string | null;
+          synthesis_request_id: string | null;
+          stage:
+            | "queued"
+            | "researching"
+            | "preparing_insights"
+            | "ready"
+            | "partial"
+            | "no_findings"
+            | "research_failed"
+            | "synthesis_failed"
+            | "cancelled";
+          coverage: Record<string, unknown>[];
+          stage_changed_at: string;
+          safe_failure_code: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -223,6 +626,12 @@ export type Database = {
           source_content_digest: string | null;
           safe_failure_code: string | null;
           quotation_characters: number;
+          excerpt_text: string | null;
+          excerpt_digest: string | null;
+          qualification_version: string | null;
+          retain_until: string | null;
+          erased_at: string | null;
+          erasure_reason_code: string | null;
           retrieved_at: string;
           published_at: string | null;
           observed_at: string | null;
@@ -250,7 +659,7 @@ export type Database = {
             | "topic";
           subject_ref: string;
           claim_kind: string;
-          paraphrase: string;
+          paraphrase: string | null;
           quotation: string | null;
           geographic_layer: "trade_area" | "city" | "country";
           geography_ref: string;
@@ -271,6 +680,7 @@ export type Database = {
           stale_at: string;
           expires_at: string;
           limitations: string[];
+          text_withdrawn: boolean;
           created_at: string;
         };
         Insert: never;
@@ -288,7 +698,8 @@ export type Database = {
             | "withdrawn"
             | "excluded"
             | "corrected"
-            | "superseded";
+            | "superseded"
+            | "erased";
           event_digest: string;
           reason: string | null;
           occurred_at: string;
@@ -306,6 +717,9 @@ export type Database = {
           market_evidence_source_id: string | null;
           related_market_evidence_claim_id: string | null;
           relation: "supports" | "corroborates" | "contradicts";
+          support_verdict: "supported" | "unsupported" | "uncertain" | null;
+          reviewed_at: string | null;
+          reviewer_ref: string | null;
           created_at: string;
         };
         Insert: never;
@@ -342,6 +756,8 @@ export type Database = {
           organization_id: string;
           growth_intelligence_synthesis_run_id: string;
           market_profile_version_id: string;
+          /** Exact synthesis branch; null is the legacy organization scope. */
+          branch_id: string | null;
           kind: "insight" | "recommendation" | "data_gap";
           narrative: string;
           item_fingerprint: string;
@@ -415,6 +831,19 @@ export type Database = {
           snoozed_until: string | null;
           item_fingerprint: string;
           created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      growth_intelligence_item_feedback: {
+        Row: {
+          organization_id: string;
+          growth_intelligence_item_id: string;
+          actor_id: string;
+          helpful: boolean;
+          created_at: string;
+          updated_at: string;
         };
         Insert: never;
         Update: never;
@@ -1984,6 +2413,92 @@ export type Database = {
         Relationships: [];
       };
       /** Confirmed descriptions are the declared-subject fallback when no photo exists. */
+      organization_brand_guidelines: {
+        Row: {
+          organization_id: string;
+          palette: Record<string, string>;
+          rules: { text: string; strength: "hard" | "soft" }[];
+          restricted_terms: string[];
+          updated_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_brand_guidelines"]["Row"],
+          "created_at" | "updated_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["organization_brand_guidelines"]["Insert"]>;
+        Relationships: [];
+      };
+      organization_brand_logos: {
+        Row: {
+          organization_id: string;
+          variant: "primary" | "dark";
+          brand_asset_version_id: string;
+          set_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_brand_logos"]["Row"],
+          "created_at" | "updated_at"
+        >;
+        Update: Partial<Database["public"]["Tables"]["organization_brand_logos"]["Insert"]>;
+        Relationships: [];
+      };
+      /** Nightly stored answers behind the home growth outlook (ADR 0060). */
+      organization_revenue_snapshots: {
+        Row: {
+          id: string;
+          organization_id: string;
+          snapshot_date: string;
+          scenario_input: Record<string, unknown>;
+          ai_note: string | null;
+          input_digest: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_revenue_snapshots"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: never;
+        Relationships: [];
+      };
+      /**
+       * Frozen original growth projections, one per organization, horizon and
+       * cycle (spec 027, D04). Written once through
+       * publish_organization_growth_projection; never updated or trimmed.
+       */
+      organization_growth_projections: {
+        Row: {
+          id: string;
+          organization_id: string;
+          schedule_origin_date: string;
+          cycle_index: number;
+          horizon_months: number;
+          period_start: string;
+          period_end_exclusive: string;
+          issued_at: string;
+          source_cutoff_date: string;
+          timezone: string;
+          currency: string;
+          metric_key: string;
+          scope_digest: string;
+          input_digest: string;
+          document_version: number;
+          method_version: string;
+          requires_growth_read: boolean;
+          requires_campaign_read: boolean;
+          frozen_document: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["organization_growth_projections"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: never;
+        Relationships: [];
+      };
       organization_subject_profiles: {
         Row: {
           id: string;
@@ -2163,6 +2678,28 @@ export type Database = {
         Update: never;
         Relationships: [];
       };
+      /** Client-scoped invitations. The invitee needs no agency membership; accepting writes an explicit membership row. */
+      organization_invitations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          email: string;
+          role: "owner" | "admin" | "operator" | "viewer";
+          token_hash: string;
+          status: "pending" | "accepted" | "revoked" | "expired";
+          invited_by: string;
+          expires_at: string;
+          accepted_by: string | null;
+          accepted_at: string | null;
+          revoked_by: string | null;
+          revoked_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       /** Tenant root: the agency. Organizations are the clients it runs. */
       accounts: {
         Row: {
@@ -2222,9 +2759,362 @@ export type Database = {
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
       };
+      /**
+       * Independent Creative Studio documents (Task 3). One row per saved
+       * Studio canvas: title, setup settings, compare-and-swap revision, and
+       * the current-version pointer. Written only through save_studio_document.
+       */
+      studio_documents: {
+        Row: {
+          id: string;
+          organization_id: string;
+          creator_id: string;
+          title: string;
+          revision: number;
+          current_version_id: string | null;
+          settings: Record<string, unknown>;
+          archived_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_documents"]["Row"],
+          "id" | "revision" | "created_at" | "updated_at"
+        > & {
+          title?: string;
+          current_version_id?: string | null;
+          settings?: Record<string, unknown>;
+          archived_at?: string | null;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["studio_documents"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Immutable Studio versions (Task 3). One row per completed generation:
+       * ordinal ancestry, input manifest, provider profile pin, validated
+       * output identity, exact Text Copy, and the campaign request intent.
+       * Written only through complete_studio_run; updates are refused.
+       */
+      studio_versions: {
+        Row: {
+          id: string;
+          organization_id: string;
+          document_id: string;
+          ordinal: number;
+          parent_version_id: string | null;
+          run_id: string;
+          requested_campaign_id: string | null;
+          input_manifest: Record<string, unknown>;
+          input_digest: string;
+          provider_profile_id: string;
+          continuation_id: string | null;
+          output_path: string;
+          output_hash: string;
+          output_mime: string;
+          output_width: number;
+          output_height: number;
+          output_bytes: number;
+          exact_text_copy: string;
+          verification: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_versions"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_versions"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Studio run ledger (Task 3). Admission, reservation, lease, and result
+       * for every generate/edit/enhance/new_idea/export attempt. Admitted
+       * through admit_studio_run and create_studio_export; settled only by
+       * the worker writers.
+       */
+      studio_runs: {
+        Row: {
+          id: string;
+          organization_id: string;
+          document_id: string;
+          actor_id: string;
+          operation: "generate" | "edit" | "enhance" | "new_idea" | "export";
+          expected_revision: number;
+          parent_version_id: string | null;
+          request: Record<string, unknown>;
+          request_digest: string;
+          idempotency_key: string;
+          requested_campaign_id: string | null;
+          profile_id: string;
+          policy_version: number;
+          reserved_minor: number;
+          currency: string;
+          actual_cost_minor: number | null;
+          state:
+            | "queued"
+            | "preparing"
+            | "generating"
+            | "previewing"
+            | "validating"
+            | "ready"
+            | "failed"
+            | "cancel_requested"
+            | "cancelled"
+            | "outcome_unknown";
+          lease_token: string | null;
+          lease_expires_at: string | null;
+          attempt: number;
+          provider_request_id: string | null;
+          cancel_requested_at: string | null;
+          result_version_id: string | null;
+          result_export_id: string | null;
+          result_json: Record<string, unknown> | null;
+          safe_failure_code: string | null;
+          created_at: string;
+          finished_at: string | null;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_runs"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_runs"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Immutable export derivatives (Task 3). One row per validated
+       * resize/pad/crop of a version. Same inputs reuse the same row.
+       * Finalized only through complete_studio_export.
+       */
+      studio_exports: {
+        Row: {
+          id: string;
+          organization_id: string;
+          studio_version_id: string;
+          parent_export_id: string | null;
+          transform_version: number;
+          transform: Record<string, unknown>;
+          preset_version: number;
+          output_path: string;
+          output_hash: string;
+          output_mime: string;
+          output_width: number;
+          output_height: number;
+          output_bytes: number;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_exports"]["Row"],
+          "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_exports"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Append-only export consent receipts (Task 3). Pins the exact bytes an
+       * operator accepted for Campaign use. Written only through
+       * accept_studio_export; one receipt per export.
+       */
+      studio_export_acceptances: {
+        Row: {
+          id: string;
+          organization_id: string;
+          export_id: string;
+          content_hash: string;
+          transform_digest: string;
+          actor_id: string;
+          idempotency_key: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_export_acceptances"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_export_acceptances"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Durable run event stream (Task 3). Database-assigned sequence per run
+       * doubles as the SSE resume cursor. Payloads carry stage, preview, and
+       * error codes only. Written by the run writers; never updated.
+       */
+      studio_run_events: {
+        Row: {
+          id: number;
+          organization_id: string;
+          run_id: string;
+          sequence: number;
+          kind: string;
+          safe_payload: Record<string, unknown>;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_run_events"]["Row"],
+          "id" | "sequence" | "created_at"
+        > & {
+          safe_payload?: Record<string, unknown>;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["studio_run_events"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Real preview frames (Task 3). One row per independently decodable
+       * partial image, referencing its private object. 24-hour retention.
+       */
+      studio_preview_frames: {
+        Row: {
+          id: string;
+          organization_id: string;
+          run_id: string;
+          frame_index: number;
+          private_path: string;
+          content_hash: string;
+          mime: string;
+          width: number;
+          height: number;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_preview_frames"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_preview_frames"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Upload reservations (Task 3). A reservation grants one actor a bounded
+       * window to transfer bytes; settlement records the verified receipt.
+       */
+      studio_uploads: {
+        Row: {
+          id: string;
+          organization_id: string;
+          actor_id: string;
+          reserved_path: string;
+          state: "reserved" | "ready" | "rejected" | "expired";
+          rights_attestation: Record<string, unknown>;
+          final_hash: string | null;
+          final_mime: string | null;
+          final_width: number | null;
+          final_height: number | null;
+          final_bytes: number | null;
+          expires_at: string;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_uploads"]["Row"],
+          "id" | "created_at"
+        > & {
+          state?: Database["public"]["Tables"]["studio_uploads"]["Row"]["state"];
+          rights_attestation?: Record<string, unknown>;
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["studio_uploads"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Opaque provider continuations (Task 3). Worker-only: no member role
+       * may read these rows. The browser learns computed edit availability.
+       */
+      studio_continuations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          document_id: string;
+          version_id: string;
+          parent_id: string | null;
+          profile_id: string;
+          private_object_path: string;
+          private_object_hash: string;
+          provider_handle: string | null;
+          replay_expires_at: string | null;
+          state: "usable" | "expired" | "deleted";
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_continuations"]["Row"],
+          "id" | "created_at"
+        > & {
+          state?: Database["public"]["Tables"]["studio_continuations"]["Row"]["state"];
+        };
+        Update: Partial<
+          Database["public"]["Tables"]["studio_continuations"]["Insert"]
+        >;
+        Relationships: [];
+      };
+      /**
+       * Immutable generation policy versions (Task 3). The current policy is
+       * the highest version per organization. Nothing is admitted without an
+       * explicit enabled policy, and no default is ever seeded.
+       */
+      studio_generation_policies: {
+        Row: {
+          id: string;
+          organization_id: string;
+          version: number;
+          enabled: boolean;
+          currency: string;
+          per_run_ceiling_minor: number;
+          window_ceiling_minor: number;
+          window_seconds: number;
+          max_pending: number;
+          max_attempts: number;
+          created_at: string;
+        };
+        Insert: Omit<
+          Database["public"]["Tables"]["studio_generation_policies"]["Row"],
+          "id" | "created_at"
+        >;
+        Update: Partial<
+          Database["public"]["Tables"]["studio_generation_policies"]["Insert"]
+        >;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
     Functions: {
+      fail_exhausted_agent_turn: {
+        Args: { p_organization_id: string; p_turn_id: string };
+        Returns: Record<string, unknown>;
+      };
+      release_agent_turn_for_retry: {
+        Args: { p_organization_id: string; p_turn_id: string; p_lease_token: string };
+        Returns: Record<string, unknown>;
+      };
+      cancel_revoked_agent_turn: {
+        Args: { p_organization_id: string; p_turn_id: string };
+        Returns: Record<string, unknown>;
+      };
+      keep_existing_agent_report_package: {
+        Args: { p_organization_id: string; p_turn_id: string; p_attachment_id: string; p_lease_token: string; p_package_id: string };
+        Returns: Record<string, unknown>;
+      };
+      mark_agent_attachment_staging_deleted: {
+        Args: { p_attachment_ids: string[] };
+        Returns: { markedAttachments: number };
+      };
+      resolve_agent_attachment_scope: {
+        Args: { p_organization_id: string; p_turn_id: string; p_attachment_id: string; p_lease_token: string; p_scope: Record<string, unknown> };
+        Returns: Record<string, unknown>;
+      };
+      request_agent_report_package_projection: {
+        Args: { p_organization_id: string; p_turn_id: string; p_attachment_id: string; p_lease_token: string };
+        Returns: Record<string, unknown>;
+      };
       enqueue_growth_intelligence_request: {
         Args: {
           p_organization_id: string;
@@ -2296,6 +3186,52 @@ export type Database = {
         };
         Returns: Record<string, unknown>;
       };
+      open_monitoring_update: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_project_id: string;
+          p_update_id: string;
+          p_brief_revision_id: string | null;
+          p_lease_token: string;
+          p_lease_seconds: number;
+        };
+        Returns: Record<string, unknown>;
+      };
+      advance_monitoring_update_stage: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_update_id: string;
+          p_stage: string;
+          p_lease_token: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      settle_monitoring_update: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_update_id: string;
+          p_stage: string;
+          p_reason_code: string | null;
+          p_retryable: boolean;
+          p_coverage: unknown;
+          p_known_cost_micros_usd: number;
+          p_unknown_cost_count: number;
+          p_lease_token: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      cancel_monitoring_update: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_update_id: string;
+          p_reason_code: string;
+        };
+        Returns: Record<string, unknown>;
+      };
       complete_growth_intelligence_request: {
         Args: {
           p_organization_id: string;
@@ -2339,6 +3275,28 @@ export type Database = {
           p_claim_token: string;
           p_market_research_run_id: string;
           p_result: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_market_research_pipeline: {
+        Args: {
+          p_organization_id: string;
+          p_pipeline_id: string;
+          p_market_research_run_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_result: unknown;
+          p_coverage: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      retry_market_research_synthesis: {
+        Args: {
+          p_organization_id: string;
+          p_pipeline_id: string;
+          p_actor_id: string;
+          p_idempotency_key: string;
+          p_correlation_id: string;
         };
         Returns: Record<string, unknown>;
       };
@@ -2391,6 +3349,26 @@ export type Database = {
         };
         Returns: Record<string, unknown>;
       };
+      complete_market_synthesis_pipeline: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_synthesis_run_id: string;
+          p_result: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      fail_market_synthesis_pipeline: {
+        Args: {
+          p_organization_id: string;
+          p_request_id: string;
+          p_claim_token: string;
+          p_synthesis_run_id: string;
+          p_safe_failure_code: string;
+        };
+        Returns: Record<string, unknown>;
+      };
       decide_growth_intelligence_item: {
         Args: {
           p_organization_id: string;
@@ -2402,6 +3380,15 @@ export type Database = {
           p_item_fingerprint: string;
         };
         Returns: Record<string, unknown>;
+      };
+      record_growth_intelligence_item_feedback: {
+        Args: {
+          p_organization_id: string;
+          p_item_id: string;
+          p_helpful: boolean;
+          p_actor_id: string;
+        };
+        Returns: undefined;
       };
       request_campaign_draft_from_opportunity: {
         Args: {
@@ -2819,6 +3806,10 @@ export type Database = {
         };
         Returns: Record<string, unknown> | null;
       };
+      grounded_share_status: {
+        Args: { p_organization_id: string };
+        Returns: Record<string, unknown> | null;
+      };
       triage_channel_recommendation: {
         Args: {
           p_organization_id: string;
@@ -2981,6 +3972,52 @@ export type Database = {
         Args: { p_token_hash: string };
         Returns: Database["public"]["Tables"]["accounts"]["Row"];
       };
+      create_organization_invitation: {
+        Args: {
+          p_organization_id: string;
+          p_email: string;
+          p_role: "owner" | "admin" | "operator" | "viewer";
+          p_token_hash: string;
+          p_expires_at: string;
+        };
+        Returns: Database["public"]["Tables"]["organization_invitations"]["Row"];
+      };
+      reissue_organization_invitation: {
+        Args: { p_invitation_id: string; p_token_hash: string; p_expires_at: string };
+        Returns: Database["public"]["Tables"]["organization_invitations"]["Row"];
+      };
+      revoke_organization_invitation: {
+        Args: { p_invitation_id: string };
+        Returns: Database["public"]["Tables"]["organization_invitations"]["Row"];
+      };
+      preview_organization_invitation: {
+        Args: { p_token_hash: string };
+        /** Every field is null unless the invitation is live, so an unknown token reveals nothing. */
+        Returns: {
+          state: "valid" | "invalid" | "already_accepted";
+          organization_name: string | null;
+          invited_email: string | null;
+          inviter_name: string | null;
+          role: "owner" | "admin" | "operator" | "viewer" | null;
+          expires_at: string | null;
+          matches_caller: boolean | null;
+        }[];
+      };
+      accept_organization_invitation: {
+        Args: { p_token_hash: string };
+        Returns: Database["public"]["Tables"]["organizations"]["Row"];
+      };
+      list_organization_members: {
+        Args: { p_organization_id: string };
+        /** Explicit grants only, with addresses: permission-gated inside to team managers. */
+        Returns: {
+          user_id: string;
+          email: string;
+          display_name: string | null;
+          role: "owner" | "admin" | "operator" | "viewer";
+          created_at: string;
+        }[];
+      };
       current_organization_role: {
         Args: { target_organization_id: string };
         /** Null when the caller has no access, which is indistinguishable from no such organization. */
@@ -3060,6 +4097,223 @@ export type Database = {
           input_entries: unknown;
         };
         Returns: number;
+      };
+      /**
+       * Service-only fixed-projection publication (spec 027, D04). Granted to
+       * service_role only; every other role is denied at the grant level.
+       */
+      publish_organization_growth_projection: {
+        Args: {
+          p_organization_id: string;
+          p_document: Record<string, unknown>;
+          p_correlation_id: string;
+        };
+        Returns: {
+          projection_id: string;
+          digest: string;
+          published: boolean;
+        }[];
+      };
+      /**
+       * Service-only growth schedule read (spec 027, D08). Returns the
+       * distinct schedule origins behind active/upcoming rows; no amounts,
+       * points, scopes or digests. Granted to service_role only.
+       */
+      read_organization_growth_schedule: {
+        Args: {
+          p_organization_id: string;
+          p_as_of_date: string;
+        };
+        Returns: {
+          schedule_origin_date: string;
+        }[];
+      };
+      /**
+       * Public lead capture. Records a validated signup or reports a replay;
+       * the unique (email, intent) pair is the idempotency guard. Granted to
+       * service_role only; the route calls it after strict Zod validation.
+       */
+      record_public_lead: {
+        Args: {
+          input_lead: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Member thread creation (operator role or above; viewers read only)
+       * with idempotency-key replay. Returns threadId, status and replayed.
+       */
+      create_agent_thread_keyed: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_idempotency_key: string;
+          p_title: string | null;
+          p_mode: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Member message append (operator role or above; viewers read only)
+       * with idempotency-key replay. Refreshes the parent thread clock.
+       * Returns messageId, threadId and replayed.
+       */
+      append_agent_message: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_thread_id: string;
+          p_role: string;
+          p_body: string;
+          p_idempotency_key: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Governed thread link update (operator role or above, or the worker
+       * under service_role). Fenced to the calling organization. Returns
+       * the kept link ids.
+       */
+      set_thread_links: {
+        Args: {
+          p_organization_id: string;
+          p_actor_id: string;
+          p_thread_id: string;
+          p_project_id: string | null;
+          p_request_id: string | null;
+          p_draft_request_id: string | null;
+          p_campaign_id: string | null;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Service-only retention scrub: nulls message payloads on threads
+       * older than the cutoff while keeping every audit row.
+       */
+      purge_expired_agent_threads: {
+        Args: {
+          p_older_than: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      /**
+       * Independent Creative Studio writers (Task 3). Document, upload,
+       * policy, run, and export RPCs from migration 20260921130000. Each
+       * returns a jsonb receipt; typed mappings live in the Studio
+       * infrastructure repository.
+       */
+      save_studio_document: {
+        Args: {
+          target_organization_id: string;
+          input_document: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      reserve_studio_upload: {
+        Args: {
+          target_organization_id: string;
+          input_upload: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_studio_upload: {
+        Args: {
+          target_organization_id: string;
+          target_upload_id: string;
+          input_receipt: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      save_studio_generation_policy: {
+        Args: {
+          target_organization_id: string;
+          input_policy: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      admit_studio_run: {
+        Args: {
+          target_organization_id: string;
+          input_run: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      claim_studio_run: {
+        Args: {
+          target_run_id: string;
+          target_worker_id: string;
+          lease_seconds: number;
+        };
+        Returns: Record<string, unknown>;
+      };
+      heartbeat_studio_run: {
+        Args: {
+          target_run_id: string;
+          target_lease_token: string;
+        };
+        Returns: boolean;
+      };
+      append_studio_run_event: {
+        Args: {
+          target_run_id: string;
+          target_lease_token: string;
+          input_event: unknown;
+        };
+        Returns: number;
+      };
+      complete_studio_run: {
+        Args: {
+          target_run_id: string;
+          target_lease_token: string;
+          input_result: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      fail_studio_run: {
+        Args: {
+          target_run_id: string;
+          target_lease_token: string;
+          input_failure: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      cancel_studio_run: {
+        Args: {
+          target_organization_id: string;
+          target_run_id: string;
+        };
+        Returns: Record<string, unknown>;
+      };
+      reconcile_studio_run: {
+        Args: {
+          target_run_id: string;
+          input_receipt: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      create_studio_export: {
+        Args: {
+          target_organization_id: string;
+          input_export: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      complete_studio_export: {
+        Args: {
+          target_organization_id: string;
+          target_export_id: string;
+          input_receipt: unknown;
+        };
+        Returns: Record<string, unknown>;
+      };
+      accept_studio_export: {
+        Args: {
+          target_organization_id: string;
+          target_export_id: string;
+          expected_content_hash: string;
+          idempotency_key: string;
+        };
+        Returns: Record<string, unknown>;
       };
     };
     Enums: {

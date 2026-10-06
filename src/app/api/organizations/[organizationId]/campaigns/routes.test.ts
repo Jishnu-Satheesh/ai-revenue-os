@@ -24,6 +24,7 @@ const getCampaign = vi.fn();
 const getVersion = vi.fn();
 const listVersions = vi.fn();
 const getLiveApproval = vi.fn();
+const getLatestApproval = vi.fn();
 const recordAttestation = vi.fn();
 const approve = vi.fn();
 const enqueue = vi.fn();
@@ -47,6 +48,7 @@ vi.mock("@/modules/campaigns/infrastructure/repository", () => ({
     getVersion,
     listVersions,
     getLiveApproval,
+    getLatestApproval,
     recordAttestation,
     approve,
   }),
@@ -92,6 +94,7 @@ beforeEach(() => {
     getVersion,
     listVersions,
     getLiveApproval,
+    getLatestApproval,
     recordAttestation,
     approve,
     enqueue,
@@ -108,6 +111,7 @@ beforeEach(() => {
   getCampaign.mockResolvedValue({ id: CAMPAIGN_ID, organizationId: ORGANIZATION_ID });
   listVersions.mockResolvedValue([]);
   getLiveApproval.mockResolvedValue(null);
+  getLatestApproval.mockResolvedValue(null);
   enqueue.mockResolvedValue({ runId: "run-1", replayed: false });
 });
 
@@ -187,7 +191,7 @@ describe("campaign reads", () => {
 
   it("returns the timeline with its approval status", async () => {
     listVersions.mockResolvedValue([{ id: VERSION_ID, version: 1, digest: "a".repeat(64) }]);
-    getLiveApproval.mockResolvedValue({
+    getLatestApproval.mockResolvedValue({
       bundleVersionId: VERSION_ID,
       bundleDigest: "a".repeat(64),
       expiresAt: "2099-01-01T00:00:00.000Z",

@@ -80,9 +80,23 @@ describe("the recommendation narration contracts", () => {
     // v2: narration prompt gained the plain-language, highest-leverage advice
     // rules so a recommendation reads as advice a non-technical owner can act
     // on, never as a restatement of the arithmetic.
-    expect(RECOMMENDATION_PROMPT_VERSION).toBe(4);
-    expect(JUDGE_PROMPT_VERSION).toBe(1);
-    expect(MAX_RECOMMENDATIONS_PER_RUN).toBe(6);
+    // v2: judge allows grounded portal how-to steps while still flagging
+    // invented numbers, causes, savings, benchmarks, attribution, and
+    // confidence (Amendment A: playbooks removed, grounding primary).
+    // v6: narration prompt grounds with Google Search instead of curated
+    // playbooks; no URLs emitted; findings remain the only cited evidence.
+    // v7: narration prompt rolls grounding plus stored channel context out to
+    // every run with findings and requires plain English globally
+    // (Amendment B). v3: judge names heavy jargon and longwinded prose in
+    // issues and reflects them in score; the verdict shape is unchanged.
+    // v8: narration prompt requires at least one citing item per chapter
+    // holding observation findings, and the per-run cap rises to 8
+    // (Amendment C).
+    // v4: judge receives cited shared-context entries with non-corroboration
+    // rules (Spec 023): memory is background, never independent evidence.
+    expect(RECOMMENDATION_PROMPT_VERSION).toBe(9);
+    expect(JUDGE_PROMPT_VERSION).toBe(4);
+    expect(MAX_RECOMMENDATIONS_PER_RUN).toBe(8);
     expect(MAX_EVALUATION_BATCH).toBe(200);
   });
 

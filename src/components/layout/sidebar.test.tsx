@@ -48,6 +48,7 @@ describe("Sidebar", () => {
       "Guided onboarding",
       "Agents",
       "Executions",
+      "Settings",
     ]);
     expect(screen.getByRole("link", { name: /Overview/ })).toHaveAttribute(
       "href",
@@ -85,6 +86,81 @@ describe("Sidebar", () => {
       expect(entry).not.toHaveAttribute("data-active", "true");
     }
     expect(screen.getAllByText("Soon")).toHaveLength(2);
+  });
+
+  it("keeps Campaigns a link of its own while nesting its sections under it", () => {
+    renderSidebar(`/organizations/${organizationId}/campaigns`);
+
+    // Adding a menu must not cost a destination: the row still goes where it
+    // always went, and the chevron is a separate control.
+    expect(screen.getByRole("link", { name: /^Campaigns$/ })).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/campaigns`,
+    );
+    expect(screen.getByRole("button", { name: "Campaigns sections" })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+
+    const children = screen
+      .getAllByTestId("workspace-child-entry")
+      .map((entry) => entry.textContent?.trim());
+    expect(children).toEqual(["Overview", "Asset Library", "Research settings"]);
+    expect(screen.getByRole("link", { name: "Asset Library" })).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/assets`,
+    );
+    // The money fence on research sits beside the work it governs, because the
+    // question it answers is asked from here.
+    expect(screen.getByRole("link", { name: "Research settings" })).toHaveAttribute(
+      "href",
+      `/organizations/${organizationId}/campaign-research`,
+    );
+  });
+
+  it("keeps the group shut until you are inside it", () => {
+    renderSidebar(`/organizations/${organizationId}/channels`);
+
+    expect(screen.getByRole("button", { name: "Campaigns sections" })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("treats the Asset Library as part of Campaigns", () => {
+    renderSidebar(`/organizations/${organizationId}/assets`);
+
+    // The parent stays lit for a child's page, or Campaigns would read as
+    // unvisited while its own sub-item is highlighted.
+    expect(screen.getByRole("link", { name: /^Campaigns$/ })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    expect(screen.getByRole("link", { name: "Asset Library" })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
+    // Scoped to the sub-menu: "Overview" also names the workspace's own
+    // top-level entry, which is a different destination entirely.
+    const overview = screen
+      .getAllByTestId("workspace-child-entry")
+      .find((entry) => entry.textContent?.trim() === "Overview");
+    expect(overview).toHaveAttribute("data-active", "false");
+  });
+
+  it("stops lighting the campaigns Overview once a single campaign is open", () => {
+    renderSidebar(`/organizations/${organizationId}/campaigns/c1000000-0000-4000-8000-000000000001`);
+
+    // Overview is the portfolio exactly, not everything beneath it.
+    const overview = screen
+      .getAllByTestId("workspace-child-entry")
+      .find((entry) => entry.textContent?.trim() === "Overview");
+    expect(overview).toHaveAttribute("data-active", "false");
+    // The parent still shows you are inside Campaigns.
+    expect(screen.getByRole("link", { name: /^Campaigns$/ })).toHaveAttribute(
+      "data-active",
+      "true",
+    );
   });
 
   it("hides the workspace group but keeps the switcher off an organization route", () => {

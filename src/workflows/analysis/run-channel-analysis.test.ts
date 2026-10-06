@@ -10,27 +10,36 @@ import {
 import {
   runChannelAnalysis,
   type ChannelAnalysisDependencies,
+  type ChannelAnalysisPayload,
 } from "@/workflows/analysis/run-channel-analysis";
 
 const RUN = "00000000-0000-4000-8000-0000000000a1";
 const CORRELATION = "00000000-0000-4000-8000-0000000000b1";
 
-const payload = {
+const basePayload: ChannelAnalysisPayload = {
   organizationId: ORGANIZATION,
   channelId: CHANNEL,
   branchId: BRANCH,
   windowStart: "2026-01-01",
   windowEnd: "2026-01-05",
-  periodGrain: "day" as const,
+  periodGrain: "day",
+  windowTimezone: "Asia/Dubai",
   analysisRunId: RUN,
   correlationId: CORRELATION,
   idempotencyKey: "channel-analysis-run-0001",
 };
 
+function payload(overrides: Partial<ChannelAnalysisPayload> = {}): ChannelAnalysisPayload {
+  return { ...basePayload, ...overrides };
+}
+
 function dependencies(
   overrides: Partial<ChannelAnalysisDependencies> = {},
 ): ChannelAnalysisDependencies {
   return {
+    // Wide enough to cover every window the tests in this file ask about,
+    // since the mock ignores which channel it was asked for.
+    loadCoverageSegments: vi.fn(async () => [{ start: "2025-01-01", end: "2026-12-31" }]),
     claim: vi.fn(async (input) => ({
       outcome: "acquired" as const,
       windowTimezone: "Asia/Dubai",
@@ -52,7 +61,7 @@ function dependencies(
 describe("runChannelAnalysis", () => {
   it("binds only the detectors the run's scope and grain support", async () => {
     const deps = dependencies();
-    await runChannelAnalysis(payload, deps);
+    await runChannelAnalysis(payload(), deps);
 
     expect(deps.claim).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -110,7 +119,7 @@ describe("runChannelAnalysis", () => {
       })),
     });
 
-    const result = await runChannelAnalysis(payload, deps);
+    const result = await runChannelAnalysis(payload(), deps);
 
     expect(result.outcome).toBe("completed");
     const call = vi.mocked(deps.complete).mock.calls[0][0];
@@ -148,7 +157,7 @@ describe("runChannelAnalysis", () => {
       })),
     });
 
-    const result = await runChannelAnalysis(payload, deps);
+    const result = await runChannelAnalysis(payload(), deps);
 
     expect(result).toEqual({
       outcome: "completed",
@@ -160,7 +169,7 @@ describe("runChannelAnalysis", () => {
 
   it("sends money as integer strings so nothing rounds on the way to the database", async () => {
     const deps = dependencies();
-    await runChannelAnalysis(payload, deps);
+    await runChannelAnalysis(payload(), deps);
 
     const movement = vi
       .mocked(deps.complete)
@@ -183,7 +192,7 @@ describe("runChannelAnalysis", () => {
 
   it("binds the cross-channel detector, and only that one, when no channel is named", async () => {
     const deps = dependencies();
-    await runChannelAnalysis({ ...payload, channelId: null }, deps);
+    await runChannelAnalysis(payload({ channelId: null }), deps);
 
     expect(deps.claim).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -202,7 +211,7 @@ describe("runChannelAnalysis", () => {
       })),
     });
 
-    const result = await runChannelAnalysis(payload, deps);
+    const result = await runChannelAnalysis(payload(), deps);
 
     expect(result.outcome).toBe("failed");
     expect(deps.complete).not.toHaveBeenCalled();
@@ -218,7 +227,7 @@ describe("runChannelAnalysis", () => {
       }),
     });
 
-    const result = await runChannelAnalysis(payload, deps);
+    const result = await runChannelAnalysis(payload(), deps);
 
     expect(result.outcome).toBe("failed");
     expect(deps.complete).not.toHaveBeenCalled();
@@ -230,59 +239,34 @@ describe("runChannelAnalysis", () => {
   it("returns the claim outcome untouched when the lease is held elsewhere", async () => {
     const deps = dependencies({ claim: vi.fn(async () => ({ outcome: "in_progress" as const })) });
 
-    expect(await runChannelAnalysis(payload, deps)).toEqual({ outcome: "in_progress" });
-    expect(deps.loadEvidence).not.toHaveBeenCalled();
+    expect(await runChannelAnalysis(payload(), deps)).toEqual({ outcome: "in_progress" });
+    // The evidence digest is an argument to the claim call itself, so it is
+    // read before the lease outcome is known -- unlike the trust-based path
+    // this replaced, which claimed first and read evidence only on a win.
+    expect(deps.loadEvidence).toHaveBeenCalled();
   });
 });
 
-const monthlyPayload = {
-  organizationId: ORGANIZATION,
-  channelId: CHANNEL,
-  branchId: null,
-  windowStart: "2026-02-01",
-  windowEnd: "2026-02-28",
-  periodGrain: "day" as const,
-  windowTimezone: "Asia/Dubai",
-  month: "2026-02",
-  analysisRunId: RUN,
-  correlationId: CORRELATION,
-  idempotencyKey: "channel-analysis-run-0001",
-};
-
-function monthlyDependencies(
-  overrides: Partial<ChannelAnalysisDependencies> = {},
-): ChannelAnalysisDependencies {
-  return {
-    ...dependencies(),
-    loadMonthHorizon: vi.fn(async () => ({ firstMonth: "2026-01", lastMonth: "2026-03" })),
-    ...overrides,
-  };
-}
-
-describe("runChannelAnalysis monthly dispatch", () => {
+describe("runChannelAnalysis content-addressed claim", () => {
   it("claims with the evidence digest and cache key it just computed", async () => {
-    const deps = monthlyDependencies();
-    const result = await runChannelAnalysis(monthlyPayload, deps);
+    const deps = dependencies();
+    const result = await runChannelAnalysis(payload(), deps);
 
     expect(result.outcome).toBe("completed");
-    expect(deps.loadMonthHorizon).toHaveBeenCalledWith({
-      organizationId: ORGANIZATION,
-      channelId: CHANNEL,
-    });
     const claimCall = vi.mocked(deps.claim).mock.calls[0][0];
     expect(claimCall.evidenceDigest).toMatch(/^[a-f0-9]{64}$/);
     expect(claimCall.cacheKey).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it("returns the reused run without writing when the claim reports a cache hit", async () => {
-    const deps = monthlyDependencies({
+    const deps = dependencies({
       claim: vi.fn(async () => ({
         outcome: "cached" as const,
         analysisRunId: "reused-run-id",
       })),
     });
 
-    expect(await runChannelAnalysis(monthlyPayload, deps)).toEqual({
+    expect(await runChannelAnalysis(payload(), deps)).toEqual({
       outcome: "cached",
       analysisRunId: "reused-run-id",
     });
@@ -290,30 +274,8 @@ describe("runChannelAnalysis monthly dispatch", () => {
     expect(deps.fail).not.toHaveBeenCalled();
   });
 
-  it("fails when the payload window is not the month it names", async () => {
-    const deps = monthlyDependencies();
-
-    const result = await runChannelAnalysis({ ...monthlyPayload, windowEnd: "2026-02-27" }, deps);
-
-    expect(result.outcome).toBe("failed");
-    expect(deps.claim).not.toHaveBeenCalled();
-    expect(deps.complete).not.toHaveBeenCalled();
-  });
-
-  it("fails when the month has no known timeline", async () => {
-    const deps = monthlyDependencies({ loadMonthHorizon: vi.fn(async () => null) });
-
-    const result = await runChannelAnalysis(monthlyPayload, deps);
-
-    expect(result.outcome).toBe("failed");
-    expect(deps.claim).not.toHaveBeenCalled();
-    expect(deps.fail).toHaveBeenCalledWith(
-      expect.objectContaining({ code: "EVIDENCE_UNAVAILABLE" }),
-    );
-  });
-
   it("fails when the claim binds a different timezone than the key was computed under", async () => {
-    const deps = monthlyDependencies({
+    const deps = dependencies({
       claim: vi.fn(async (input) => ({
         outcome: "acquired" as const,
         windowTimezone: "Asia/Kolkata",
@@ -321,12 +283,59 @@ describe("runChannelAnalysis monthly dispatch", () => {
       })),
     });
 
-    const result = await runChannelAnalysis(monthlyPayload, deps);
+    const result = await runChannelAnalysis(payload(), deps);
 
     expect(result.outcome).toBe("failed");
     expect(deps.complete).not.toHaveBeenCalled();
     expect(deps.fail).toHaveBeenCalledWith(
       expect.objectContaining({ code: "WINDOW_CONTEXT_UNAVAILABLE" }),
+    );
+  });
+});
+
+describe("the worker's own coverage check", () => {
+  it("refuses a window the channel's reports do not declare", async () => {
+    // The route checks this too. This is the check that still holds when the
+    // route is bypassed, and the one that still holds when a package was
+    // withdrawn between the operator pressing Apply and the worker claiming.
+    const claim = vi.fn();
+    const result = await runChannelAnalysis(
+      payload({ windowStart: "2026-03-01", windowEnd: "2026-03-04" }),
+      dependencies({
+        loadCoverageSegments: vi
+          .fn()
+          .mockResolvedValue([{ start: "2026-01-01", end: "2026-02-28" }]),
+        claim,
+      }),
+    );
+
+    expect(result.outcome).toBe("failed");
+    expect(claim).not.toHaveBeenCalled();
+  });
+
+  it("claims a covered window with a key built from the window, not a month", async () => {
+    const claim = vi.fn().mockResolvedValue({
+      outcome: "acquired",
+      windowTimezone: "Asia/Dubai",
+      boundDetectors: [],
+    });
+
+    await runChannelAnalysis(
+      payload({ windowStart: "2026-01-01", windowEnd: "2026-01-04" }),
+      dependencies({
+        loadCoverageSegments: vi
+          .fn()
+          .mockResolvedValue([{ start: "2026-01-01", end: "2026-02-28" }]),
+        claim,
+      }),
+    );
+
+    expect(claim).toHaveBeenCalledWith(
+      expect.objectContaining({
+        windowStart: "2026-01-01",
+        windowEnd: "2026-01-04",
+        cacheKey: expect.stringMatching(/^[a-f0-9]{64}$/),
+      }),
     );
   });
 });

@@ -2,6 +2,10 @@ import { z } from "zod";
 
 import { campaignGenerationRequestDigest } from "@/workflows/campaigns/contracts";
 import type { GenerationRunClaim, GenerationRunStore } from "@/workflows/campaigns/generate-bundle";
+import type {
+  GenerationBootstrapOutcome,
+  GenerationBootstrapRecorder,
+} from "@/workflows/campaigns/run-bootstrap";
 
 /**
  * The durable record of generation work.
@@ -22,6 +26,7 @@ export type CampaignRunPersistence = {
       | "claim_campaign_generation_run"
       | "complete_campaign_generation_run"
       | "fail_campaign_generation_run"
+      | "fail_campaign_generation_run_bootstrap"
       | "cancel_campaign_generation_run",
     args: Record<string, unknown>,
   ): Promise<RpcResult<unknown>>;
@@ -75,6 +80,25 @@ const claimResultSchema = z.union([
         });
       }
     }),
+]);
+
+/**
+ * The bootstrap-failure answer.
+ *
+ * Three of the four outcomes are refusals to write, and that is the point: a
+ * worker that died before claiming anything must never be able to overwrite a
+ * run some other worker is actively holding, or one that has already finished.
+ */
+const bootstrapFailureResultSchema = z.union([
+  z.strictObject({
+    outcome: z.literal("recorded"),
+    attempt: z.number().int().positive(),
+  }),
+  z.strictObject({ outcome: z.literal("already_claimed") }),
+  z.strictObject({
+    outcome: z.literal("already_finished"),
+    status: z.enum(["succeeded", "failed", "cancelled"]),
+  }),
 ]);
 
 export type EnqueueRunInput = {
@@ -152,9 +176,12 @@ export function createCampaignRunDispatcher(persistence: CampaignRunPersistence)
 export type CampaignRunDispatcher = ReturnType<typeof createCampaignRunDispatcher>;
 
 /** The worker-only lifecycle. Never constructed in a request path. */
-export function createCampaignRunStore(persistence: CampaignRunPersistence): GenerationRunStore & {
-  cancel(input: { organizationId: string; runId: string }): Promise<void>;
-} {
+export function createCampaignRunStore(
+  persistence: CampaignRunPersistence,
+): GenerationRunStore &
+  GenerationBootstrapRecorder & {
+    cancel(input: { organizationId: string; runId: string }): Promise<void>;
+  } {
   return {
     async claim(input): Promise<GenerationRunClaim> {
       const { data, error } = await persistence.rpc("claim_campaign_generation_run", {
@@ -217,6 +244,34 @@ export function createCampaignRunStore(persistence: CampaignRunPersistence): Gen
         },
       });
       if (error) runDatabaseError();
+    },
+
+    /**
+     * Records a failure that happened before this worker ever claimed the run.
+     *
+     * It carries no claim token, because there is no claim — that is the
+     * situation it exists for. The database decides instead: it writes only a
+     * run still sitting in `queued`, and answers `already_claimed` or
+     * `already_finished` without writing anything otherwise. A worker that died
+     * assembling its dependencies cannot fence out the worker that is
+     * succeeding at the same job.
+     */
+    async failBootstrap(input): Promise<GenerationBootstrapOutcome> {
+      const { data, error } = await persistence.rpc("fail_campaign_generation_run_bootstrap", {
+        target_organization_id: input.organizationId,
+        input_failure: {
+          organization_id: input.organizationId,
+          run_id: input.runId,
+          failure_code: input.failureCode,
+          task_id: input.taskId,
+        },
+      });
+      if (error || !data) runDatabaseError();
+
+      const parsed = bootstrapFailureResultSchema.safeParse(data);
+      if (!parsed.success) runDatabaseError();
+
+      return parsed.data;
     },
 
     async cancel(input): Promise<void> {

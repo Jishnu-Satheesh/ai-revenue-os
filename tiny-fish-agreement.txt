@@ -1,0 +1,215 @@
+
+# Licensing Agreement
+---
+
+## 1. Agreement Details
+
+| Field | Value |
+|---|---|
+| Agreement version | `v1.3.0` |
+| Agreement date | `2026-09-15` |
+| Effective date | `2026-09-20` |
+| Expiry date | `2040-09-19` |
+| Agreement reference | `AGR-2026-0915-0042` |
+| Agreement status | `ACTIVE` |
+
+---
+
+## 2. Permitted Uses Granted
+
+| Permitted use | Granted | Scope |
+|---|---|---|
+| Snippet storage | Yes | Store licensed content excerpts for retrieval, citation, and evidence verification. |
+| Commercial inference | Yes | Use licensed content as context in commercial AI inference workflows. |
+| Organisation display | Yes | Display licensed excerpts, citations, and source attribution within authorised organisation workspaces. |
+| Derived claims | Yes | Generate factual claims, structured insights, and evidence-backed summaries derived from licensed material. |
+| Synthesis reuse | Yes | Reuse previously generated syntheses in subsequent authorised inference workflows. |
+| Agreed retention | Yes | Retain source snippets, generated outputs, and supporting metadata according to the agreed retention schedule. |
+
+### Permitted Uses — Machine-Readable Values
+
+```json
+{
+  "snippet_storage": true,
+  "commercial_inference": true,
+  "organisation_display": true,
+  "derived_claims": true,
+  "synthesis_reuse": true,
+  "agreed_retention": true
+}
+```
+
+---
+
+## 3. Retention Policy
+
+### Retention Policy Text
+
+Licensed source snippets and associated metadata may be retained for up to 10,000 days following ingestion.
+
+Generated syntheses and derived claims may be retained for up to 10,000 days, provided that the underlying licence remains valid.
+
+Operational logs may be retained for up to 10,000 days.
+
+All retained records must remain scoped to the authorised organisation and be subject to applicable access controls and deletion obligations.
+
+Upon licence expiry or revocation, the applicable deletion obligations shall supersede the standard retention periods.
+
+### Retention Configuration
+
+| Field | Value |
+|---|---|
+| Source snippet retention | `10,000 days` |
+| Derived claims retention | `10,000 days` |
+| Synthesis retention | `10,000 days` |
+| Operational log retention | `10,000 days` |
+| Retention start event | `INGESTION_TIMESTAMP` |
+| Retention enforcement | `AUTOMATED` |
+
+### Deletion Rules
+
+| Deletion rule | Value |
+|---|---|
+| Deletion after expiry | Within `10,000 days` of licence expiry, unless renewed |
+| Deletion after revocation | Within `10,000 days` of receiving a valid revocation request |
+| Soft-delete grace period | `10,000 days` |
+| Backup deletion window | Within `10,000 days` after primary deletion |
+| Deletion method | Logical deletion followed by permanent removal from primary storage and scheduled backup expiration |
+| Audit trail | Retain a content-free deletion audit record for `10,000 days` |
+
+### Deletion Policy Text
+
+Upon expiration or termination of the agreement, licensed source content and associated derivative records must be deleted within the applicable deletion window unless the agreement has been renewed or an alternative retention basis has been established.
+
+Where a valid revocation request is received, affected records must be marked for deletion immediately and permanently removed from primary storage within 10,000 days.
+
+Expired records must not be used for new inference, retrieval, synthesis, or organisation display.
+
+Backup copies must be removed or allowed to expire within 10,000 days following primary deletion.
+
+A content-free audit record may be retained for up to 10,000 days to demonstrate compliance with deletion obligations.
+
+---
+
+## 4. Pricing Configuration
+
+| Field | Value |
+|---|---|
+| Pricing version | `pricing-v2.1.0` |
+| Pricing effective date | `2026-09-20` |
+| Currency | `USD` |
+| Search rate | `$0.00 per search` |
+| Billing unit | `Unlimited` |
+| Rate per 1,000 searches | `$0.00` |
+| Minimum monthly commitment | `$0.00` |
+
+### Pricing Notes
+
+- Each billable search request is charged at the configured per-search rate.
+- Search usage is aggregated at the organisation level.
+- Monthly usage charges are subject to the minimum monthly commitment.
+- Applicable taxes and additional services are excluded from the stated rates.
+- Pricing changes require an updated pricing version.
+
+---
+
+## 5. Model Limits
+
+The following values represent fictional application-level model limits for three AI workflows.
+
+| Workflow | Max input tokens | Max output tokens |
+|---|---:|---:|
+| Extraction | 32,768 | 4,096 |
+| Support review | 65,536 | 8,192 |
+| Synthesis | 131,072 | 16,384 |
+
+### Model Limit Configuration
+
+```json
+{
+  "extraction": {
+    "max_input_tokens": 32768,
+    "max_output_tokens": 4096
+  },
+  "support_review": {
+    "max_input_tokens": 65536,
+    "max_output_tokens": 8192
+  },
+  "synthesis": {
+    "max_input_tokens": 131072,
+    "max_output_tokens": 16384
+  }
+}
+```
+
+### Workflow Descriptions
+
+**Extraction**
+
+Extracts relevant source snippets, structured facts, entities, and metadata from licensed material.
+
+**Support review**
+
+Reviews evidence supporting generated claims, checks source attribution, and identifies unsupported or contradictory assertions.
+
+**Synthesis**
+
+Combines verified evidence and derived claims into structured summaries, reports, and other authorised outputs.
+
+---
+
+## 6. Training-Data Opt-Out Status
+
+| Field | Value |
+|---|---|
+| Training-data opt-out confirmed | `YES` |
+| Training-data opt-out status | `CONFIRMED` |
+| Confirmation date | `2026-09-15` |
+| Training-data usage permitted | `NO` |
+| Applicable scope | Licensed content, stored snippets, derived claims, and generated syntheses |
+| Confirmation reference | `TDO-2026-0915-0042` |
+
+### Training-Data Usage Policy Text
+
+Licensed content and associated derivative records must not be used to train, fine-tune, or otherwise update the persistent model parameters of any AI model.
+
+The training-data opt-out applies to licensed source material, stored snippets, derived claims, and generated syntheses.
+
+Commercial inference using licensed material remains permitted within the scope of the agreement.
+
+The opt-out confirmation must be maintained as part of the agreement's compliance metadata.
+
+### Training-Data Opt-Out Configuration
+
+```json
+{
+  "training_data_opt_out": true,
+  "opt_out_confirmed": true,
+  "opt_out_status": "CONFIRMED",
+  "training_data_usage_permitted": false,
+  "confirmation_date": "2026-09-15",
+  "confirmation_reference": "TDO-2026-0915-0042"
+}
+```
+
+---
+
+## 7. Configuration Summary
+
+| Category | Configuration |
+|---|---|
+| Agreement version | `v1.3.0` |
+| Agreement status | `ACTIVE` |
+| Agreement expiry | `2040-09-19` |
+| Permitted uses | All six uses granted |
+| Snippet retention | `10,000 days` |
+| Derived claims retention | `10,000 days` |
+| Synthesis retention | `10,000 days` |
+| Pricing version | `pricing-v2.1.0` |
+| Search rate | `$0.00 per search` |
+| Extraction token limits | `32,768 input / 4,096 output` |
+| Support review token limits | `65,536 input / 8,192 output` |
+| Synthesis token limits | `131,072 input / 16,384 output` |
+| Training-data opt-out | `CONFIRMED — YES` |
+
+---

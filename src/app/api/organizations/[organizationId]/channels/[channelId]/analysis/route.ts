@@ -3,21 +3,30 @@ import { z } from "zod";
 
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { apiErrorResponse, getOrganizationContext } from "@/lib/api/organization-context";
+import { consumeAnalysisRunAllowance } from "@/lib/cache/rate-limit";
+import { localDaysBetween } from "@/domain/analysis/calendar";
+import { MAX_ANALYSIS_WINDOW_DAYS } from "@/domain/analysis/window-selection";
 import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import { requestChannelAnalysis } from "@/modules/analysis/application/dispatch";
+import { requestChannelAnalysis, requestChannelRecommendations } from "@/modules/analysis/application/dispatch";
+import { resolveCurrentChannelRunForRequest } from "@/modules/analysis/application/current-run";
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import { assertGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
 import type { OrganizationRole } from "@/domain/organizations/types";
 
 /**
- * Start a deterministic analysis of one channel for one calendar month.
+ * Start a deterministic analysis of one channel over a picked date range.
  *
- * The month is selected, never inferred and never accompanied by caller
- * dates: the server resolves the window, the zone, and the grain from the
- * channel's declared packages, and the worker re-resolves the evidence and
- * cache key under its lease before using a prior result. A month the reports
- * do not declare is refused here, before any work starts.
+ * The range is the operator's, but its admissibility is not: the resolver
+ * below re-decides it against the channel's declared coverage, and the worker
+ * re-decides it a second time under its own lease before using a prior
+ * result. A range the reports do not cover is refused here, before any work
+ * starts.
+ *
+ * Authorization and cost control are orthogonal and both apply, in that
+ * order: `report.retry` decides who may ask at all, and an organization-scoped
+ * rate limit caps how often someone who may ask can spend a detector pass and
+ * an AI narration. Neither substitutes for the other. See ADR 0048.
  *
  * This route starts work; it does not decide anything. The claim RPC re-resolves
  * the channel, the branch timezone, and the metric vocabulary, and refuses a
@@ -29,11 +38,41 @@ const paramsSchema = z.object({
   channelId: z.string().uuid(),
 });
 
+const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A picked range, not a month.
+ *
+ * The dates are the operator's, but their admissibility is not: the resolver
+ * below re-decides it against the channel's declared coverage, and the worker
+ * decides it a second time under its lease. See ADR 0048.
+ */
 const bodySchema = z
   .object({
-    month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Use a YYYY-MM month."),
+    from: z.string().regex(LOCAL_DATE, "Use a YYYY-MM-DD date."),
+    to: z.string().regex(LOCAL_DATE, "Use a YYYY-MM-DD date."),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    let span: number;
+    try {
+      // Rejects the 31st of February rather than rolling it into March.
+      span = localDaysBetween(value.from, value.to);
+    } catch {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "That is not a real date." });
+      return;
+    }
+    if (span < 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "The end date is before the start." });
+    }
+    // `>` not `>=`, matching the database's `<= 400` check exactly. See Task 1.
+    if (span > MAX_ANALYSIS_WINDOW_DAYS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "That range is wider than one analysis can cover. Pick a shorter period.",
+      });
+    }
+  });
 
 export async function POST(
   request: Request,
@@ -61,19 +100,71 @@ export async function POST(
     }
 
     const body = bodySchema.parse(await request.json().catch(() => ({})));
-    // Monthly selection is channel-wide: the picker names no branch, so the
-    // run analyses every branch this channel trades through.
-    const resolved = await createAuthenticatedChannelAnalysisRepository(
-      context.supabase,
-    ).resolveMonthInput({
+    // Channel-wide: the picker names no branch, so the run analyses every
+    // branch this channel trades through.
+    const repository = createAuthenticatedChannelAnalysisRepository(context.supabase);
+    const resolved = await repository.resolveWindowInput({
       organizationId: routeParams.organizationId,
       channelId: routeParams.channelId,
-      month: body.month,
+      from: body.from,
+      to: body.to,
     });
     if (resolved === null) {
       throw new DomainError(
         "VALIDATION_ERROR",
-        "That month is outside this channel's reported timeline. Pick a month your approved reports declare.",
+        "That range is outside this channel's reported dates. Pick a period your approved reports declare.",
+      );
+    }
+
+    // An already-analysed range opens instantly: the same ready rule the
+    // status route reports (`completed` with recommendations landed) returns
+    // the existing run without spending allowance or starting new work.
+    const existing = await resolveCurrentChannelRunForRequest(context.supabase, {
+      organizationId: routeParams.organizationId,
+      channelId: routeParams.channelId,
+      branchId: null,
+      windowStart: resolved.windowStart,
+      windowEnd: resolved.windowEnd,
+      grain: resolved.grain,
+      timeZone: resolved.timeZone,
+    });
+    if (existing.kind === "ready") {
+      return NextResponse.json(
+        { analysisRunId: existing.analysisRunId, correlationId, cached: true },
+        { status: 200 },
+      );
+    }
+    if (existing.kind === "narrating") {
+      const dispatched = await requestChannelRecommendations({
+        organizationId: routeParams.organizationId,
+        channelId: routeParams.channelId,
+        analysisRunId: existing.analysisRunId,
+        correlationId,
+      });
+      if (!dispatched) throw new DomainError("INTEGRATION_ERROR", "The analysis narration could not be resumed.");
+      return NextResponse.json({ analysisRunId: existing.analysisRunId, correlationId, narrating: true }, { status: 202 });
+    }
+    if (existing.kind === "running") {
+      // A run already in progress remains the one to observe; a second press
+      // should not spend another allowance or create another run.
+      const run = await repository.loadRunForWindow({
+        organizationId: routeParams.organizationId,
+        channelId: routeParams.channelId,
+        windowStart: resolved.windowStart,
+        windowEnd: resolved.windowEnd,
+      });
+      if (run) return NextResponse.json({ analysisRunId: run.id, correlationId, running: true }, { status: 202 });
+    }
+
+    // After coverage, never before: a mistyped date must not cost the
+    // organization part of its allowance. Starting a run costs a detector
+    // pass and an AI narration; the permission check above already decided
+    // this caller may ask at all, and this caps how often. An
+    // already-computed range returned above and never reaches here.
+    if (!(await consumeAnalysisRunAllowance(routeParams.organizationId))) {
+      throw new DomainError(
+        "RATE_LIMITED",
+        "This organization has started a lot of analyses in the last hour. Ranges you have already analysed still open instantly; try a new one again shortly.",
       );
     }
 
@@ -85,7 +176,6 @@ export async function POST(
       windowStart: resolved.windowStart,
       windowEnd: resolved.windowEnd,
       periodGrain: resolved.grain,
-      month: body.month,
       windowTimezone: resolved.timeZone,
       analysisRunId,
       correlationId,
@@ -103,7 +193,8 @@ export async function POST(
     logger.info("channel_analysis.requested", {
       organizationId: routeParams.organizationId,
       channelId: routeParams.channelId,
-      month: body.month,
+      windowStart: resolved.windowStart,
+      windowEnd: resolved.windowEnd,
       runId: analysisRunId,
       correlationId,
     });

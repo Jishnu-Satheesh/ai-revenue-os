@@ -1,6 +1,8 @@
 # Feature Specification: Business Memory
 
-**Status:** Approved product and architecture design; implementation not started
+**Status:** Approved product and architecture design; storage, retrieval, workspace and worker code exist. Full original-scope operational acceptance is not established by this status.
+
+**Inspection note (2026-09-10):** Hosted staging contains the memory schema and the repository contains the authenticated workspace and provider projection. The current retrieval path has no wired Redis cache; automatic worker dispatch and cross-feature learning are not established by task registration alone. [Spec 023](023-business-memory-shared-intelligence.md) proposes the shared-intelligence extension; it is Draft and does not yet amend this specification's approved rules. See its [research evidence](../docs/research/2026-09-10-business-memory-shared-intelligence.md).
 
 **Primary user:** Agency operator, plus every platform worker that needs organizational context
 
@@ -259,6 +261,8 @@ Rules:
 | `sensitivity` | `internal` |
 
 Structured facts participate in lexical ranking over `fact_key` and the text content of `value`. They are not embedded in V1; their semantic score is zero and their trust rank carries them.
+
+Read-through fact candidates are bounded to the most recently updated 200 rows in the authorized organization/branch scope, ordered by `updated_at` and `id`. Deterministic matching preserves substring and numeric JSON-value matches; the caller's result limit is applied after matching. Facts older than this candidate window are outside retrieval recall. A denied or failed source read remains unavailable, never an empty search result.
 
 ## 8. Database and tenancy requirements
 

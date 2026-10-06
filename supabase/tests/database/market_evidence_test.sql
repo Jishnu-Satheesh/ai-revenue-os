@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(59);
+select extensions.plan(61);
 
 -- Contract, tenant boundary, and least-privilege access --------------------
 
@@ -353,6 +353,48 @@ as $$
   );
 $$;
 
+-- Every claim-to-source support edge must carry the review verdict, the
+-- review time, and the run's review-model version as reviewer: the
+-- source → excerpt → claim → support-link lineage stays queryable.
+create or replace function pg_temp.supports_links_reviewed(p_organization_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select
+    pg_catalog.count(*) > 0
+    and pg_catalog.bool_and(
+      support_verdict = 'supported'
+      and reviewed_at is not null
+      and reviewer_ref = 'gemini-fixture-review-1'
+    )
+  from public.market_evidence_links
+  where organization_id = p_organization_id
+    and relation = 'supports'
+    and market_evidence_source_id is not null;
+$$;
+
+-- Claim-to-claim corroboration/contradiction edges carry their own pairwise
+-- relation and no per-pair verdict: no review runs per pair in this slice.
+create or replace function pg_temp.claim_pair_links_unreviewed(p_organization_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select
+    pg_catalog.count(*) = 2
+    and pg_catalog.bool_and(
+      support_verdict is null and reviewed_at is null and reviewer_ref is null
+    )
+  from public.market_evidence_links
+  where organization_id = p_organization_id
+    and market_evidence_source_id is null;
+$$;
+
 create or replace function pg_temp.request_status(p_organization_id uuid)
 returns text
 language sql
@@ -372,7 +414,7 @@ immutable
 as $$
   select pg_catalog.jsonb_build_object(
     'adapterProvider', 'qualified-research', 'adapterVersion', 'market-research@1',
-    'modelProvider', null, 'modelVersion', null, 'runFingerprint', p_fingerprint,
+    'modelProvider', 'gemini', 'modelVersion', 'gemini-fixture-review-1', 'runFingerprint', p_fingerprint,
     'queryPlanDigest', pg_catalog.repeat('c', 64),
     'correlationId', 'a9000000-0000-4000-8000-000000000702'
   );
@@ -655,6 +697,14 @@ select extensions.ok(
   pg_temp.link_exists('a9000000-0000-4000-8000-000000000201'::uuid, 'contradicts'),
   'contradiction is stored as an immutable evidence edge'
 );
+select extensions.ok(
+  pg_temp.supports_links_reviewed('a9000000-0000-4000-8000-000000000201'::uuid),
+  'every supports edge carries the supported verdict, review time and review model'
+);
+select extensions.ok(
+  pg_temp.claim_pair_links_unreviewed('a9000000-0000-4000-8000-000000000201'::uuid),
+  'claim-to-claim relations persist without a per-pair review verdict'
+);
 
 reset role;
 select extensions.throws_ok(
@@ -914,8 +964,11 @@ select extensions.throws_ok(
       'supports'
     )
   $$,
-  '23503', null,
+  '22023', 'market_evidence_link_source_missing',
   'a source from another tenant cannot be linked to this tenant claim'
+-- (Task 7: the Task 5 link-eligibility trigger refuses cross-tenant sources
+-- with 22023 before the foreign key fires, so the suite pins that code.
+-- Tenant isolation still holds: the link is refused.)
 );
 
 -- A later failure keeps the ledger safe and request-fenced ------------------

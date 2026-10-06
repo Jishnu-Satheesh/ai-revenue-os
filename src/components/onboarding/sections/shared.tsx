@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useForm } from "@tanstack/react-form";
 import { CircleAlert, Info } from "lucide-react";
 
+import { BrandRulesField } from "@/components/onboarding/fields/brand-rules-field";
 import {
   ComboboxField,
   MultiSelectField,
@@ -15,6 +16,7 @@ import {
 } from "@/components/onboarding/fields/cost-rate-field";
 import { MoneyField, minorUnitsHint } from "@/components/onboarding/fields/money-field";
 import { MonthRangeField } from "@/components/onboarding/fields/month-range-field";
+import { PaletteField } from "@/components/onboarding/fields/palette-field";
 import { TagListField } from "@/components/onboarding/fields/tag-list-field";
 import { WeeklyHoursField } from "@/components/onboarding/fields/weekly-hours-field";
 import { useOnboardingWorkspace } from "@/components/onboarding/onboarding-workspace";
@@ -68,6 +70,8 @@ export type SectionField = FieldBase &
     | { control: "tags"; multiline?: boolean }
     | { control: "radio"; options: readonly FieldOption[] }
     | { control: "switch"; switchLabel: string }
+    | { control: "palette" }
+    | { control: "brandRules" }
     | { control: "weeklyHours" }
     | { control: "monthRange" }
     | { control: "date" }
@@ -104,7 +108,12 @@ function initialValues(fields: readonly SectionField[], payload: Record<string, 
         values[field.name] = typeof stored === "number" ? stored : null;
         break;
       case "costRates":
+      case "brandRules":
         values[field.name] = Array.isArray(stored) ? stored : [];
+        break;
+      case "palette":
+        values[field.name] =
+          stored && typeof stored === "object" && !Array.isArray(stored) ? stored : {};
         break;
       case "weeklyHours":
         values[field.name] = Array.isArray(stored) && stored.length ? stored : emptyWeeklyHours();
@@ -209,6 +218,8 @@ export function SectionForm({
                       control === "weeklyHours" ||
                       control === "monthRange" ||
                       control === "costRates" ||
+                      control === "palette" ||
+                      control === "brandRules" ||
                       control === "radio";
 
                     return (
@@ -275,13 +286,6 @@ export function SectionForm({
               ))}
             </FieldGroup>
             {children}
-            {error ? (
-              <Alert variant="destructive">
-                <CircleAlert />
-                <AlertTitle>Save failed</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            ) : null}
           </div>
         </div>
       </ScrollArea>
@@ -295,6 +299,17 @@ export function SectionForm({
           ).filter((requirement) => !requirement.satisfied);
           return (
             <div className="flex shrink-0 flex-col gap-3 border-t border-border bg-card px-(--card-spacing) py-4">
+              {/* Beside the button that was pressed, not at the top of a form
+                  somebody has already scrolled past. A save that fails while
+                  the only notice of it sits off-screen reads as a save that
+                  worked. */}
+              {error ? (
+                <Alert variant="destructive">
+                  <CircleAlert />
+                  <AlertTitle>Save failed</AlertTitle>
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              ) : null}
               {missing.length > 0 ? (
                 <p className="flex items-start gap-2 text-xs text-muted-foreground">
                   <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
@@ -462,6 +477,10 @@ function SectionControl({
           </label>
         </div>
       );
+    case "palette":
+      return <PaletteField id={controlId} value={value} onChange={change} onBlur={onBlur} />;
+    case "brandRules":
+      return <BrandRulesField id={controlId} value={value} onChange={change} onBlur={onBlur} />;
     case "weeklyHours":
       return <WeeklyHoursField id={controlId} value={value} onChange={change} onBlur={onBlur} />;
     case "monthRange":

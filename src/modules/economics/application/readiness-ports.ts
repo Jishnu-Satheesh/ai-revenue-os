@@ -1,7 +1,4 @@
-import type {
-  ReadinessCostCoverage,
-  ReadinessObservation,
-} from "@/domain/economics/readiness";
+import type { ReadinessCostCoverage, ReadinessObservation } from "@/domain/economics/readiness";
 
 /**
  * The boundaries evidence readiness reads through. There is no write side, and

@@ -20,6 +20,7 @@ export function TagListField({
   invalid,
   multiline = false,
   addLabel = "Add",
+  showList = true,
   onChange,
   onBlur,
 }: {
@@ -29,6 +30,9 @@ export function TagListField({
   invalid?: boolean;
   multiline?: boolean;
   addLabel?: string;
+  /** False where the caller renders the entries itself, so neither list can
+   *  be mistaken for the one in force. */
+  showList?: boolean;
   onChange: (values: string[]) => void;
   onBlur?: () => void;
 }) {
@@ -67,7 +71,7 @@ export function TagListField({
           <Plus />
         </Button>
       </div>
-      {values.length > 0 ? (
+      {showList && values.length > 0 ? (
         <ul className="flex flex-wrap gap-1.5">
           {values.map((value, index) => (
             <li key={`${value}-${index}`}>

@@ -4,6 +4,14 @@ import {
   type OrganizationRecommendationLaneRecord,
   type OrganizationRecommendationRecord,
 } from "@/modules/analysis/application/read-model";
+import {
+  laneProposals,
+  type CampaignProposalCardView,
+} from "@/modules/campaigns/application/proposal-read-model";
+import type {
+  ResearchActivityEvent,
+  ResearchItemProvenance,
+} from "@/modules/growth-intelligence/application/research-read-model";
 
 /**
  * Composed organization intelligence view (spec 022 section 9).
@@ -21,7 +29,8 @@ export type GrowthIntelligenceSection =
   | "recommendations"
   | "insights"
   | "data_gaps"
-  | "timeline";
+  | "timeline"
+  | "campaign_proposals";
 
 export type ChannelRecommendationDecision = "acknowledged" | "dismissed" | "planned";
 
@@ -29,8 +38,17 @@ export type ChannelRecommendationDecision = "acknowledged" | "dismissed" | "plan
  * Channel narration rows arrive through the analysis module's own
  * organization projection; this module never re-derives label grouping,
  * carry-over ageing, or actionability.
+ *
+ * `supportedActions` and `limitations` travel from the stored narration so
+ * the workspace can show what to do next and what the evidence does not
+ * cover. They stay optional so older callers keep compiling; missing means
+ * the row carried none, never a hidden gap.
  */
-export type ChannelRecommendationRow = OrganizationRecommendationRecord;
+export type ChannelRecommendationRow = OrganizationRecommendationRecord & {
+  supportedActions?: readonly string[];
+  limitations?: readonly string[];
+  citationFindingIds?: readonly string[];
+};
 
 export type SynthesizedItemDecision =
   | "acknowledged"
@@ -44,6 +62,8 @@ export type SynthesizedItemRow = {
   kind: "insight" | "recommendation" | "data_gap";
   narrative: string;
   fingerprint: string;
+  /** Exact synthesis run that produced the item; links research provenance. */
+  synthesisRunId: string;
   supportGrade: string;
   freshness: string;
   urgency: string;
@@ -60,12 +80,15 @@ export type SynthesizedItemRow = {
   decidedAt: string | null;
   snoozedUntil: string | null;
   pinned: boolean;
+  myFeedback: boolean | null;
 };
 
 export type CardSource =
   | { kind: "opportunity"; id: string }
   | { kind: "channel_recommendation"; id: string }
-  | { kind: "synthesized_item"; id: string };
+  | { kind: "synthesized_item"; id: string }
+  | { kind: "research_pipeline"; id: string }
+  | { kind: "campaign_proposal"; id: string };
 
 export type EvidenceWindow = { start: string; end: string };
 
@@ -86,6 +109,8 @@ type CardBase = {
   carriedOver: boolean;
   /** Present only when carriedOver; e.g. "2 months old". */
   ageLabel: string | null;
+  /** Required only by synthesized-item decision writes. */
+  itemFingerprint: string | null;
 };
 
 export type OpportunityCard = CardBase & {
@@ -124,6 +149,26 @@ export type RecommendationCard = CardBase & {
   /** Null for synthesized cross-market recommendations with no single channel. */
   channelId: string | null;
   branchId: string | null;
+  myFeedback: boolean | null;
+  /**
+   * What the stored narration said to do next. Empty means the headline
+   * already says the action; the card never invents steps.
+   */
+  supportedActions: readonly string[];
+  /**
+   * What the stored narration said the evidence does not cover. Empty means
+   * no stored caveat; the card hides the line rather than inventing one.
+   */
+  limitations: readonly string[];
+  /** Stored finding ids the narration cited, when the source carried them. */
+  citationFindingIds?: readonly string[];
+  /**
+   * Market-research provenance for items produced by a research pipeline.
+   * The builders always set this (null when there is no pipeline lineage);
+   * the field stays optional so existing card fixtures keep compiling.
+   * The card keeps its deterministic position either way.
+   */
+  researchProvenance?: ResearchItemProvenance | null;
 };
 
 export type InsightCard = CardBase & {
@@ -133,6 +178,7 @@ export type InsightCard = CardBase & {
   /** Owning channel for provenance links; null for synthesized cross-market insights. */
   channelId: string | null;
   branchId: string | null;
+  myFeedback: boolean | null;
 };
 
 export type DataGapCard = CardBase & {
@@ -151,14 +197,75 @@ export type TimelineEventType =
   | "draft-requested"
   | "retry"
   | "draft-created"
-  | "draft-failed";
+  | "draft-failed"
+  | "research-started"
+  | "research-finished"
+  | "research-retried"
+  /**
+   * Proposal lifecycle. `snoozed` and `dismissed` are deliberately NOT
+   * repeated here: a snoozed proposal is a snooze and a dismissed one is a
+   * dismissal, and reusing those types is what puts them under the filters a
+   * person already reaches for. Approving and asking for changes have no
+   * existing type that would not misdescribe them — "planned" is not an
+   * approval, and an approval here is preparation only.
+   */
+  | "proposal-ready"
+  | "proposal-approved"
+  | "changes-requested";
 
 export type TimelineEvent = {
   type: TimelineEventType;
   source: CardSource;
+  title: string;
   occurredAt: string;
   reason: string | null;
+  /**
+   * Owning channel/branch for the scope line on Your actions. Null when the
+   * source has no single channel (synthesized cross-market items,
+   * opportunities, research pipelines). Optional so older fixtures compile;
+   * missing means the row carries no scope.
+   */
+  channelId?: string | null;
+  branchId?: string | null;
+  /** Required horizon while the event is a snooze; null otherwise. */
+  snoozedUntil?: string | null;
 };
+
+/**
+ * Decision filters for the Your actions tab. Research and draft lifecycle
+ * rows belong to All only; a named decision filter shows its decision type.
+ */
+export const YOUR_ACTION_FILTERS = [
+  "all",
+  "planned",
+  "acknowledged",
+  "snoozed",
+  "dismissed",
+] as const;
+
+export type YourActionFilter = (typeof YOUR_ACTION_FILTERS)[number];
+
+export function parseYourActionFilter(value: string | null | undefined): YourActionFilter {
+  return value === "planned" ||
+    value === "acknowledged" ||
+    value === "snoozed" ||
+    value === "dismissed"
+    ? value
+    : "all";
+}
+
+/**
+ * Client-side filter for the Your actions list. The caller already excludes
+ * generated rows; All keeps every acted row, a named filter keeps only its
+ * decision type so research and draft rows never leak into a decision slice.
+ */
+export function filterYourActionEvents(
+  events: readonly TimelineEvent[],
+  filter: YourActionFilter,
+): TimelineEvent[] {
+  if (filter === "all") return [...events];
+  return events.filter((event) => event.type === filter);
+}
 
 export type GrowthIntelligenceViewInput = {
   organizationId: string;
@@ -172,6 +279,27 @@ export type GrowthIntelligenceViewInput = {
   items: readonly SynthesizedItemRow[];
   draftRequests?: readonly DraftRequestState[];
   sections?: readonly GrowthIntelligenceSection[];
+  /**
+   * Research provenance keyed by synthesis run id. Omitted lookups leave
+   * cards without provenance; ordering, filters and triage never depend on it.
+   */
+  researchProvenance?: Readonly<Record<string, ResearchItemProvenance>>;
+  /** Named research lifecycle events merged into the timeline. */
+  researchActivity?: readonly ResearchActivityEvent[];
+  /**
+   * Campaign proposals, already projected by the campaigns module.
+   *
+   * Passed in rather than derived: a proposal is a campaigns-module record with
+   * its own approval gate, and this builder is a projection, not a second place
+   * that decides what a proposal means. Omitted means the caller composed no
+   * proposal reader, which reads exactly as "none" — the pre-proposal view.
+   *
+   * This is EVERY proposal, settled ones included. The lane rule is applied
+   * here rather than by the caller, because the timeline needs the dismissed
+   * and superseded ones: what a person turned down is part of what they
+   * decided.
+   */
+  campaignProposals?: readonly CampaignProposalCardView[];
 };
 
 export type GrowthIntelligenceView = {
@@ -184,6 +312,13 @@ export type GrowthIntelligenceView = {
   insights: InsightCard[];
   dataGaps: DataGapCard[];
   timeline: TimelineEvent[];
+  /**
+   * Campaign-ready opportunities, kept in their own lane. Deliberately not
+   * folded into `priorityActions`: a proposal is answered at its own approval
+   * gate with its own permission, and mixing it into the recommendation counts
+   * would make one number mean two different kinds of act.
+   */
+  campaignProposals: CampaignProposalCardView[];
   counts: {
     opportunities: number;
     recommendations: number;
@@ -218,8 +353,7 @@ function compareOpportunities(left: OpportunityFeedItem, right: OpportunityFeedI
   // ADR 0014 ordering: evidence tier, expected contribution within that tier,
   // then time to impact. No blending across tiers; the sort never mixes
   // currencies into one number.
-  const tierDelta =
-    TIER_ORDER.indexOf(left.evidenceTier) - TIER_ORDER.indexOf(right.evidenceTier);
+  const tierDelta = TIER_ORDER.indexOf(left.evidenceTier) - TIER_ORDER.indexOf(right.evidenceTier);
   if (tierDelta !== 0) return tierDelta;
   if (left.expectedContributionMinor !== right.expectedContributionMinor) {
     return right.expectedContributionMinor - left.expectedContributionMinor;
@@ -260,6 +394,7 @@ function toOpportunityCard(
     timeToImpactDays: item.timeToImpactDays,
     version: item.version,
     draftRequest,
+    itemFingerprint: null,
   };
 }
 
@@ -294,6 +429,7 @@ function channelBase(row: OrganizationRecommendationLaneRecord) {
     pinned: row.pinned,
     carriedOver: row.carriedOver,
     ageLabel: row.ageLabel,
+    itemFingerprint: null,
   };
 }
 
@@ -301,7 +437,23 @@ function toRecommendationCardFromChannel(
   row: OrganizationRecommendationLaneRecord,
 ): RecommendationCard {
   if (row.label !== "recommendation") throw new Error("Recommendation misrouted.");
-  return { ...channelBase(row), channelId: row.channelId, branchId: row.branchId };
+  const stored = row as Partial<ChannelRecommendationRow>;
+  return {
+    ...channelBase(row),
+    channelId: row.channelId,
+    branchId: row.branchId,
+    myFeedback: row.myFeedback ?? null,
+    supportedActions: Array.isArray(stored.supportedActions)
+      ? stored.supportedActions.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    limitations: Array.isArray(stored.limitations)
+      ? stored.limitations.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    citationFindingIds: Array.isArray(stored.citationFindingIds)
+      ? stored.citationFindingIds.filter((entry): entry is string => typeof entry === "string")
+      : [],
+    researchProvenance: null,
+  };
 }
 
 function toInsightCardFromChannel(row: OrganizationRecommendationLaneRecord): InsightCard {
@@ -313,6 +465,7 @@ function toInsightCardFromChannel(row: OrganizationRecommendationLaneRecord): In
     urgency: "low",
     channelId: row.channelId,
     branchId: row.branchId,
+    myFeedback: row.myFeedback ?? null,
   };
 }
 
@@ -344,15 +497,26 @@ function itemBase(row: SynthesizedItemRow, activityMonth: string) {
     snoozedUntil: row.snoozedUntil,
     pinned: row.pinned,
     ...itemCarryOver(row, activityMonth),
+    itemFingerprint: row.fingerprint,
   };
 }
 
 function toRecommendationCardFromItem(
   row: SynthesizedItemRow,
   activityMonth: string,
+  provenance: Readonly<Record<string, ResearchItemProvenance>> = {},
 ): RecommendationCard {
   if (row.kind !== "recommendation") throw new Error("Item misrouted.");
-  return { ...itemBase(row, activityMonth), channelId: null, branchId: null };
+  return {
+    ...itemBase(row, activityMonth),
+    channelId: null,
+    branchId: null,
+    myFeedback: row.myFeedback,
+    supportedActions: [],
+    limitations: [],
+    citationFindingIds: [],
+    researchProvenance: provenance[row.synthesisRunId] ?? null,
+  };
 }
 
 function toInsightCardFromItem(row: SynthesizedItemRow, activityMonth: string): InsightCard {
@@ -364,12 +528,17 @@ function toInsightCardFromItem(row: SynthesizedItemRow, activityMonth: string): 
     urgency: row.urgency,
     channelId: null,
     branchId: null,
+    myFeedback: row.myFeedback,
   };
 }
 
 function toDataGapCardFromItem(row: SynthesizedItemRow, activityMonth: string): DataGapCard {
   if (row.kind !== "data_gap") throw new Error("Data gap misrouted.");
-  return { ...itemBase(row, activityMonth), missingInput: row.missingInput ?? "unknown", channelId: null };
+  return {
+    ...itemBase(row, activityMonth),
+    missingInput: row.missingInput ?? "unknown",
+    channelId: null,
+  };
 }
 
 function isVisibleItem(row: SynthesizedItemRow, now: Date): boolean {
@@ -401,18 +570,56 @@ function suppressDuplicates<T extends { fingerprint?: string; id: string; genera
 function pushTimeline(
   events: TimelineEvent[],
   source: CardSource,
+  title: string,
   generatedAt: string,
   decision: string | null,
   decidedAt: string | null,
+  scope?: { channelId?: string | null; branchId?: string | null; snoozedUntil?: string | null },
 ): void {
-  events.push({ type: "generated", source, occurredAt: generatedAt, reason: null });
+  events.push({
+    type: "generated",
+    source,
+    title,
+    occurredAt: generatedAt,
+    reason: null,
+    channelId: scope?.channelId ?? null,
+    branchId: scope?.branchId ?? null,
+    snoozedUntil: null,
+  });
   if (decision && decidedAt && decision !== "pinned" && decision !== "unpinned") {
     events.push({
       type: decision as TimelineEventType,
       source,
+      title,
       occurredAt: decidedAt,
       reason: null,
+      channelId: scope?.channelId ?? null,
+      branchId: scope?.branchId ?? null,
+      snoozedUntil: scope?.snoozedUntil ?? null,
     });
+  }
+}
+
+/**
+ * A proposal decision as a timeline row.
+ *
+ * Snoozes and dismissals keep the ordinary types, so they fall under the
+ * filters a person already reaches for. The other two get their own, because
+ * no existing type describes them without overstating: an approval here buys
+ * creative preparation and nothing else.
+ */
+function proposalEventType(
+  decision: CampaignProposalCardView["decisions"][number]["decision"],
+): TimelineEventType {
+  switch (decision) {
+    case "approved_for_preparation":
+      return "proposal-approved";
+    case "changes_requested":
+      return "changes-requested";
+    case "snoozed":
+      return "snoozed";
+    case "dismissed":
+      return "dismissed";
   }
 }
 
@@ -422,6 +629,7 @@ const ALL_SECTIONS: readonly GrowthIntelligenceSection[] = [
   "insights",
   "data_gaps",
   "timeline",
+  "campaign_proposals",
 ];
 
 /**
@@ -430,7 +638,9 @@ const ALL_SECTIONS: readonly GrowthIntelligenceSection[] = [
  * Reads only: every row arrives tenant-scoped from its owning repository.
  * The month is canonical `YYYY-MM`; the view never relabels evidence.
  */
-export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput): GrowthIntelligenceView {
+export function buildGrowthIntelligenceView(
+  input: GrowthIntelligenceViewInput,
+): GrowthIntelligenceView {
   if (!CANONICAL_MONTH.test(input.activityMonth)) {
     throw new Error(`Activity month must be canonical YYYY-MM, got ${input.activityMonth}.`);
   }
@@ -465,6 +675,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
       timeline.push({
         type: "generated",
         source,
+        title: item.title,
         occurredAt: item.createdAt,
         reason: null,
       });
@@ -473,6 +684,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
         timeline.push({
           type: "draft-requested",
           source,
+          title: item.title,
           occurredAt: draft.requestedAt,
           reason: null,
         });
@@ -480,6 +692,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
           timeline.push({
             type: "draft-created",
             source,
+            title: item.title,
             occurredAt: draft.updatedAt,
             reason: null,
           });
@@ -487,6 +700,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
           timeline.push({
             type: "retry",
             source,
+            title: item.title,
             occurredAt: draft.updatedAt,
             reason: null,
           });
@@ -494,6 +708,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
           timeline.push({
             type: "draft-failed",
             source,
+            title: item.title,
             occurredAt: draft.updatedAt,
             reason: null,
           });
@@ -527,16 +742,15 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
   const visibleItems = uniqueItems.filter((row) => isVisibleItem(row, input.now));
 
   if (sections.has("recommendations")) {
+    const provenance = input.researchProvenance ?? {};
     for (const row of visibleItems.filter((item) => item.kind === "recommendation")) {
-      recommendations.push(toRecommendationCardFromItem(row, input.activityMonth));
+      recommendations.push(toRecommendationCardFromItem(row, input.activityMonth, provenance));
     }
   }
 
   const insights: InsightCard[] = sections.has("insights")
     ? [
-        ...channelLanes.insights
-          .filter((row) => row.actionable)
-          .map(toInsightCardFromChannel),
+        ...channelLanes.insights.filter((row) => row.actionable).map(toInsightCardFromChannel),
         ...visibleItems
           .filter((row) => row.kind === "insight")
           .map((row) => toInsightCardFromItem(row, input.activityMonth)),
@@ -545,9 +759,7 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
 
   const dataGaps: DataGapCard[] = sections.has("data_gaps")
     ? [
-        ...channelLanes.dataGaps
-          .filter((row) => row.actionable)
-          .map(toDataGapCardFromChannel),
+        ...channelLanes.dataGaps.filter((row) => row.actionable).map(toDataGapCardFromChannel),
         ...visibleItems
           .filter((row) => row.kind === "data_gap")
           .map((row) => toDataGapCardFromItem(row, input.activityMonth)),
@@ -563,22 +775,95 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
       pushTimeline(
         timeline,
         { kind: "channel_recommendation", id: row.id },
+        row.headline,
         row.generatedAt,
         row.decision?.decision ?? null,
         row.decision?.createdAt ?? null,
+        {
+          channelId: row.channelId,
+          branchId: row.branchId,
+          snoozedUntil: row.decision?.snoozedUntil ?? null,
+        },
       );
     }
     for (const row of uniqueItems) {
       pushTimeline(
         timeline,
         { kind: "synthesized_item", id: row.id },
+        row.narrative,
         row.generatedAt,
         row.decision,
         row.decidedAt,
+        { channelId: null, branchId: null, snoozedUntil: row.snoozedUntil },
       );
+    }
+    for (const event of input.researchActivity ?? []) {
+      timeline.push({
+        type:
+          event.kind === "started"
+            ? "research-started"
+            : event.kind === "finished"
+              ? "research-finished"
+              : "research-retried",
+        source: { kind: "research_pipeline", id: event.pipelineId },
+        title: event.title,
+        occurredAt: event.occurredAt,
+        reason: null,
+      });
+    }
+    // Proposals, including the settled ones. A dismissal belongs in the record
+    // of what a person decided; hiding it there would leave the history saying
+    // only what was agreed to.
+    for (const proposal of input.campaignProposals ?? []) {
+      const source = { kind: "campaign_proposal", id: proposal.proposalId } as const;
+      const title =
+        proposal.content.kind === "document"
+          ? proposal.content.document.title
+          : "Campaign proposal";
+      timeline.push({
+        type: "generated",
+        source,
+        title,
+        occurredAt: proposal.createdAt,
+        reason: null,
+      });
+      if (proposal.content.kind === "document") {
+        timeline.push({
+          type: "proposal-ready",
+          source,
+          title,
+          occurredAt: proposal.content.writtenAt,
+          reason: null,
+        });
+      }
+      for (const decision of proposal.decisions) {
+        timeline.push({
+          type: proposalEventType(decision.decision),
+          source,
+          title,
+          occurredAt: decision.decidedAt,
+          // The words the decider wrote, carried as written. Instructions
+          // first: on a change request they are the point of the row.
+          reason: decision.instructions ?? decision.reason,
+          snoozedUntil: decision.snoozedUntil,
+        });
+      }
     }
     timeline.sort((left, right) => right.occurredAt.localeCompare(left.occurredAt));
   }
+
+  // Identical lifecycle deliveries collapse to one named event: a retried
+  // pipeline emits one start and one terminal event per transition, never a
+  // duplicated row for the same instant.
+  const seenTimelineKeys = new Set<string>();
+  const timelineEvents = wantTimeline
+    ? timeline.filter((event) => {
+        const key = `${event.type}|${event.source.kind}|${event.source.id}|${event.occurredAt}`;
+        if (seenTimelineKeys.has(key)) return false;
+        seenTimelineKeys.add(key);
+        return true;
+      })
+    : [];
 
   return {
     activityMonth: input.activityMonth,
@@ -589,7 +874,10 @@ export function buildGrowthIntelligenceView(input: GrowthIntelligenceViewInput):
     },
     insights,
     dataGaps,
-    timeline: wantTimeline ? timeline.slice(0, 50) : [],
+    timeline: wantTimeline ? timelineEvents.slice(0, 50) : [],
+    campaignProposals: sections.has("campaign_proposals")
+      ? laneProposals(input.campaignProposals ?? [])
+      : [],
     counts: {
       opportunities: sections.has("opportunities") ? opportunities.length : 0,
       recommendations: recommendations.length,

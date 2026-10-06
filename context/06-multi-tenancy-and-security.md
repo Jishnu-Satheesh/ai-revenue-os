@@ -54,6 +54,22 @@ The vocabulary, in full, is the seeded catalogue. Examples:
 - `budget.modify`
 - `customer_data.export`
 
+## Organization invitations and team management
+
+A client organization invites its own people without involving the agency: an
+`organization_invitations` row binds one email address to one organization role,
+and accepting writes an explicit `organization_memberships` row. The invitee may
+be a complete outsider. Token discipline, opaque refusals, and rate limiting
+mirror the account invitations in `specs/017-account-identity-and-access.md`.
+
+Team management uses the `organization.member.invite`, `organization.member.manage_role`,
+and `organization.member.remove` permissions (owner and admin). Role changes and
+removals write `organization_memberships` directly under RLS, and the
+`enforce_organization_role_ceiling` trigger refuses grants at or above the
+actor's own role plus any attempt on the last owner. Every grant, change,
+removal, and invitation lifecycle step emits an `organization_member.*` audit
+event. The Team Members tab in organization Settings is the UI.
+
 ## Secrets
 
 - Do not store provider access tokens in plaintext application tables.

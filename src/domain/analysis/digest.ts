@@ -56,22 +56,27 @@ export function createFindingCalculationDigest(input: {
 }
 
 /**
- * The monthly resolver version. A completed run is reusable only under the
- * resolver that bound it; bumping this retires every cached run at once.
+ * Version 2 drops the month label. A key minted under version 1 named a
+ * calendar month; this one names a window. Bumping rather than reusing means
+ * every run cached under the old scheme recomputes once, which is correct --
+ * a month's arithmetic must never be reused under a range's heading.
  */
-export const MONTHLY_ANALYSIS_RESOLVER_VERSION = 1;
+export const ANALYSIS_RESOLVER_VERSION = 2;
 
 /**
- * The content address of one monthly analysis: every input that could change
- * its answer, and nothing else. A late correction, a held reconciliation, a
- * supersession, or a newly projected row changes the evidence digest and
- * makes the prior run ineligible immediately. No TTL, no wall clock.
+ * The identity of one analysable question: who is asking, about which channel
+ * and window, in which zone, at which grain, with which arithmetic, over which
+ * evidence.
+ *
+ * `evidenceDigest` is the ingredient that makes this a cache key rather than a
+ * bookmark. A correction, a supersession, a held decision, a new projection or
+ * a detector version change all move it, so a completed run stops matching the
+ * moment its inputs stop being the current ones. See ADR 0043 and ADR 0048.
  */
-export function createMonthlyAnalysisCacheKey(input: {
+export function createWindowAnalysisCacheKey(input: {
   organizationId: string;
   channelId: string | null;
   branchId: string | null;
-  month: string;
   windowStart: string;
   windowEnd: string;
   timeZone: string;
@@ -84,11 +89,10 @@ export function createMonthlyAnalysisCacheKey(input: {
   return createHash("sha256")
     .update(
       canonicalize({
-        resolverVersion: MONTHLY_ANALYSIS_RESOLVER_VERSION,
+        resolverVersion: ANALYSIS_RESOLVER_VERSION,
         organizationId: input.organizationId,
         channelId: input.channelId,
         branchId: input.branchId,
-        month: input.month,
         windowStart: input.windowStart,
         windowEnd: input.windowEnd,
         timeZone: input.timeZone,

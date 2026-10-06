@@ -29,6 +29,19 @@ function input(): GrowthIntelligenceRequestFingerprintInput {
 }
 
 describe("createGrowthIntelligenceRequestFingerprint", () => {
+  it("fingerprints the handoff child kind and reason distinctly", () => {
+    const child = createGrowthIntelligenceRequestFingerprint({
+      ...input(),
+      kind: "market_evidence_changed",
+      triggerReason: "market_research_completed",
+      businessEvidenceDigest: null,
+      localTimeBucket: "immediate",
+    });
+
+    expect(child).toMatch(/^[a-f0-9]{64}$/);
+    expect(child).not.toBe(createGrowthIntelligenceRequestFingerprint(input()));
+  });
+
   it("returns a stable SHA-256 fingerprint", () => {
     expect(createGrowthIntelligenceRequestFingerprint(input())).toMatch(/^[a-f0-9]{64}$/);
     expect(createGrowthIntelligenceRequestFingerprint(input())).toBe(
@@ -139,5 +152,20 @@ describe("createGrowthIntelligenceRequestFingerprint", () => {
     value.localTimeBucket = "whenever";
 
     expect(() => createGrowthIntelligenceRequestFingerprint(value)).toThrow(/bucket/i);
+  });
+
+  it("stays frozen while pipeline contracts are introduced alongside it", () => {
+    expect(createGrowthIntelligenceRequestFingerprint(input())).toBe(
+      "83ff7ff74b7da6205d7f09cb66c95d83bec41516160e4eef7bdde618719e262f",
+    );
+  });
+
+  it("rejects unknown fields instead of silently widening the bound scope", () => {
+    expect(() =>
+      createGrowthIntelligenceRequestFingerprint({
+        ...input(),
+        pipelineId: "99999999-9999-4999-8999-999999999999",
+      } as GrowthIntelligenceRequestFingerprintInput),
+    ).toThrow();
   });
 });

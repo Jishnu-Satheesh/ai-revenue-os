@@ -64,4 +64,5 @@ Workers may propose new memory. Authoritative fact changes require deterministic
 - Prefer recent and verified items.
 - Include provenance in the model context.
 - Limit retrieved content to the minimum necessary.
+- Read-through structured fact search matches keys and rendered JSON values within the most recently updated 200 facts in the authorized organization/branch scope. Its returned result limit is separate; older facts outside that candidate window are not searched. Source read failure remains an unavailable result, never an empty match.
 - Do not retrieve sensitive customer-level data unless the worker is explicitly authorized.

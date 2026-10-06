@@ -4,60 +4,29 @@
     "/organizations/[organizationId]/overview": {
       "targetKind": "existing-ui",
       "projectId": "8393ba3e-6abf-458c-a693-bac68f26161b",
-      "baselineDraftId": "298e0aae-820f-40f9-8df9-bc894e78649e",
-    "activeDraftId": "8de86a1e-5f2b-477c-ab6e-5d2eddeae8dd",
+      "activeDraftId": "7950207a-e504-4ee6-82a8-b86aa05b2464",
       "designSystemPath": ".superdesign/design-system.md",
       "contextFiles": [
         ".superdesign/design-system.md",
-        "src/app/globals.css",
+        "docs/superpowers/specs/2026-09-11-organization-home-design.md",
+        ".superdesign/organization-home/prototype.html",
+        "src/app/globals.css:1:105",
         "src/app/(platform)/organizations/[organizationId]/overview/page.tsx",
-        "src/components/organizations/organization-intelligence-cockpit.tsx",
-        "src/components/organizations/channel-economics-overview.tsx",
-        "src/components/organizations/digital-twin-workspace.tsx",
-        "src/components/organizations/overview-editor.tsx",
+        "src/components/organizations/overview-report.tsx:60:143",
         "src/components/layout/app-shell.tsx",
-        "src/components/layout/sidebar.tsx",
-        "src/components/layout/organization-switcher.tsx",
-        "src/components/layout/route-context.tsx",
-        "src/components/accounts/sidebar-identity.tsx",
-        "src/components/integrations/health-status.tsx",
-        "src/components/ui/sidebar.tsx",
-        "src/components/ui/card.tsx",
-        "src/components/ui/alert.tsx",
-        "src/components/ui/button.tsx",
-        "src/components/ui/badge.tsx",
-        "src/components/ui/chart.tsx",
-        "src/components/ui/tabs.tsx"
+        "src/components/layout/sidebar.tsx"
       ],
       "fingerprints": {
-        ".superdesign/design-system.md": "6b82a4e5bdb263638930208e74577b5a70c818721e57618fc37e9a3d187361ef",
-        "src/app/globals.css": "a223405ba640ef98a22575b1d98e90d2fc2080815354f1e7f28ed9a85bd7764c",
-        "src/app/(platform)/organizations/[organizationId]/overview/page.tsx": "4de94c35982defbc5097320e3adfe9790f078661fc006d75d54265d403ef6bee",
-        "src/components/organizations/organization-intelligence-cockpit.tsx": "43e9795be046a6d8ee6fc405c223f0e72f5b239be90b50c064a272f679bbdaf3",
-        "src/components/organizations/channel-economics-overview.tsx": "f0903fb3f9606b7273ef1a73f7edf946087f32e26dbdc8987f26c9ecefe27563",
-        "src/components/organizations/digital-twin-workspace.tsx": "09c771c43bf87bd57206313fd97d972bc2c64deff551bdaedc9a8e84ed3a4ee5",
-        "src/components/organizations/overview-editor.tsx": "3fc0fbcddd148a8ef6c21da2a45e6dd87cbd7815c4e8ab96d609faa294773720",
+        ".superdesign/design-system.md": "87056df0a2fec772d8f15c75fa938f247fdb1206f0b4ce0e47e7fc43cebed608",
+        "docs/superpowers/specs/2026-09-11-organization-home-design.md": "544f152412e7ed20444007bb7616b31f1e33c591d857331ae8dbbfc6c608b1aa",
+        ".superdesign/organization-home/prototype.html": "a6332ca7adf59a317a6891fbe94f57b9a54f62b9c94c8e6a0384c239e8e05bea",
+        "src/app/globals.css": "9d84771e9dd3ffba9016d03395f9f7ee8c0a18104ef6f8ccff1f2063a21257cb",
+        "src/app/(platform)/organizations/[organizationId]/overview/page.tsx": "adc1a1b6c46ba7a1ad8b975cb8330fd23159578faf144640acd48abe4da3dd1f",
+        "src/components/organizations/overview-report.tsx": "c346c6254af947d7e97eb58a4f56215dad70c1367f4bb8128a00aa02f3534c66",
         "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
-        "src/components/layout/sidebar.tsx": "e7d3304336bdc438d5139a5bc35022bfeacf9853877e3defe6622d09f2ef188b",
-        "src/components/layout/organization-switcher.tsx": "bf3df750ea428345ba6b1d0334de950fcd138df5a5646d3320edab733369736f",
-        "src/components/layout/route-context.tsx": "ba9da02587a644b87f309875b40fcafa4a8a5d2c253c66f4dbfbafc3973abfcb",
-        "src/components/accounts/sidebar-identity.tsx": "0d48e272f77f2393a2f2f1da931bd17b9bb5c6d16183979371d7e62e962d93d1",
-        "src/components/integrations/health-status.tsx": "1367225f5b7848f3f4365a1cdf4ee5709721b1d43feddb0e31adb76742c0baa4",
-        "src/components/ui/sidebar.tsx": "0fedefcbefab30499e62944a6ab15ed9641ee81ec602974cf3fc00905bd505b6",
-        "src/components/ui/card.tsx": "b2b19796c2454d90a1ceab4cff5db9a171d6d331e6386ff3d1295050563f7d55",
-        "src/components/ui/alert.tsx": "8a3130341608d5d3d4b84e3883071153c00fd67cdf02c433866b0417ac84c2ca",
-        "src/components/ui/button.tsx": "dc0a281924aa9f24eb599a08ab7a9bb114adb3de1711ca5217e8ca4ee1f38afb",
-        "src/components/ui/badge.tsx": "81ae24325209085fabe6b2e8bf81117fc0011c9e915f4c7bbe76e5ac2517f26a",
-        "src/components/ui/chart.tsx": "a3dbb996f74497dd8288d85a5649d604b63d7715a960c41335362c389e2f7cb2",
-        "src/components/ui/tabs.tsx": "74b0ce5df5a5d65b15a051d37d7e8fc734c124ee5fe1c5e5e74c711d24cad053"
+        "src/components/layout/sidebar.tsx": "79e6b159c149d941f7d9472430c0cb3606cb4247a62d0e91c4187d7250dbcdc1"
       },
-      "components": [
-        {
-          "name": "OrganizationWorkspaceShell",
-          "id": "c8f6e848-384a-4642-8cdb-26a491bddf12",
-          "sourcePath": "src/components/layout/app-shell.tsx"
-        }
-      ],
+      "components": [],
       "drafts": {
         "298e0aae-820f-40f9-8df9-bc894e78649e": {
           "title": "Current Organization Overview — 2026-08-24",
@@ -82,20 +51,25 @@
           "parentDraftId": "298e0aae-820f-40f9-8df9-bc894e78649e",
           "currentVersion": 1
         },
-      "d174c71c-c747-4cea-aa4b-0728438aba00": {
-        "title": "Revenue Observatory",
-        "visualDirection": "premium dark analytical instrument with a restrained economics canvas, ranked signal rail, channel scan, and explicit evidence lineage",
-        "parentDraftId": "298e0aae-820f-40f9-8df9-bc894e78649e",
-        "currentVersion": 1
+        "d174c71c-c747-4cea-aa4b-0728438aba00": {
+          "title": "Revenue Observatory",
+          "visualDirection": "premium dark analytical instrument with a restrained economics canvas, ranked signal rail, channel scan, and explicit evidence lineage",
+          "parentDraftId": "298e0aae-820f-40f9-8df9-bc894e78649e",
+          "currentVersion": 1
+        },
+        "8de86a1e-5f2b-477c-ab6e-5d2eddeae8dd": {
+          "title": "Growth Intelligence — Hybrid",
+          "visualDirection": "locked hybrid light client-facing command center with a pale sage focal economics instrument, light ranked action rail, channel comparison, evidence lineage, and collapsed organization foundation",
+          "parentDraftId": "6f06e200-4f70-411e-9fdb-8306449673e1",
+          "currentVersion": 2
+        },
+        "7950207a-e504-4ee6-82a8-b86aa05b2464": {
+          "title": "Overview — Organization Home",
+          "visualDirection": "User-approved organization home: real campaigns and creative library, organization identity, attention, goals and workspace navigation. Fictional standalone prototype; implementation plan proposed. Supersedes analytics-first Overview direction.",
+          "currentVersion": 2
+        }
       },
-      "8de86a1e-5f2b-477c-ab6e-5d2eddeae8dd": {
-        "title": "Growth Intelligence — Hybrid",
-        "visualDirection": "locked hybrid light client-facing command center with a pale sage focal economics instrument, light ranked action rail, channel comparison, evidence lineage, and collapsed organization foundation",
-        "parentDraftId": "6f06e200-4f70-411e-9fdb-8306449673e1",
-        "currentVersion": 2
-      }
-    },
-    "updatedAt": "2026-08-24T05:37:44.000Z"
+      "updatedAt": "2026-09-11T05:26:58.325421+00:00"
     },
     "/organizations/[organizationId]/economics": {
       "targetKind": "existing-ui",
@@ -350,12 +324,112 @@
       "components": [],
       "drafts": {
         "36eb0389-670f-4907-9b6b-c8c0548a454e": {
-          "title": "Report intake \u2014 recognition led",
+          "title": "Report intake — recognition led",
           "visualDirection": "recognition-led four-step intake replacing both raw JSON textareas; known-family confirmation card, guided column mapper for unrecognised exports, separate approvals for meaning and for what gets recorded; platform emerald-on-neutral shadcn language kept unchanged",
           "currentVersion": 1
         }
       },
       "updatedAt": "2026-08-22T12:08:51.920960Z"
+    },
+    "/organizations/[organizationId]/growth-intelligence": {
+      "targetKind": "existing-ui",
+      "projectId": "99074e63-8b31-43b3-b3bf-d29ae0583535",
+      "baselineDraftId": "5e38b367-f8e0-4707-ba46-5b5be3d65822",
+      "activeDraftId": "5e38b367-f8e0-4707-ba46-5b5be3d65822",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/market-monitoring-experience/brief.md",
+        "src/app/globals.css",
+        "src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx",
+        "src/components/layout/app-shell.tsx",
+        "src/components/layout/sidebar.tsx",
+        "src/components/growth-intelligence/campaign-draft-action.tsx",
+        "src/components/growth-intelligence/data-gaps.tsx",
+        "src/components/growth-intelligence/growth-intelligence-workspace.tsx",
+        "src/components/growth-intelligence/insights-list.tsx",
+        "src/components/growth-intelligence/intelligence-card.tsx",
+        "src/components/growth-intelligence/intelligence-timeline.tsx",
+        "src/components/growth-intelligence/market-profile-review.tsx",
+        "src/components/growth-intelligence/market-watch.tsx",
+        "src/components/growth-intelligence/priority-actions.tsx",
+        "src/components/growth-intelligence/source-evidence-drawer.tsx",
+        ".superdesign/growth-intelligence/primitives-context.md",
+        "src/components/growth-intelligence/market-monitoring-dialog.tsx:758:1193"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "87056df0a2fec772d8f15c75fa938f247fdb1206f0b4ce0e47e7fc43cebed608",
+        ".superdesign/market-monitoring-experience/brief.md": "52ade45214f751ac3ee831ac636a6882e7641645025b06f1cb6f14da14137c8a",
+        "src/app/globals.css": "c9277914defc17b2d2378e3e257f3d95dc4222e710e3f7e62a9b7bde62427114",
+        "src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx": "f093cc9006f5cbae675f79574f8b706aa10e6b3340f199a2eb726d5c49c5254a",
+        "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+        "src/components/layout/sidebar.tsx": "79e6b159c149d941f7d9472430c0cb3606cb4247a62d0e91c4187d7250dbcdc1",
+        "src/components/growth-intelligence/campaign-draft-action.tsx": "3659ce1ab8382925b831278853cd22d9a8ac92aa8778979c190717b8fa099652",
+        "src/components/growth-intelligence/data-gaps.tsx": "680f3446138327b9e4c6f091688208bd7970404a015e1e1f34658eb2de3f77cd",
+        "src/components/growth-intelligence/growth-intelligence-workspace.tsx": "a0867619d39c3a10d608fb9ba25f5c222c4d6c4165187acb2ec9e3661598d76e",
+        "src/components/growth-intelligence/insights-list.tsx": "914c324d195c8a3bb9ac6a3d14002fa1c39ea7455f124958f9a2ee2d38065115",
+        "src/components/growth-intelligence/intelligence-card.tsx": "f5f72e967239529f1a665ae9ee07652e1840684400f9d8d5ac6e79afaa244a4b",
+        "src/components/growth-intelligence/intelligence-timeline.tsx": "6f6c5af1a4ecca4ff592d8e711c8f5ba521b4a797a12db2bfdd24a8e8426a4ee",
+        "src/components/growth-intelligence/market-profile-review.tsx": "cc623cf2b4be58d4a483373e0a3a608f823a7ae5747589c78b8ddda7062c6bd2",
+        "src/components/growth-intelligence/market-watch.tsx": "f671058bab0f1668c8732a13c9348414e82e1c25550fa4823b671dde946a9777",
+        "src/components/growth-intelligence/priority-actions.tsx": "bc696ed8949cc823b387ed4fdccae3216c106905de70905a03ee8a11677512b9",
+        "src/components/growth-intelligence/source-evidence-drawer.tsx": "cc123a188c2b0c985c71076f9c6b3f94fd07237fb4dc1308cc70e28ff3d22ec1",
+        ".superdesign/growth-intelligence/primitives-context.md": "8507600ace8a803dde1abf8f15f1b1e5c746bbd9a7c41aabbdf6b792856892c5",
+        "src/components/growth-intelligence/market-monitoring-dialog.tsx": "4c667be1754cc58ea016f0d1a45239a97d307c834a7597fd12448d25f7479a1c"
+      },
+      "components": [
+        {
+          "name": "GrowthWorkspaceSidebar",
+          "id": "31072f0b-a9ef-4029-a095-c28d8848fd0a",
+          "sourcePath": "src/components/layout/sidebar.tsx"
+        }
+      ],
+      "drafts": {
+        "5e38b367-f8e0-4707-ba46-5b5be3d65822": {
+          "title": "Growth Intelligence — Market Watch and reports",
+          "visualDirection": "Four-tab Growth Intelligence review draft; report-led Market Watch, independent research projects, readable English reports, PDF download and selected-item acceptance. Fictional prototype; application implementation remains separate.",
+          "currentVersion": 3
+        }
+      },
+      "updatedAt": "2026-09-13T18:06:18.242891+00:00",
+      "referenceIds": [
+        "80ffebe4-cb3e-44b2-b79e-d17c993a2aac",
+        "4383a445-9f5c-4f42-8779-5989d558db2b"
+      ]
+    },
+    "/organizations/[organizationId]/campaigns/studio": {
+      "targetKind": "new-ui",
+      "projectId": "1acb3016-c8be-4e30-a461-3e06e9782041",
+      "activeDraftId": "21d0f45c-6ad2-4d78-a831-03df6684d43a",
+      "designSystemPath": ".superdesign/design-system.md",
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        ".superdesign/creative-studio-independent/prototype.html",
+        "docs/superpowers/specs/2026-09-20-independent-creative-studio-design.md",
+        "docs/design/creative-studio-independent/technical-contract.md",
+        "src/components/layout/sidebar.tsx",
+        "src/components/layout/app-shell.tsx",
+        "src/app/globals.css"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "87056df0a2fec772d8f15c75fa938f247fdb1206f0b4ce0e47e7fc43cebed608",
+        ".superdesign/creative-studio-independent/prototype.html": "9bdef5dc39342f1f1425149233766003e0ae05bb9535963288b00ad60fb41672",
+        "docs/superpowers/specs/2026-09-20-independent-creative-studio-design.md": "3f42e7935960626613262054efe60ae264c7afceae3991e6df1fd59154f04825",
+        "docs/design/creative-studio-independent/technical-contract.md": "c52ac3b90233511caed964943ffced12cc466fd5d06d4a2df3ecb4913bb3ec70",
+        "src/components/layout/sidebar.tsx": "54fe05f95e5bb2bc853e16380327623a7f0bd9924d09a8ae8454a44b1a039708",
+        "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+        "src/app/globals.css": "c9277914defc17b2d2378e3e257f3d95dc4222e710e3f7e62a9b7bde62427114"
+      },
+      "components": [],
+      "drafts": {
+        "21d0f45c-6ad2-4d78-a831-03df6684d43a": {
+          "title": "Creative Studio — Independent workspace (proposed)",
+          "visualDirection": "20/80 settings and history/canvas; optional campaign; complete-poster mock; real progressive provider previews required for implementation; unapproved text-derived design, sketch unavailable.",
+          "currentVersion": 2
+        }
+      },
+      "updatedAt": "2026-09-24T04:07:03.416Z",
+      "previewUrl": "https://p.superdesign.dev/draft/21d0f45c-6ad2-4d78-a831-03df6684d43a"
     }
   }
 }

@@ -18,6 +18,19 @@ import type { IntegrationDataSourceRow } from "@/modules/integrations/applicatio
 import type { IntegrationHubSnapshot } from "@/modules/integrations/application/read-model";
 import { googleBusinessProfileDefinition } from "@/modules/integrations/providers/google-business-profile/definition";
 
+const navigationMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+  params: new URLSearchParams(),
+  pathname: "/test-path",
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: navigationMocks.push, replace: navigationMocks.replace }),
+  useSearchParams: () => navigationMocks.params,
+  usePathname: () => navigationMocks.pathname,
+}));
+
 const organizationId = "11111111-1111-4111-8111-111111111111";
 const dataSourceId = "22222222-2222-4222-8222-222222222222";
 

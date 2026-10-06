@@ -365,7 +365,10 @@ describe("generateCampaignBundle", () => {
       expect.objectContaining({
         imageGuidance: expect.objectContaining({
           subjectDescription: "Kingfish curry in a clay pot.",
-          references: [
+          // The final-image set only. A rejected design reaches the Blueprint
+          // stage as evidence but must never reach the model that draws the
+          // finished picture — see reference-fence.test.ts.
+          finalImageReferences: [
             expect.objectContaining({
               role: "subject",
               ordinal: 0,

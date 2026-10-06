@@ -83,14 +83,16 @@ describe("isTruncatedCategoricalValue", () => {
 
 describe("isBareCategoricalValueNotDeclared", () => {
   it("recognises the pre-Task-4 recording, exactly as it reads on staging", () => {
-    expect(isBareCategoricalValueNotDeclared("ReportProjectionError: CATEGORICAL_VALUE_NOT_DECLARED")).toBe(
-      true,
-    );
+    expect(
+      isBareCategoricalValueNotDeclared("ReportProjectionError: CATEGORICAL_VALUE_NOT_DECLARED"),
+    ).toBe(true);
     expect(isBareCategoricalValueNotDeclared("CATEGORICAL_VALUE_NOT_DECLARED")).toBe(true);
   });
 
   it("is false once the failure names a label -- the modern, parseable shape", () => {
-    const failure = new ReportCategoricalValueNotDeclared("cancel_reason", "CLOSED", ["2026-03-04"]);
+    const failure = new ReportCategoricalValueNotDeclared("cancel_reason", "CLOSED", [
+      "2026-03-04",
+    ]);
     const detail = ["ReportProjectionError", failure.code, failure.message].join(": ");
     expect(isBareCategoricalValueNotDeclared(detail)).toBe(false);
   });
@@ -104,7 +106,9 @@ describe("isBareCategoricalValueNotDeclared", () => {
   });
 
   it("is false for an unrelated failure", () => {
-    expect(isBareCategoricalValueNotDeclared("ReportProjectionFailure: INVALID_LOCAL_DATE")).toBe(false);
+    expect(isBareCategoricalValueNotDeclared("ReportProjectionFailure: INVALID_LOCAL_DATE")).toBe(
+      false,
+    );
     expect(isBareCategoricalValueNotDeclared("")).toBe(false);
   });
 });

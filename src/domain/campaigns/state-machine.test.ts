@@ -54,6 +54,20 @@ describe("campaign state machine", () => {
     expect(canTransition("approved", "executing")).toBe(false);
   });
 
+  it("sends an approved campaign back to review when its approval is superseded", () => {
+    // A new bundle version revokes the approval on the old one, and the
+    // database moves the campaign with it. Without this transition the two
+    // layers disagree: staging held a campaign in `approved` whose only
+    // approval had been revoked, and the portfolio badge said so out loud.
+    expect(canTransition("approved", "ready_for_review")).toBe(true);
+  });
+
+  it("still refuses to reopen an approved campaign as a draft", () => {
+    // Back to review is not the same as back to the drawing board: review is
+    // where a version that already exists gets looked at again.
+    expect(canTransition("approved", "draft")).toBe(false);
+  });
+
   it("lets a readiness gap recover once the evidence arrives", () => {
     expect(canTransition("needs_data", "ready_for_review")).toBe(true);
   });

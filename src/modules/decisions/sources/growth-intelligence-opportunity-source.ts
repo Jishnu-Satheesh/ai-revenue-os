@@ -19,6 +19,31 @@ import {
  * Data Gaps stay where they are; an Insight is missing draft prerequisites by
  * kind, not by evidence, so it reports that instead of a gap list that
  * implies providing something would qualify it.
+ *
+ * ---------------------------------------------------------------------------
+ * DORMANT BY DESIGN. Nothing constructs this, and nothing should until the
+ * missing evidence exists. Reviewed 2026-09-16 against Spec 025 Task 7.
+ *
+ * `checkDraftEligibility` ends at `qualifyDraftImpact`, which demands a
+ * governed impact range with a currency, a declared confidence, the authoring
+ * detector's own words for that confidence, at least one stated assumption and
+ * the source revisions the range rests on. It never estimates, by design.
+ *
+ * A Growth Intelligence recommendation carries none of those. `SynthesizedItemRow`
+ * has no impact fields at all — the numbers on `OpportunityCard` arrive from the
+ * Decision Engine's own feed, not from synthesis. So wiring this source today
+ * would mean inventing an impact range for every recommendation, which is
+ * exactly the fabricated numeric impact the contract forbids (D06, and
+ * `AGENTS.md` section 6).
+ *
+ * Its purpose is now served without that: a campaign proposal states its
+ * argument, its cost ceiling and how it would be measured, and says plainly
+ * what it cannot estimate — see
+ * `docs/collaboration/campaign-and-growth-intelligence-seam.md`. Wire this only
+ * once a detector actually authors impact evidence for synthesized items; do
+ * not delete it, because the eligibility gates it composes are the ones such a
+ * detector would still have to pass.
+ * ---------------------------------------------------------------------------
  */
 
 export const governedDraftActionParametersSchema = z.strictObject({

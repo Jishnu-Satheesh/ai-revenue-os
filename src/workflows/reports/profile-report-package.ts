@@ -189,6 +189,13 @@ function headerCandidateDigest(rowPosition: number, values: unknown[]): HeaderCa
     (value) => value !== null && value !== undefined && value !== "",
   );
   if (populated.length < 2 || !populated.every((value) => typeof value === "string")) return null;
+  // A CSV data row is all strings, exactly like a header row, so without this
+  // check its figures become header candidates and change the fingerprint --
+  // which is how a CSV of a known report stopped matching its own admission.
+  // A row with even one figure in it is data, never a header candidate. XLSX
+  // data rows never reach here: typed numbers and dates already fail the
+  // string check above, and a genuine header row of labels still passes.
+  if (!readsAsLabels(populated as string[])) return null;
   const headers = normalizedHeaders(candidates);
   if (headers.length !== populated.length) return null;
   const normalizedHeaderDigests = headers.map(headerValueDigest);
@@ -197,9 +204,7 @@ function headerCandidateDigest(rowPosition: number, values: unknown[]): HeaderCa
     fieldCount: headers.length,
     digest: createHash("sha256").update(JSON.stringify(normalizedHeaderDigests)).digest("hex"),
     normalizedHeaderDigests,
-    normalizedHeaders: readsAsLabels(populated as string[])
-      ? headers.slice(0, MAX_RETAINED_HEADERS)
-      : [],
+    normalizedHeaders: headers.slice(0, MAX_RETAINED_HEADERS),
   };
 }
 

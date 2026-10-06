@@ -227,6 +227,49 @@ function OverrideConfirmation({
   );
 }
 
+export type LessonReviewDetail = {
+  evidenceNote: string;
+  applicability: string;
+  reviewDate: string | null;
+};
+
+export function lessonReviewDetailFor(item: MemoryItemView): LessonReviewDetail | null {
+  if (item.memoryType !== "lesson") return null;
+  return {
+    evidenceNote:
+      "Evidence lives in Inspect chain. Only the listed roots support this lesson; a corrected source invalidates it.",
+    applicability: item.body ?? "Applicability was not recorded.",
+    reviewDate: item.reviewDueAt ?? item.observedAt ?? null,
+  };
+}
+
+function LessonExtension({ item }: { item: MemoryItemView }) {
+  const detail = lessonReviewDetailFor(item);
+  if (!detail) return null;
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-dashed p-2.5">
+      <p className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+        Lesson review
+      </p>
+      <p className="text-xs text-muted-foreground">{detail.evidenceNote}</p>
+      <p className="text-xs">
+        <span className="font-medium">Applies where: </span>
+        <span className="text-muted-foreground">{detail.applicability}</span>
+      </p>
+      <p className="text-xs">
+        <span className="font-medium">Review by: </span>
+        <span className="text-muted-foreground">
+          {detail.reviewDate ?? "No review date was recorded."}
+        </span>
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Wording stays within its settled verdict. An inconclusive result is never recorded as a
+        winning tactic, and captured lessons are reviewed here, never directly verified.
+      </p>
+    </div>
+  );
+}
+
 function ProposalRow({
   organizationId,
   item,
@@ -242,6 +285,7 @@ function ProposalRow({
   const canPromote = hasMemoryPermission(role, "memory.promote_fact");
   const canVerify = hasMemoryPermission(role, "memory.verify");
   const isFactProposal = Boolean(item.proposedFactKey);
+  const isCapturedLesson = item.memoryType === "lesson";
 
   // One key per distinct decision, held across retries: a confirm whose
   // response was lost must replay rather than be refused as no longer pending.
@@ -325,6 +369,8 @@ function ProposalRow({
           <p className="text-sm text-muted-foreground">{item.body}</p>
         ) : null}
 
+        <LessonExtension item={item} />
+
         <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-2.5">
           <ItemChainDialog
             organizationId={organizationId}
@@ -335,7 +381,12 @@ function ProposalRow({
           {canVerify ? <RejectProposal onReject={reject.mutate} isPending={isPending} /> : null}
           {canPromote ? (
             <>
-              <OverrideConfirmation onOverride={() => confirm.mutate(true)} isPending={isPending} />
+              {isCapturedLesson ? null : (
+                <OverrideConfirmation
+                  onOverride={() => confirm.mutate(true)}
+                  isPending={isPending}
+                />
+              )}
               <Button
                 size="sm"
                 className="h-7 text-xs"

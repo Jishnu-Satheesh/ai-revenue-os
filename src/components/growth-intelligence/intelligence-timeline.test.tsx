@@ -15,6 +15,7 @@ function event(overrides: Partial<TimelineEvent> = {}): TimelineEvent {
     occurredAt: "2026-09-02T08:00:00.000Z",
     reason: null,
     ...overrides,
+    title: overrides.title ?? "Extend Friday hours",
   };
 }
 
@@ -40,5 +41,40 @@ describe("IntelligenceTimeline", () => {
   it("names an empty month instead of rendering a bare rail", () => {
     render(<IntelligenceTimeline events={[]} timeZone="Asia/Dubai" />);
     expect(screen.getByText(/No activity this month/)).toBeTruthy();
+  });
+});
+
+describe("IntelligenceTimeline research rows", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("shows one row when workspace and research reads name the same transition", () => {
+    const started = event({
+      type: "research-started",
+      source: { kind: "research_pipeline", id: "40000000-0000-4000-8000-000000000004" },
+      occurredAt: "2026-09-08T06:00:00.000Z",
+      title: "Market research started — Downtown",
+    });
+    render(<IntelligenceTimeline events={[started, { ...started }]} timeZone="Asia/Dubai" />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(1);
+    expect(screen.getByText("Market research started — Downtown")).toBeTruthy();
+  });
+
+  it("labels a retried analysis without inventing progress", () => {
+    render(
+      <IntelligenceTimeline
+        events={[
+          event({
+            type: "research-retried",
+            source: { kind: "research_pipeline", id: "40000000-0000-4000-8000-000000000004" },
+            title: "Market analysis retried — Downtown",
+          }),
+        ]}
+        timeZone="Asia/Dubai"
+      />,
+    );
+    expect(screen.getByText("Market analysis retried — Downtown")).toBeTruthy();
+    expect(screen.getByText("Analysis retried · Market research")).toBeTruthy();
   });
 });

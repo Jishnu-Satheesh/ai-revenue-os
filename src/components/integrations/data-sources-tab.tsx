@@ -55,12 +55,19 @@ export function DataSourcesTab({
   metricTargets,
   role,
   timeZone,
+  defaultCurrency,
 }: Readonly<{
   organizationId: string;
   snapshot: IntegrationHubSnapshot;
   metricTargets: readonly MetricTargetChoice[];
   role: OrganizationRole;
   timeZone: string;
+  /**
+   * The organization's base currency, forwarded as the upload form's starting
+   * currency. The hub snapshot carries no organization row, so this arrives
+   * as a prop from the page; absent leaves currency manual, as before.
+   */
+  defaultCurrency?: string;
 }>) {
   const queryClient = useQueryClient();
   const [acknowledgement, setAcknowledgement] = useState<string | null>(null);
@@ -174,7 +181,12 @@ export function DataSourcesTab({
 
   return (
     <div className="flex flex-col gap-4">
-      <ReportPackageUpload organizationId={organizationId} role={role} timeZone={timeZone} />
+      <ReportPackageUpload
+        organizationId={organizationId}
+        role={role}
+        timeZone={timeZone}
+        defaultCurrency={defaultCurrency}
+      />
       {canImport ? (
         <Card>
           <CardHeader>

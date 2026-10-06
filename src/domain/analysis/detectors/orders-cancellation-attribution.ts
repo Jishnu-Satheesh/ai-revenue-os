@@ -115,7 +115,8 @@ export const ordersCancellationAttributionDetector: DetectorDeclaration = {
       return [refuse(evidence, "CANCELLATION_ATTRIBUTION_UNDIMENSIONED")];
     }
 
-    const setAside = attributions.setAsideCount + (attributions.accepted.length - dimensioned.length);
+    const setAside =
+      attributions.setAsideCount + (attributions.accepted.length - dimensioned.length);
     const baseLimitations = [...ordersCancellationAttributionDetector.limitations];
     if (setAside > 0) {
       baseLimitations.push(
@@ -153,7 +154,9 @@ export const ordersCancellationAttributionDetector: DetectorDeclaration = {
       const orderDays = new Set(orders.accepted.map((point) => point.periodStart));
       const attributionDays = new Set(dimensioned.map((point) => point.periodStart));
       const attributionsShared = dimensioned.filter((point) => orderDays.has(point.periodStart));
-      const ordersShared = orders.accepted.filter((point) => attributionDays.has(point.periodStart));
+      const ordersShared = orders.accepted.filter((point) =>
+        attributionDays.has(point.periodStart),
+      );
       const ordersTotal = sumNumerators(ordersShared);
       // A share of no orders is undefined, not zero.
       if (attributionsShared.length > 0 && ordersTotal > 0) {

@@ -1,0 +1,19 @@
+[
+  ".superdesign/design-system.md",
+  ".superdesign/growth-intelligence/brief.md",
+  "src/app/globals.css",
+  "src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx",
+  "src/components/layout/app-shell.tsx",
+  "src/components/layout/sidebar.tsx",
+  "src/components/growth-intelligence/campaign-draft-action.tsx",
+  "src/components/growth-intelligence/data-gaps.tsx",
+  "src/components/growth-intelligence/growth-intelligence-workspace.tsx",
+  "src/components/growth-intelligence/insights-list.tsx",
+  "src/components/growth-intelligence/intelligence-card.tsx",
+  "src/components/growth-intelligence/intelligence-timeline.tsx",
+  "src/components/growth-intelligence/market-profile-review.tsx",
+  "src/components/growth-intelligence/market-watch.tsx",
+  "src/components/growth-intelligence/priority-actions.tsx",
+  "src/components/growth-intelligence/source-evidence-drawer.tsx",
+  ".superdesign/growth-intelligence/primitives-context.md"
+]

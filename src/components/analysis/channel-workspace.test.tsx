@@ -1,10 +1,18 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const routerMock = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
+
+vi.mock("next/navigation", () => ({ useRouter: () => routerMock }));
 
 import { ChannelWorkspace } from "@/components/analysis/channel-workspace";
+import type {
+  AnalysisWindowSelection,
+  CoverageSegment,
+  CoverageWindow,
+} from "@/domain/analysis/window-selection";
 import { buildChannelWorkspaceView } from "@/modules/analysis/application/read-model";
 import type {
   ChannelAnalysisRunRecord,
@@ -33,6 +41,7 @@ function run(overrides: Partial<ChannelAnalysisRunRecord> = {}): ChannelAnalysis
     registryVersion: 1,
     detectorVersions: [{ key: "evidence.period_coverage", calculationVersion: 1 }],
     status: "completed",
+    resultDigest: "d".repeat(64),
     findingCount: 0,
     observationCount: 1,
     needsDataCount: 0,
@@ -99,20 +108,27 @@ function metricEvidence(
   } as ChannelFindingEvidenceRecord;
 }
 
-const MONTH_HORIZON = { firstMonth: "2025-12", lastMonth: "2026-02" };
+const COVERAGE_SEGMENTS: CoverageSegment[] = [{ start: "2026-01-01", end: "2026-01-31" }];
+
+const COVERAGE_WINDOWS: CoverageWindow[] = [
+  { windowStart: "2026-01-01", windowEnd: "2026-01-31", grain: "day", governedRowCount: 31 },
+];
+
+const SELECTED_WINDOW: AnalysisWindowSelection = { from: "2026-01-01", to: "2026-01-04" };
 
 type WorkspaceInput = {
   runs?: ChannelAnalysisRunRecord[];
   findings?: ChannelFindingRecord[];
   evidence?: ChannelFindingEvidenceRecord[];
   canRunAnalysis?: boolean;
-  monthHorizon?: { firstMonth: string; lastMonth: string } | null;
-  selectedMonth?: string | null;
+  segments?: CoverageSegment[];
+  coverageWindows?: CoverageWindow[];
+  selectedWindow?: AnalysisWindowSelection | null;
   recommendations?: import("@/modules/analysis/application/ports").ChannelRecommendationRecord[];
 };
 
 /** The element on its own, so a test can re-render the same instance with a
- *  different month's view -- which is what the month picker actually does. */
+ *  different window's view -- which is what a refresh actually does. */
 function workspaceElement(input: WorkspaceInput) {
   const view = buildChannelWorkspaceView({
     runs: input.runs ?? [run()],
@@ -125,8 +141,9 @@ function workspaceElement(input: WorkspaceInput) {
       organizationId="org-1"
       channel={CHANNEL}
       view={view}
-      monthHorizon={input.monthHorizon === undefined ? MONTH_HORIZON : input.monthHorizon}
-      selectedMonth={input.selectedMonth === undefined ? "2026-01" : input.selectedMonth}
+      segments={input.segments ?? COVERAGE_SEGMENTS}
+      coverageWindows={input.coverageWindows ?? COVERAGE_WINDOWS}
+      selectedWindow={input.selectedWindow === undefined ? SELECTED_WINDOW : input.selectedWindow}
       timeZone="Asia/Dubai"
       canRunAnalysis={input.canRunAnalysis ?? true}
       channelsHref="/organizations/org-1/channels"
@@ -137,18 +154,6 @@ function workspaceElement(input: WorkspaceInput) {
 
 function renderWorkspace(input: WorkspaceInput) {
   return render(workspaceElement(input));
-}
-
-/** Opens a pill-style select, whose options live in a Radix portal. */
-async function openPicker(label: string) {
-  // Radix opens the listbox from pointerdown only when the event looks like a
-  // primary click, which jsdom's synthetic event does not do on its own.
-  fireEvent.pointerDown(screen.getByLabelText(label), {
-    button: 0,
-    ctrlKey: false,
-    pointerType: "mouse",
-  });
-  return within(await screen.findByRole("listbox")).getAllByRole("option");
 }
 
 beforeAll(() => {
@@ -604,7 +609,7 @@ describe("ChannelWorkspace", () => {
     const heatmap = screen.getByRole("region", { name: "Availability heatmap" });
     expect(
       within(heatmap).getByRole("img", {
-        name: "2026-01-06: 355.6 closed minutes of 720 scheduled minutes.",
+        name: "2026-01-06: 5.9 closed hours of 12 scheduled hours.",
       }),
     ).toBeTruthy();
     expect(
@@ -762,77 +767,270 @@ describe("ChannelWorkspace", () => {
     expect(screen.queryByText(/last attempt failed/i)).toBeNull();
   });
 
-  it("hides the run control from a member who may not start one", () => {
+  it("disables the range control for a member who may not start one", () => {
     renderWorkspace({ canRunAnalysis: false });
 
-    expect(screen.queryByRole("button", { name: "Run analysis" })).toBeNull();
+    // The picker stays visible so the selected range still reads, but a
+    // viewer who may not spend AI budget cannot apply a run from it.
+    expect(screen.getByRole("button", { name: /2026-01-01/ })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /^apply$/i })).toBeNull();
   });
 
-  it("offers twelve month names with out-of-horizon pairs disabled", async () => {
-    renderWorkspace({});
+  // Month-picker coverage lives with the picker itself: the workspace now
+  // offers any range the reports cover, and the run it starts is pinned by
+  // "posts the picked range, not a month" above.
 
-    const options = await openPicker("Month to analyse");
-    expect(options.map((option) => option.textContent)).toEqual([
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
-    ]);
-    // The horizon runs December 2025 to February 2026; within 2026 only
-    // January and February are selectable.
-    const disabled = options
-      .filter((option) => option.getAttribute("aria-disabled") === "true")
-      .map((option) => option.textContent);
-    expect(disabled).toEqual([
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
-    ]);
-  });
-
-  it("offers only the years the reported horizon covers", async () => {
-    renderWorkspace({});
-
-    const options = await openPicker("Year to analyse");
-    expect(options.map((option) => option.textContent)).toEqual(["2025", "2026"]);
-  });
-
-  it("starts the run for the selected month and nothing else", async () => {
-    const fetchMock = vi.fn(
-      async (_url: string, _init?: RequestInit) =>
-        new Response(JSON.stringify({ analysisRunId: "run-9" }), { status: 202 }),
-    );
+  it("posts the picked range, not a month", async () => {
+    const fetchMock = vi.fn(async (url: unknown) => {
+      // The guard checks status first; nothing is ready here, so Apply posts.
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "queued" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
     vi.stubGlobal("fetch", fetchMock);
-    renderWorkspace({ selectedMonth: "2026-02" });
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
 
-    fireEvent.click(screen.getByRole("button", { name: "Run analysis" }));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit | undefined;
-    expect(JSON.parse(init?.body as string)).toEqual({ month: "2026-02" });
-    vi.unstubAllGlobals();
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    const post = (fetchMock.mock.calls as unknown as [unknown, RequestInit][]).find(
+      (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+    );
+    expect(JSON.parse(post?.[1].body as string)).toEqual({
+      from: "2026-01-01",
+      to: "2026-01-04",
+    });
   });
 
-  it("says there is no reported month rather than offering a dead control", () => {
-    renderWorkspace({ monthHorizon: null, selectedMonth: null });
+  it("shows the loader instead of telling the operator to refresh", async () => {
+    // The message this replaces read "refresh in a moment to see the result",
+    // which asked the operator to do the waiting themselves.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "queued" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
 
-    expect(screen.getByText(/no reported month to analyse yet/i)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Run analysis" })).toBeNull();
-    expect(screen.queryByLabelText("Month to analyse")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/reading approved reports/i)).toBeInTheDocument();
+    expect(screen.queryByText(/refresh in a moment/i)).not.toBeInTheDocument();
+  });
+
+  it("says plainly when the organization is over its allowance", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 429,
+        json: async () => ({
+          error: { message: "This organization has started a lot of analyses" },
+        }),
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/started a lot of analyses/i)).toBeInTheDocument();
+  });
+
+  it("navigates to the applied range when its run is ready", async () => {
+    // The URL names Jan 1-4 but the operator applies "All reported"
+    // (Jan 1-31): re-reading the URL's window after ready would show the old
+    // run, so ready must navigate to the applied range instead.
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        if (typeof url === "string" && url.includes("/analysis/status")) {
+          return { ok: true, json: async () => ({ stage: "ready" }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /all reported/i }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() =>
+      expect(routerMock.push).toHaveBeenCalledWith("?from=2026-01-01&to=2026-01-31"),
+    );
+    expect(routerMock.refresh).not.toHaveBeenCalled();
+  });
+
+  it("refreshes in place when the applied range is already displayed", async () => {
+    // Same-window ready keeps today's behavior exactly: refresh, with no
+    // extra history entry from a push.
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: unknown) => {
+        if (typeof url === "string" && url.includes("/analysis/status")) {
+          return { ok: true, json: async () => ({ stage: "ready" }) };
+        }
+        return { ok: true, json: async () => ({}) };
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(routerMock.push).not.toHaveBeenCalled();
+  });
+
+  it("opens a ready range at once instead of starting a duplicate run", async () => {
+    // The guard GETs the exact from/to first; a ready stage opens the range
+    // with no POST and no loader.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "ready" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      "/analysis/status?from=2026-01-01&to=2026-01-04",
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+      ),
+    ).toBe(false);
+    expect(screen.queryByText(/reading approved reports/i)).not.toBeInTheDocument();
+  });
+
+  it("navigates to a ready range that differs from the displayed window", async () => {
+    // Same ready shortcut, different destination: the applied range is not on
+    // screen, so opening it pushes rather than refreshing.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "ready" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /all reported/i }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() =>
+      expect(routerMock.push).toHaveBeenCalledWith("?from=2026-01-01&to=2026-01-31"),
+    );
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+      ),
+    ).toBe(false);
+    expect(screen.queryByText(/reading approved reports/i)).not.toBeInTheDocument();
+  });
+
+  it("starts a new run while the range is still narrating", async () => {
+    // Only `ready` opens instantly: a half-narrated run must never open as
+    // final, so narrating posts exactly as before, with the loader.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "narrating" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/reading approved reports/i)).toBeInTheDocument();
+    const post = (fetchMock.mock.calls as unknown as [unknown, RequestInit][]).find(
+      (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+    );
+    expect(post?.[1].method).toBe("POST");
+    expect(JSON.parse(post?.[1].body as string)).toEqual({ from: "2026-01-01", to: "2026-01-04" });
+  });
+
+  it("starts a new run when the status check itself fails", async () => {
+    // Fail-open: a broken shortcut must never strand the operator without a
+    // run, so a rejected status fetch posts exactly as before.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        throw new Error("network down");
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    expect(await screen.findByText(/reading approved reports/i)).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => typeof call[0] === "string" && !(call[0] as string).includes("/analysis/status"),
+      ),
+    ).toBe(true);
+  });
+
+  it("opens at once when the start call reports the run as cached", async () => {
+    // The route's cached disposition (Task 10) names the run already on
+    // screen: opening it needs no loader either.
+    const fetchMock = vi.fn(async (url: unknown) => {
+      if (typeof url === "string" && url.includes("/analysis/status")) {
+        return { ok: true, json: async () => ({ stage: "queued" }) };
+      }
+      return { ok: true, json: async () => ({ cached: true }) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    routerMock.push.mockClear();
+    routerMock.refresh.mockClear();
+    const user = userEvent.setup();
+    renderWorkspace({ selectedWindow: { from: "2026-01-01", to: "2026-01-04" } });
+
+    await user.click(screen.getByRole("button", { name: /2026-01-01/ }));
+    await user.click(screen.getByRole("button", { name: /^apply$/i }));
+
+    await waitFor(() => expect(routerMock.refresh).toHaveBeenCalled());
+    expect(screen.queryByText(/reading approved reports/i)).not.toBeInTheDocument();
+  });
+
+  it("says there is no reported range rather than offering a dead control", () => {
+    renderWorkspace({ segments: [], coverageWindows: [], selectedWindow: null });
+
+    expect(screen.getByText(/no reported range to analyse yet/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^apply$/i })).toBeNull();
   });
 
   it("does not imply a provider connection from a channel", () => {
@@ -951,7 +1149,10 @@ describe("ChannelWorkspace", () => {
       ).toBeNull();
     });
 
-    it("explains the gap without a button where narration exists but skipped the chapter", () => {
+    it("offers the gap-fill button where narration exists but skipped the chapter", () => {
+      // Amendment C: a narration that cites findings this page does not show
+      // leaves the chapter uncovered, and the uncovered chapter gets the
+      // button — the run having narrations no longer hides it.
       renderWorkspace({
         ...cancellationChapter(),
         recommendations: [
@@ -976,9 +1177,81 @@ describe("ChannelWorkspace", () => {
 
       const rail = screen.getByRole("complementary", { name: "Cancellations figures" });
       expect(
-        within(rail).queryByRole("button", { name: /Generate AI recommendation/i }),
+        within(rail).getByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeTruthy();
+    });
+
+    it("shows the button only on the uncovered chapter when its sibling is advised", () => {
+      // The March Talabat shape: cancellations advised, funnel bare. Only
+      // the bare rail offers the gap-fill.
+      renderWorkspace({
+        ...twoChapters(),
+        recommendations: [
+          {
+            id: "rec-cancel",
+            analysisRunId: "run-1",
+            channelId: CHANNEL.id,
+            branchId: "branch-1",
+            label: "recommendation",
+            headline: "Mark items out of stock before service.",
+            detail: "Cancellations land after the order is accepted.",
+            supportedActions: [],
+            limitations: [],
+            citationFindingIds: ["finding-cancel"],
+            resultDigest: "b".repeat(64),
+            decisions: [],
+            myFeedback: null,
+            createdAt: "2026-02-01T00:05:00Z",
+          },
+        ],
+      });
+
+      const funnelRail = screen.getByRole("complementary", { name: "Funnel figures" });
+      expect(
+        within(funnelRail).getByRole("button", { name: /Generate AI recommendation/i }),
+      ).toBeTruthy();
+      const cancellationsRail = screen.getByRole("complementary", { name: "Cancellations figures" });
+      expect(
+        within(cancellationsRail).queryByRole("button", { name: /Generate AI recommendation/i }),
       ).toBeNull();
-      expect(within(rail).getByText(/no advice was written for this section/i)).toBeTruthy();
+    });
+
+    it("requests the gap-fill for the displayed run from an uncovered chapter", async () => {
+      const fetchMock = vi.fn<typeof fetch>(
+        async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      renderWorkspace({
+        ...twoChapters(),
+        recommendations: [
+          {
+            id: "rec-cancel",
+            analysisRunId: "run-1",
+            channelId: CHANNEL.id,
+            branchId: "branch-1",
+            label: "recommendation",
+            headline: "Mark items out of stock before service.",
+            detail: "Cancellations land after the order is accepted.",
+            supportedActions: [],
+            limitations: [],
+            citationFindingIds: ["finding-cancel"],
+            resultDigest: "b".repeat(64),
+            decisions: [],
+            myFeedback: null,
+            createdAt: "2026-02-01T00:05:00Z",
+          },
+        ],
+      });
+
+      const funnelRail = screen.getByRole("complementary", { name: "Funnel figures" });
+      fireEvent.click(
+        within(funnelRail).getByRole("button", { name: /Generate AI recommendation/i }),
+      );
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+        "/api/organizations/org-1/channels/channel-1/analysis-runs/run-1/recommendations",
+      );
+      vi.unstubAllGlobals();
     });
 
     it("requests narration for the displayed run when the button is pressed", async () => {
@@ -1019,7 +1292,7 @@ describe("ChannelWorkspace", () => {
       vi.unstubAllGlobals();
     });
 
-    it("says the narrator reads the whole run, not only the section pressed", async () => {
+    it("says the narrator reads the uncovered sections, not only the section pressed", async () => {
       const fetchMock = vi.fn<typeof fetch>(
         async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
       );
@@ -1028,7 +1301,7 @@ describe("ChannelWorkspace", () => {
 
       fireEvent.click(screen.getByRole("button", { name: /Generate AI recommendation/i }));
 
-      expect(await screen.findByText(/reads every section's findings together/i)).toBeTruthy();
+      expect(await screen.findByText(/reads every section still missing advice together/i)).toBeTruthy();
       vi.unstubAllGlobals();
     });
 
@@ -1046,7 +1319,7 @@ describe("ChannelWorkspace", () => {
       ).toBeNull();
     });
 
-    it("does not carry one month's request into the month switched to", async () => {
+    it("does not carry one window's request into the window switched to", async () => {
       const fetchMock = vi.fn<typeof fetch>(
         async () => new Response(JSON.stringify({ analysisRunId: "run-1" }), { status: 202 }),
       );
@@ -1056,9 +1329,9 @@ describe("ChannelWorkspace", () => {
       fireEvent.click(screen.getByRole("button", { name: /Generate AI recommendation/i }));
       await screen.findByRole("button", { name: /Advice requested/i });
 
-      // The month picker pushes history rather than remounting, so the next
-      // month arrives as new props on the same component. February must not
-      // inherit January's answer.
+      // A refresh re-renders rather than remounting, so the next window
+      // arrives as new props on the same component. The new run must not
+      // inherit the old run's answer.
       rerender(
         workspaceElement({
           runs: [

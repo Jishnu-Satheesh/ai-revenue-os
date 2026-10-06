@@ -2,12 +2,11 @@ import { createHash } from "node:crypto";
 
 import { z } from "zod";
 
-import { resolveAnalysisMonth } from "@/domain/analysis/calendar";
 import {
   createAnalysisEvidenceDigest,
   createAnalysisResultDigest,
   createFindingCalculationDigest,
-  createMonthlyAnalysisCacheKey,
+  createWindowAnalysisCacheKey,
 } from "@/domain/analysis/digest";
 import { ChannelAnalysisError } from "@/domain/analysis/errors";
 import {
@@ -25,6 +24,7 @@ import type {
   AnalysisSeriesPoint,
   AnalysisWindow,
 } from "@/domain/analysis/types";
+import { isWindowCovered, type CoverageSegment } from "@/domain/analysis/window-selection";
 
 /**
  * The channel analysis worker.
@@ -51,25 +51,16 @@ export const channelAnalysisTaskSchema = z
     // `span` is a provider that states one figure for its whole export.
     periodGrain: z.enum(["day", "week", "month", "span"]),
     /**
-     * The canonical month the route selected. Present only on the monthly
-     * path, where the worker re-resolves the window from the timeline and
-     * claims with a content-addressed key instead of blindly re-running.
+     * The zone the caller resolved the window in. The worker re-loads the
+     * evidence in this zone before claiming, so its cache key and the
+     * database's own claim always describe the same question.
      */
-    month: z
-      .string()
-      .regex(/^\d{4}-(0[1-9]|1[0-2])$/, "Use a YYYY-MM month.")
-      .optional(),
-    /** The zone the route resolved the month in. Required with `month`. */
-    windowTimezone: z.string().trim().min(1).max(60).optional(),
+    windowTimezone: z.string().trim().min(1).max(60),
     analysisRunId: z.string().uuid(),
     correlationId: z.string().uuid(),
     idempotencyKey: z.string().trim().min(16).max(200),
   })
-  .strict()
-  .refine((payload) => payload.month === undefined || payload.windowTimezone !== undefined, {
-    message: "A monthly analysis must name the timezone its month was resolved in.",
-    path: ["windowTimezone"],
-  });
+  .strict();
 
 export type ChannelAnalysisPayload = z.infer<typeof channelAnalysisTaskSchema>;
 
@@ -129,13 +120,15 @@ type FindingPayload = {
 
 export type ChannelAnalysisDependencies = {
   /**
-   * The channel's known month horizon. Required only on the monthly path;
-   * legacy callers never resolve a month and may omit it.
+   * The stretches of dates this channel's projected packages declare, read by
+   * the worker itself. The route checked the same thing before dispatching;
+   * this is the check that still holds when the route is bypassed, and the
+   * one that still holds when a package was withdrawn in between.
    */
-  loadMonthHorizon?(input: {
+  loadCoverageSegments(input: {
     organizationId: string;
     channelId: string | null;
-  }): Promise<{ firstMonth: string; lastMonth: string } | null>;
+  }): Promise<CoverageSegment[]>;
   claim(input: {
     organizationId: string;
     channelId: string | null;
@@ -266,49 +259,127 @@ export async function runChannelAnalysis(
   const payload = channelAnalysisTaskSchema.parse(input);
   if (payload.windowEnd < payload.windowStart) throw new ChannelAnalysisError("INVALID_WINDOW");
 
-  // The monthly path re-resolves the window from the timeline and claims
-  // with a content-addressed key; the legacy path keeps its exact behavior.
-  if (payload.month !== undefined) {
-    if (payload.windowTimezone === undefined) {
-      throw new ChannelAnalysisError("INVALID_WINDOW");
-    }
-    return runMonthlyChannelAnalysis(
-      { ...payload, month: payload.month, windowTimezone: payload.windowTimezone },
-      dependencies,
-    );
-  }
+  return runWindowChannelAnalysis(payload, dependencies);
+}
 
-  const scope = payload.channelId === null ? "organization" : "channel";
-  const detectors = selectDetectors({ scope, grain: payload.periodGrain });
-  // Nothing is claimed and no run is recorded. A run that bound no detector
-  // would sit in the audit trail looking like an analysis that found nothing.
-  if (detectors.length === 0) return { outcome: "no_compatible_detectors" };
-
-  const metricKeys = requiredMetricKeys(detectors);
+/**
+ * The only path: the window's coverage is re-checked from the database under
+ * the worker's own read before anything is claimed, evidence is loaded and
+ * digested before the claim so the claim can carry a content-addressed key,
+ * and a cache hit returns the standing run without writing. A window the
+ * reports do not declare, or that the re-check and the payload disagree
+ * about, fails the run rather than filing under a question nobody asked.
+ */
+async function runWindowChannelAnalysis(
+  payload: ChannelAnalysisPayload,
+  dependencies: ChannelAnalysisDependencies,
+): Promise<{
+  outcome: string;
+  analysisRunId?: string;
+  findingCount?: number;
+  observationCount?: number;
+  needsDataCount?: number;
+}> {
   const claimToken = crypto.randomUUID();
-  const claim = await dependencies.claim({
-    organizationId: payload.organizationId,
-    channelId: payload.channelId,
-    branchId: payload.branchId,
-    windowStart: payload.windowStart,
-    windowEnd: payload.windowEnd,
-    periodGrain: payload.periodGrain,
-    analysisRunId: payload.analysisRunId,
-    registryVersion: CHANNEL_ANALYSIS_REGISTRY_VERSION,
-    detectors: detectors.map((detector) => ({
-      key: detector.key,
-      calculationVersion: detector.calculationVersion,
-    })),
-    metricKeys,
-    idempotencyKey: payload.idempotencyKey,
-    claimToken,
-    correlationId: payload.correlationId,
-    evidenceDigest: null,
-    cacheKey: null,
-  });
-  if (claim.outcome !== "acquired") return { outcome: claim.outcome };
+  const fail = async (code: ChannelAnalysisFailureCode) => {
+    await dependencies.fail({
+      organizationId: payload.organizationId,
+      analysisRunId: payload.analysisRunId,
+      claimToken,
+      code,
+      resultDigest: failureDigest(code),
+    });
+    return { outcome: "failed" };
+  };
 
   try {
+    // The route checked this too, before dispatching. This is the check that
+    // still holds when the route is bypassed, and the one that still holds
+    // when a package was withdrawn between the operator pressing Apply and
+    // the worker claiming. `WINDOW_CONTEXT_UNAVAILABLE` rather than a new
+    // code: `fail_channel_analysis` accepts a closed vocabulary of four
+    // codes, and an unrecognised one would raise in the database rather than
+    // record a readable failure.
+    const segments = await dependencies.loadCoverageSegments({
+      organizationId: payload.organizationId,
+      channelId: payload.channelId,
+    });
+    if (!isWindowCovered(payload.windowStart, payload.windowEnd, segments)) {
+      throw new ChannelAnalysisFailure("WINDOW_CONTEXT_UNAVAILABLE");
+    }
+    const resolved = { windowStart: payload.windowStart, windowEnd: payload.windowEnd };
+
+    const scope = payload.channelId === null ? "organization" : "channel";
+    const detectors = selectDetectors({ scope, grain: payload.periodGrain });
+    // Nothing is claimed and no run is recorded. A run that bound no detector
+    // would sit in the audit trail looking like an analysis that found nothing.
+    if (detectors.length === 0) return { outcome: "no_compatible_detectors" };
+    const metricKeys = requiredMetricKeys(detectors);
+
+    const window: AnalysisWindow = {
+      organizationId: payload.organizationId,
+      channelId: payload.channelId,
+      branchId: payload.branchId,
+      windowStart: resolved.windowStart,
+      windowEnd: resolved.windowEnd,
+      grain: payload.periodGrain,
+      timeZone: payload.windowTimezone,
+    };
+    let loaded: ChannelAnalysisEvidenceLoad;
+    try {
+      loaded = await dependencies.loadEvidence({ window, metricKeys });
+    } catch {
+      throw new ChannelAnalysisFailure("EVIDENCE_UNAVAILABLE");
+    }
+
+    const evidenceDigest = createAnalysisEvidenceDigest(loaded);
+    const cacheKey = createWindowAnalysisCacheKey({
+      organizationId: payload.organizationId,
+      channelId: payload.channelId,
+      branchId: payload.branchId,
+      windowStart: resolved.windowStart,
+      windowEnd: resolved.windowEnd,
+      timeZone: payload.windowTimezone,
+      grain: payload.periodGrain,
+      registryVersion: CHANNEL_ANALYSIS_REGISTRY_VERSION,
+      detectorVersions: detectors.map((detector) => ({
+        key: detector.key,
+        calculationVersion: detector.calculationVersion,
+      })),
+      metricKeys: [...metricKeys].sort(),
+      evidenceDigest,
+    });
+
+    const claim = await dependencies.claim({
+      organizationId: payload.organizationId,
+      channelId: payload.channelId,
+      branchId: payload.branchId,
+      windowStart: resolved.windowStart,
+      windowEnd: resolved.windowEnd,
+      periodGrain: payload.periodGrain,
+      analysisRunId: payload.analysisRunId,
+      registryVersion: CHANNEL_ANALYSIS_REGISTRY_VERSION,
+      detectors: detectors.map((detector) => ({
+        key: detector.key,
+        calculationVersion: detector.calculationVersion,
+      })),
+      metricKeys,
+      idempotencyKey: payload.idempotencyKey,
+      claimToken,
+      correlationId: payload.correlationId,
+      evidenceDigest,
+      cacheKey,
+    });
+    if (claim.outcome === "cached") {
+      return { outcome: "cached", analysisRunId: claim.analysisRunId };
+    }
+    if (claim.outcome !== "acquired") return { outcome: claim.outcome };
+
+    // The key was computed under the payload's zone. A different zone at claim
+    // time means the evidence moved under the run: fail rather than file.
+    if (claim.windowTimezone !== payload.windowTimezone) {
+      throw new ChannelAnalysisError("INVALID_WINDOW");
+    }
     // A lease resumed after a deployment could belong to a run that bound a
     // different registry. Writing today's arithmetic under yesterday's version
     // tuple would make the finding unreproducible, which is the one thing the
@@ -322,23 +393,6 @@ export async function runChannelAnalysis(
       .sort()
       .join(",");
     if (bound !== selected) throw new ChannelAnalysisFailure("DETECTOR_REGISTRY_MISMATCH");
-
-    const window: AnalysisWindow = {
-      organizationId: payload.organizationId,
-      channelId: payload.channelId,
-      branchId: payload.branchId,
-      windowStart: payload.windowStart,
-      windowEnd: payload.windowEnd,
-      grain: payload.periodGrain,
-      timeZone: claim.windowTimezone,
-    };
-
-    let loaded: ChannelAnalysisEvidenceLoad;
-    try {
-      loaded = await dependencies.loadEvidence({ window, metricKeys });
-    } catch {
-      throw new ChannelAnalysisFailure("EVIDENCE_UNAVAILABLE");
-    }
 
     const evidence: AnalysisEvidence = { window, ...loaded };
     const outcomes = runDetectors(detectors, evidence);
@@ -361,183 +415,6 @@ export async function runChannelAnalysis(
     // Counting two of three made a run that filed twelve observations report
     // zero of everything, which reads as "nothing was analysed" (staging run
     // cb8d3675). `channel_analysis_runs.observation_count` always held it.
-    return {
-      outcome: "completed",
-      findingCount: findings.filter((finding) => finding.kind === "finding").length,
-      observationCount: findings.filter((finding) => finding.kind === "observation").length,
-      needsDataCount: findings.filter((finding) => finding.kind === "needs_data").length,
-    };
-  } catch (error) {
-    const code: ChannelAnalysisFailureCode =
-      error instanceof ChannelAnalysisFailure
-        ? error.code
-        : error instanceof ChannelAnalysisError &&
-            ["INVALID_WINDOW", "WINDOW_TOO_WIDE", "INVALID_LOCAL_DATE"].includes(error.code)
-          ? "WINDOW_CONTEXT_UNAVAILABLE"
-          : "ANALYSIS_PROCESSING_FAILED";
-    await dependencies.fail({
-      organizationId: payload.organizationId,
-      analysisRunId: payload.analysisRunId,
-      claimToken,
-      code,
-      resultDigest: failureDigest(code),
-    });
-    return { outcome: "failed" };
-  }
-}
-
-type MonthlyPayload = Omit<ChannelAnalysisPayload, "month" | "windowTimezone"> & {
-  month: string;
-  windowTimezone: string;
-};
-
-/**
- * The monthly path: the window is re-resolved from the timeline under the
- * worker's own read, the evidence is loaded before anything is claimed, and
- * the claim carries the content-addressed key. A hit returns the standing
- * run without writing; anything the payload and the re-resolution disagree
- * on fails the run rather than filing under a question nobody asked.
- */
-async function runMonthlyChannelAnalysis(
-  payload: MonthlyPayload,
-  dependencies: ChannelAnalysisDependencies,
-): Promise<{
-  outcome: string;
-  analysisRunId?: string;
-  findingCount?: number;
-  observationCount?: number;
-  needsDataCount?: number;
-}> {
-  const claimToken = crypto.randomUUID();
-  const fail = async (code: ChannelAnalysisFailureCode) => {
-    await dependencies.fail({
-      organizationId: payload.organizationId,
-      analysisRunId: payload.analysisRunId,
-      claimToken,
-      code,
-      resultDigest: failureDigest(code),
-    });
-    return { outcome: "failed" };
-  };
-
-  try {
-    // Monthly selection is channel-wide: the picker names no branch, so a
-    // payload that does is transport the route could never have sent.
-    if (payload.branchId !== null) throw new ChannelAnalysisError("INVALID_WINDOW");
-    if (dependencies.loadMonthHorizon === undefined) {
-      throw new ChannelAnalysisError("INVALID_WINDOW");
-    }
-    let horizon: { firstMonth: string; lastMonth: string } | null;
-    try {
-      horizon = await dependencies.loadMonthHorizon({
-        organizationId: payload.organizationId,
-        channelId: payload.channelId,
-      });
-    } catch {
-      throw new ChannelAnalysisFailure("EVIDENCE_UNAVAILABLE");
-    }
-    if (horizon === null) throw new ChannelAnalysisFailure("EVIDENCE_UNAVAILABLE");
-
-    const resolved = resolveAnalysisMonth(payload.month, horizon);
-    if (resolved.windowStart !== payload.windowStart || resolved.windowEnd !== payload.windowEnd) {
-      throw new ChannelAnalysisError("INVALID_WINDOW");
-    }
-
-    const scope = payload.channelId === null ? "organization" : "channel";
-    const detectors = selectDetectors({ scope, grain: payload.periodGrain });
-    if (detectors.length === 0) return { outcome: "no_compatible_detectors" };
-    const metricKeys = requiredMetricKeys(detectors);
-
-    const window: AnalysisWindow = {
-      organizationId: payload.organizationId,
-      channelId: payload.channelId,
-      branchId: null,
-      windowStart: resolved.windowStart,
-      windowEnd: resolved.windowEnd,
-      grain: payload.periodGrain,
-      timeZone: payload.windowTimezone,
-    };
-    let loaded: ChannelAnalysisEvidenceLoad;
-    try {
-      loaded = await dependencies.loadEvidence({ window, metricKeys });
-    } catch {
-      throw new ChannelAnalysisFailure("EVIDENCE_UNAVAILABLE");
-    }
-
-    const evidenceDigest = createAnalysisEvidenceDigest(loaded);
-    const cacheKey = createMonthlyAnalysisCacheKey({
-      organizationId: payload.organizationId,
-      channelId: payload.channelId,
-      branchId: null,
-      month: payload.month,
-      windowStart: resolved.windowStart,
-      windowEnd: resolved.windowEnd,
-      timeZone: payload.windowTimezone,
-      grain: payload.periodGrain,
-      registryVersion: CHANNEL_ANALYSIS_REGISTRY_VERSION,
-      detectorVersions: detectors.map((detector) => ({
-        key: detector.key,
-        calculationVersion: detector.calculationVersion,
-      })),
-      metricKeys: [...metricKeys].sort(),
-      evidenceDigest,
-    });
-
-    const claim = await dependencies.claim({
-      organizationId: payload.organizationId,
-      channelId: payload.channelId,
-      branchId: null,
-      windowStart: resolved.windowStart,
-      windowEnd: resolved.windowEnd,
-      periodGrain: payload.periodGrain,
-      analysisRunId: payload.analysisRunId,
-      registryVersion: CHANNEL_ANALYSIS_REGISTRY_VERSION,
-      detectors: detectors.map((detector) => ({
-        key: detector.key,
-        calculationVersion: detector.calculationVersion,
-      })),
-      metricKeys,
-      idempotencyKey: payload.idempotencyKey,
-      claimToken,
-      correlationId: payload.correlationId,
-      evidenceDigest,
-      cacheKey,
-    });
-    if (claim.outcome === "cached") {
-      return { outcome: "cached", analysisRunId: claim.analysisRunId };
-    }
-    if (claim.outcome !== "acquired") return { outcome: claim.outcome };
-
-    // The key was computed under the route's zone. A different zone at claim
-    // time means the evidence moved under the run: fail rather than file.
-    if (claim.windowTimezone !== payload.windowTimezone) {
-      throw new ChannelAnalysisError("INVALID_WINDOW");
-    }
-    const bound = [...claim.boundDetectors]
-      .map((detector) => `${detector.key}@${detector.calculationVersion}`)
-      .sort()
-      .join(",");
-    const selected = detectors
-      .map((detector) => `${detector.key}@${detector.calculationVersion}`)
-      .sort()
-      .join(",");
-    if (bound !== selected) throw new ChannelAnalysisFailure("DETECTOR_REGISTRY_MISMATCH");
-
-    const evidence: AnalysisEvidence = { window, ...loaded };
-    const outcomes = runDetectors(detectors, evidence);
-    if (outcomes.length === 0) throw new ChannelAnalysisFailure("ANALYSIS_PROCESSING_FAILED");
-
-    const findings = outcomes.map((attributed) => toFindingPayload(window, attributed));
-    await dependencies.complete({
-      organizationId: payload.organizationId,
-      analysisRunId: payload.analysisRunId,
-      claimToken,
-      resultDigest: createAnalysisResultDigest({
-        registryVersion: CHANNEL_ANALYSIS_REGISTRY_VERSION,
-        findings,
-      }),
-      findings,
-    });
     return {
       outcome: "completed",
       findingCount: findings.filter((finding) => finding.kind === "finding").length,

@@ -5,6 +5,34 @@
 **Approved 2026-08-24.** Tier 3. Implemented against
 `docs/superpowers/plans/2026-08-24-campaign-creative-studio-implementation.md`.
 
+**Amended 2026-09-12 by [Spec 025](025-campaign-experience-and-marketing-loop.md) (Proposed) and
+[ADR 0057](../adrs/0057-campaign-preparation-approval-vs-exact-output-publication.md) (Proposed),
+against audit findings F11 and F12.** The compositor, fonts, version and patch boundaries, supported
+script set and masking guarantees are unchanged. Three obligations are added:
+
+- Editing is currently split across `poster-studio.tsx`, `annotation-canvas.tsx` and
+  `revise-workspace.tsx`. Studio becomes **one focused editor**: a large live preview, editable
+  authorized text slots, layout choices, asset selection, local AI edit, undo and cancel, saved
+  revision status, server render verification, and return to review preserving the exact deliverable
+  and version. It persists through the existing version, patch and render boundaries and introduces
+  no parallel mutable campaign document.
+- Typed changes update an unsaved preview and **authorize nothing**. Saving creates the required
+  immutable revision and the server render is the authoritative artifact; the browser preview's
+  apparent fit never satisfies readiness. **Any content change invalidates the affected launch
+  approval** under ADR 0057, and a new version never inherits its parent's human review.
+- Prices, offers and claims remain source-bound; a cosmetic wording edit still passes claim
+  validation, and an offer or price edit raises a business revision request rather than silently
+  changing approved intent. Unsupported script or a missing glyph returns a named refusal — never a
+  silent font switch or transliteration.
+- A completed Studio render is linked into Creative History exactly once, as **Unreviewed**, through a
+  controlled idempotent path. It never acquires an approved-reference verdict automatically.
+
+**Creative History boundary corrected 2026-09-09.** ADR 0049 and corrected Spec 019 govern
+historical evidence: Approved Creative History bytes may reach Blueprint and final image generation;
+Rejected Creative History bytes reach Blueprint only; final generation receives validated Blueprint
+rules with their human reasons, never rejected bytes. Studio consumes the resulting plate and owns
+finished-poster lineage; it does not reopen that provider boundary.
+
 Revised before approval to adopt four practices from a design studio the user has already shipped to
 real clients: multi-region annotated editing, named text slots in the operator's language, a
 creative-direction field with a prompt optimizer, and aspect presets. §7.6 and §7.3 carry those
@@ -114,6 +142,11 @@ specification does not weaken it.
 
 - A deterministic compositor: plate plus text and logo layers to a final poster, in the exact pixel
   dimensions each placement requires.
+  The **logo layer is not implemented**, and `logoSlot` stays null on every seeded template.
+  [ADR 0059](../adrs/0059-the-brand-logo-is-conditioned-not-composited.md) records the decision to
+  supply the organization's mark to the image model as a `brand_mark` conditioning reference
+  instead of compositing the file: a generated logo is therefore an approximation, is checked at
+  review, and is never described as exact. A later decision to composite would supersede that ADR.
 - Vendored fonts covering Latin, Malayalam and Arabic, pinned by version and content hash.
 - Correct shaping and bidirectional layout, including RTL Arabic and Malayalam conjuncts.
 - A glyph-coverage check that refuses before rendering rather than after.
@@ -158,6 +191,12 @@ specification does not weaken it.
 | Produces | the **plate** — a photograph or a drawing of the declared dish, with no text | the **poster** — plate plus composited layers |
 | Model's role | draws the dish | draws nothing new except inside a mask |
 | Refuses when | nobody declared the subject | a glyph is uncovered or text will not fit |
+
+Creative History is not a fourth Studio layer. When Studio completes a poster, that finished result
+may be linked to one Creative History item as **Unreviewed**, with its render identity and private
+output preserved. It affects no later campaign until a human confirms metadata and gives it a review.
+Raw plates, intermediate variants and masked-edit source plates never enter Creative History merely
+because they exist.
 
 ## 6. UX flow
 
@@ -398,6 +437,10 @@ so an identical re-render is idempotent rather than duplicated.
   `variants` run succeeds with a null `result_version_id` by constraint, so for a plate produced that
   way, asset → bundle version → "the run whose `result_version_id` matches" resolves to nothing.
   Nullable, because a client's own photograph and an edited plate legitimately have no run.
+- **A completed poster can be linked into Creative History without changing its render identity.**
+  The link is optional, tenant-checked and starts `unreviewed`; it points to this completed poster
+  rather than copying the private object. A raw plate remains a Studio/campaign intermediate, not a
+  finished historical design.
 
 ### 8.3 New — `campaign_plate_edits`
 
@@ -492,7 +535,8 @@ Events: `campaign.poster_rendered`, `campaign.plate_edited`, `campaign.render_re
   validate them server-side. A mask is an image and is untrusted like any other.
 - Mask storage paths are validated against the tenant prefix before any byte is fetched.
 - A render request naming a plate from another organization is refused before any work is queued.
-- Rendered posters inherit the existing campaign-asset access rules. No new public surface.
+- Rendered posters inherit the existing campaign-asset access rules. A Creative History link is
+  resolved through its own tenant-checked private read path; neither route creates a public surface.
 - Font files are read from the repository, never from user input, never from a URL.
 - No secret, token or customer PII is logged. Operator instructions are tenant content.
 
@@ -613,8 +657,9 @@ prohibition, and *"Explore Our Mezza"* with it.
 - `context/04-domain-model.md` — plate, layer, poster, render, template, mask.
 - `context/05-module-map.md` — the compositor and the two new workers.
 - `specs/016-campaign-feedback-loop.md` — a note that an approved version now carries a poster plan.
-- `specs/019-organization-asset-library.md` — a note that the plate is this specification's input,
-  and a pointer to §7.7 on the naming trap.
+- `specs/019-organization-asset-library.md` and ADR 0049 — the plate remains this specification's
+  input; a completed poster may enter Creative History as Unreviewed, while raw plates do not; and
+  rejected creative bytes are excluded structurally from final image generation.
 
 ## 18. The gate, and what remains open
 

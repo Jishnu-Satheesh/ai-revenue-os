@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 
 import {
   compareCanonicalText,
-  marketProfileDocumentV1Schema,
+  marketProfileDocumentSchema,
 } from "@/domain/growth-intelligence/schemas";
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type { MarketProfileDocument } from "@/domain/growth-intelligence/types";
 
 function canonicalize(value: unknown): string {
   if (value === null) return "null";
@@ -19,8 +19,12 @@ function canonicalize(value: unknown): string {
   return JSON.stringify(value);
 }
 
-/** Binds decisions and recurring research to one exact approved profile document. */
-export function createMarketProfileDigest(document: MarketProfileDocumentV1): string {
-  const normalized = marketProfileDocumentV1Schema.parse(document);
+/**
+ * Binds decisions and recurring research to one exact approved profile document.
+ * The schema version routes each document to its frozen validator, so version-one
+ * bytes keep their exact digest.
+ */
+export function createMarketProfileDigest(document: MarketProfileDocument): string {
+  const normalized = marketProfileDocumentSchema.parse(document);
   return createHash("sha256").update(canonicalize(normalized), "utf8").digest("hex");
 }

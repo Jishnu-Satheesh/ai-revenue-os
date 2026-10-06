@@ -134,6 +134,7 @@ describe("subject profile creation", () => {
     expect(response.status).toBe(201);
     expect(draft).toHaveBeenCalledWith({
       organizationId: ORGANIZATION_ID,
+      actorId: "user-1",
       correlationId: CORRELATION_ID,
       ...draftable,
       operatorNotes: "Served in our red clay pot.",

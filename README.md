@@ -1,6 +1,6 @@
-# AI Revenue OS
+# Lunes AI
 
-AI Revenue OS is a multi-tenant, goal-driven platform that helps an agency increase measurable business outcomes for multiple clients through AI-assisted planning, durable automation, experimentation, and continuous learning.
+Lunes AI is a multi-tenant, goal-driven platform that helps an agency increase measurable business outcomes for multiple clients through AI-assisted planning, durable automation, experimentation, and continuous learning.
 
 The first pilot is a Dubai restaurant business that wants to increase:
 
@@ -61,7 +61,7 @@ This repository now contains the initial Next.js control-plane foundation and Su
 
 ## Organization + Digital Twin slice
 
-The onboarding flow is available at `/organizations/new` after authentication. It creates the organization, owner membership, default access/spend policies, an initial business profile, and an optional first branch in one database transaction. The Overview workspace at `/organizations/:organizationId/overview` records profile context, branches, source-aware facts, goals, constraints, policies, readiness, and audit history. Overview is the route and the menu label; the Digital Twin remains the domain it presents, and keeps its schema, repository, and type names.
+The onboarding flow is available at `/organizations/new` after authentication. It creates the organization, owner membership, default access/spend policies, an initial business profile, and an optional first branch in one database transaction. The Overview workspace at `/organizations/:organizationId/overview` records profile context, branches, source-aware facts, goals, constraints, policies, readiness, and audit history. Overview is the route and the menu label; the Digital Twin remains the domain it presents, and keeps its schema, repository, and type names. The Overview route now opens as the organization home — identity, recent campaigns, creative library, attention, goals, destinations, and activity, read through Campaign source-owned readers behind the session's own access — with the Digital Twin management editors retained below under Organization management. Behind the `OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS` allowlist the first section is the fixed-projection growth card (spec `specs/027-overview-growth-progress.md`); refresh failures retain the last readable view with its report date, and rollback is the allowlist alone. Verification evidence lives in `docs/verification/overview-growth/`; migration push, worker deployment, and live acceptance are still gated. The retired economics-first report and its charts stay in the tree for rollback but are no longer mounted.
 
 Every authenticated route is organization-scoped — there is no account-wide page. The root path resolves per user: the most recently accessed organization that is not archived, or the alphabetically first when none has been visited, or `/organizations/new` when the user has no workable organization. `/auth/callback` and the archive action both redirect to `/` so they inherit the same resolution. See `adrs/0015-user-scoped-interface-state.md`.
 
@@ -70,6 +70,12 @@ Draft organizations are soft-archived through the lifecycle control rather than 
 All project commands use **pnpm**. The committed `pnpm-lock.yaml` is the dependency source of truth.
 
 All user-facing controls and surface primitives must use shadcn/ui components or compositions of them. This is a critical design-system and accessibility rule; add missing primitives with the pnpm shadcn CLI rather than introducing bare HTML controls.
+
+## Universal AI Agent governed workflows
+
+The organization drawer can give a one-month improvement plan from source evidence, run missing channel analysis, and accept one CSV/XLSX report through governed intake. Empty recent coverage can use an earlier comparable period, with a dated separator marker in the thread. Reports reuse exact verified duplicates, ask only unresolved metadata through a persisted Questionnaire, and retain existing approval requirements. Background work, action markers, and one final answer survive reopening and retries.
+
+The approved contract is [Universal Agent design §21](docs/superpowers/specs/2026-09-24-universal-ai-agent-design.md#21-approved-governed-workflows-amendment-2026-10-01), with source boundaries in [ADR 0075](adrs/0075-durable-agent-turns-and-source-owned-capabilities.md). [Staging verification](docs/verification/universal-agent-governed-workflows/2026-10-04.md) records automated checks, real Trigger development-worker receipts, and authenticated browser/replay evidence. Trigger production worker release `20261004.1` is deployed and [verified against staging data](docs/verification/universal-agent-governed-workflows/production-worker-2026-10-04.md); hosted web deployment and broader enablement remain pending.
 
 ## Local setup
 
@@ -86,6 +92,20 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+
+### Dev login bypass
+
+`pnpm dev` only — this route 404s anywhere else. Sign the browser in as a test
+persona (provisioned on first use) by opening:
+
+```text
+http://localhost:3000/api/dev/login-as?org=2dda45b8-82db-4f5f-b17d-611b9bbb7846&role=viewer&next=/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/settings
+```
+
+`role` is one of `owner`, `admin`, `operator`, `viewer`; `next` is an
+optional same-origin path (default `/`). Personas are namespaced
+`dev.<role>@lunes.test` users with exactly that role's membership — reusing
+them never multiplies rows.
 
 ## Database workflow
 
@@ -132,12 +152,18 @@ Set `E2E_INTEGRATION_ORGANIZATION_ID`, `E2E_OTHER_ORGANIZATION_ID`, and the `E2E
 `E2E_VIEWER_*` credentials from `.env.example`; without them those scenarios skip and only the
 unauthenticated boundary scenarios run.
 
-## Public landing page
+The market-monitoring scenarios in `e2e/growth-intelligence.spec.ts` follow the same rule with
+`E2E_GROWTH_ORGANIZATION_ID` for the canary organization. Its research-flow scenarios (Start to
+outcomes, concurrent branches, reload, partial/no-findings, retry, viewer denial) additionally
+require a staged provider qualification and budget approval; until then they skip with their
+reason, the research routes stay fail-closed, and no browser, provider, or canary acceptance is
+claimed.
 
-`/` serves a public landing page (`src/components/marketing/`) to signed-out visitors; signed-in
-users keep the ADR 0015 resolver redirect. The page renders inside a scoped dark token shell
-(`.marketing` in `src/app/globals.css`) and makes no backend calls beyond the session probe.
-Specified in `specs/021-public-landing-page.md`.
+## App entry
+
+`/` is app-only: every visit redirects through the ADR 0015 resolver to the user's
+organization, `/organizations/new`, or `/login`. The public site lives in the separate Astro
+project. Retired in `specs/021-public-landing-page.md`.
 
 ## Foundation boundaries
 

@@ -4,6 +4,16 @@
 
 Draft. Governed by `adrs/0014-decision-value-and-evidence-tiers.md`. Resolves the six open questions in `specs/011-learning-ledger.md` section 12, which unblocks the ledger migration.
 
+**Amended 2026-09-12 — explicitly unchanged by
+[Spec 025](025-campaign-experience-and-marketing-loop.md) (Proposed).** The user's confirmed decision
+D07 allows a source-backed **Campaign proposal** to be presented and approved for preparation without
+a numeric profit estimate, without available external market research, or with an unavailable
+market-monitoring profile, showing those gaps explicitly. That change lives **only** in the new
+Campaign proposal admission contract. Generic Decision Engine execution qualification, its value and
+evidence tiers, and its thresholds are **not** broadened, relaxed or reinterpreted by it. A regression
+test must prove generic execution eligibility did not widen, and the two action keys must not be
+confused.
+
 ## 1. Business outcome
 
 Produce a small number of evidence-backed, prioritized opportunities whose value is stated in the organization's own currency, and record every decision in a form that later work can measure rather than assert.

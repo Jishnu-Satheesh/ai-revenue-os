@@ -1,9 +1,31 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// `@/trigger/recommendations` wires a live Supabase client and two AI
+// providers behind `server-only`; none of that runs by importing the module,
+// but it does need to resolve. Only the row-shape schema and mapper under
+// test here ever get called.
+vi.mock("server-only", () => ({}));
+vi.mock("@trigger.dev/sdk", () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  schemaTask: vi.fn((config) => config),
+  schedules: { task: vi.fn((config) => config) },
+}));
+vi.mock("@/lib/env", () => ({ env: { RECOMMENDATION_JUDGE_MODEL: "test-model" } }));
+vi.mock("@/lib/supabase/service", () => ({
+  createAnalysisWorkerServiceClient: vi.fn(),
+}));
+vi.mock("@/modules/analysis/infrastructure/recommendation-generation-provider", () => ({
+  createRecommendationGenerationProvider: vi.fn(),
+}));
+vi.mock("@/modules/analysis/infrastructure/recommendation-judge-provider", () => ({
+  createRecommendationJudgeProvider: vi.fn(),
+}));
 
 import { ORGANIZATION, CHANNEL } from "@/domain/analysis/test-fixtures";
+import { unjudgedRecommendationShape, toUnjudged } from "@/trigger/recommendations";
 import {
   channelRecommendationsTaskSchema,
   runChannelRecommendations,
@@ -54,6 +76,166 @@ describe("channel recommendations payload schema", () => {
   });
 });
 
+describe("the judge's unjudged-row shape", () => {
+  // Staging runs run_06g7jjmthe08pf60utruojb601, run_06g886rg2amqv2eu6b7p37fa01,
+  // and run_06g8sq27b5dm5bco6l103vm501 all failed with the same ZodError:
+  // citation_id -> finding_id is a many-to-one foreign key, so PostgREST
+  // embeds channel_findings as one object (or null), never an array. The
+  // schema wrongly required an array and rejected every real row.
+  const baseRow = {
+    id: "00000000-0000-4000-8000-0000000000e1",
+    organization_id: ORGANIZATION,
+    label: "recommendation" as const,
+    headline: "Shift spend to the channel that is actually converting",
+    detail: "Detail copy.",
+    limitations: [],
+    prompt_version: 9,
+  };
+
+  const finding = {
+    detector_key: "spend_efficiency",
+    kind: "insight",
+    code: "SPEND_SHIFT",
+    needs_data_reason: null,
+    value_kind: "money" as const,
+    value_numerator: 12_00,
+    value_denominator: null,
+    monetary_impact_minor_units: 12_00,
+    currency: "AED",
+    limitations: [],
+  };
+
+  it("parses a citation whose finding embeds as a single object, the real PostgREST shape", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+    };
+
+    const parsed = unjudgedRecommendationShape.parse(row);
+    const unjudged = toUnjudged(parsed);
+
+    expect(unjudged.citations).toHaveLength(1);
+    expect(unjudged.citations[0].detectorKey).toBe("spend_efficiency");
+  });
+
+  it("parses a citation whose finding is null", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: null }],
+    };
+
+    const parsed = unjudgedRecommendationShape.parse(row);
+    const unjudged = toUnjudged(parsed);
+
+    expect(unjudged.citations[0].detectorKey).toBeNull();
+  });
+
+  it("rejects an array, since the citation-to-finding relationship is many-to-one", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: [finding] }],
+    };
+
+    expect(unjudgedRecommendationShape.safeParse(row).success).toBe(false);
+  });
+
+  it("maps a provenance row through the resolver to cited shared context", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+      channel_recommendation_contexts: [
+        {
+          manifest_id: "00000000-0000-4000-8000-0000000000c1",
+          share_mode: "internal_only" as const,
+          provided_refs: ["ctx-0001", "ctx-0002"],
+          cited_refs: ["ctx-0001"],
+        },
+      ],
+    };
+
+    const parsed = unjudgedRecommendationShape.parse(row);
+    const unjudged = toUnjudged(parsed, () => ({
+      manifestDigest: "d".repeat(64),
+      entries: [
+        {
+          ref: "ctx-0001",
+          summary: "Operator planned action.",
+          statementKind: "operator_decision",
+        },
+        { ref: "ctx-0002", summary: "Uncited wording influence.", statementKind: "observation" },
+      ],
+    }));
+
+    expect(unjudged.context).toMatchObject({
+      shareMode: "internal_only",
+      manifestDigest: "d".repeat(64),
+    });
+    // Cited refs only: provided-but-uncited entries informed wording, not claims.
+    expect(unjudged.context?.refs).toEqual([
+      { ref: "ctx-0001", summary: "Operator planned action.", statementKind: "operator_decision" },
+    ]);
+  });
+
+  // Staging runs run_06ge1jgoc3k675ntbrpfl2f901, run_06gdd08ut3bduqh67h4qa7rs01,
+  // and run_06gcod3rcad6bdi0fbe3bpfa01 all failed with the same ZodError:
+  // recommendation_id is the contexts table's primary key, so the reverse
+  // embed is to-one and PostgREST sends one object (or null), never an
+  // array. The schema wrongly required an array and rejected every real row.
+  it("parses a null contexts embed as context null, the real PostgREST to-one empty shape", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+      channel_recommendation_contexts: null,
+    };
+
+    const unjudged = toUnjudged(unjudgedRecommendationShape.parse(row));
+
+    expect(unjudged.context).toBeNull();
+  });
+
+  it("parses a contexts embed as a single object, the real PostgREST to-one shape", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+      channel_recommendation_contexts: {
+        manifest_id: "00000000-0000-4000-8000-0000000000c1",
+        share_mode: "internal_only" as const,
+        provided_refs: ["ctx-0001", "ctx-0002"],
+        cited_refs: ["ctx-0001"],
+      },
+    };
+
+    const parsed = unjudgedRecommendationShape.parse(row);
+    const unjudged = toUnjudged(parsed, () => ({
+      manifestDigest: "d".repeat(64),
+      entries: [
+        {
+          ref: "ctx-0001",
+          summary: "Operator planned action.",
+          statementKind: "operator_decision",
+        },
+      ],
+    }));
+
+    expect(unjudged.context).toMatchObject({ shareMode: "internal_only" });
+    expect(unjudged.context?.refs).toEqual([
+      { ref: "ctx-0001", summary: "Operator planned action.", statementKind: "operator_decision" },
+    ]);
+  });
+
+  it("leaves context null for evidence-only narrations without provenance", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+      channel_recommendation_contexts: [],
+    };
+
+    const unjudged = toUnjudged(unjudgedRecommendationShape.parse(row));
+
+    expect(unjudged.context).toBeNull();
+  });
+});
+
 describe("channel recommendations Trigger registration", () => {
   // Registration is asserted against source rather than a live worker: the
   // task list only syncs on `dev`/`deploy`, which this suite never starts.
@@ -97,8 +279,11 @@ describe("channel recommendations Trigger registration", () => {
     expect(source).toContain('id: "channel-recommendations.evaluate"');
     expect(source).toMatch(/schedules\.task\(\{[\s\S]*?cron: "0 3 \*\/2 \* \*"/);
     // A string cron runs in UTC by Trigger.dev contract; no timezone override
-    // may drift the judge off the plan's Global Constraints.
-    expect(source).not.toContain("timezone:");
+    // may drift the judge off the plan's Global Constraints. Scoped to the
+    // evaluate registration: the pilot-context loader's zod row schemas
+    // legitimately name `default_timezone`/`timezone` columns elsewhere.
+    const evaluateBody = source.slice(source.indexOf('id: "channel-recommendations.evaluate"'));
+    expect(evaluateBody).not.toMatch(/timezone\s*:/);
   });
 
   it("lets Postgres anti-join the bounded judge cursor and logs refused ids", async () => {

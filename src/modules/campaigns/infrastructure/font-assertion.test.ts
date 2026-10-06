@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { CampaignError } from "@/domain/campaigns/errors";
 import { FONT_MANIFEST } from "@/domain/campaigns/font-manifest";
-import { assertVendoredFonts, readFontHashes } from "@/modules/campaigns/infrastructure/font-assertion";
+import {
+  assertVendoredFonts,
+  readFontHashes,
+} from "@/modules/campaigns/infrastructure/font-assertion";
 
 describe("readFontHashes", () => {
   it("hashes every vendored file that is actually on disk", async () => {

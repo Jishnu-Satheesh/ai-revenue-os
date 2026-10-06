@@ -27,9 +27,7 @@ function workspace(
   };
 }
 
-function service(
-  deps: Partial<Parameters<typeof createGrowthIntelligenceReadService>[0]> = {},
-) {
+function service(deps: Partial<Parameters<typeof createGrowthIntelligenceReadService>[0]> = {}) {
   return createGrowthIntelligenceReadService({
     workspace: workspace(),
     opportunities: { listOpportunities: vi.fn().mockResolvedValue([]) },
@@ -129,8 +127,8 @@ describe("getGrowthIntelligence workspace", () => {
       id: "70000000-0000-4000-8000-000000000007",
       kind: "insight",
       narrative: "Delivery orders spike on rainy Thursdays.",
-      fingerprint:
-        "aa00000000000000000000000000000000000000000000000000000000000001",
+      fingerprint: "aa00000000000000000000000000000000000000000000000000000000000001",
+      synthesisRunId: "71000000-0000-4000-8000-000000000071",
       supportGrade: "corroborated",
       freshness: "current",
       urgency: "medium",
@@ -145,6 +143,7 @@ describe("getGrowthIntelligence workspace", () => {
       decidedAt: null,
       snoozedUntil: null,
       pinned: false,
+      myFeedback: null,
     };
     const read = service({
       workspace: workspace({
@@ -162,9 +161,7 @@ describe("getGrowthIntelligence workspace", () => {
       insights: 1,
       dataGaps: 0,
     });
-    expect(view.priorityActions.opportunities[0]!.actionKey).toBe(
-      "campaign.meta_bundle_v1",
-    );
+    expect(view.priorityActions.opportunities[0]!.actionKey).toBe("campaign.meta_bundle_v1");
   });
 
   it("passes the actor and section filter to the repositories", async () => {
@@ -229,5 +226,256 @@ describe("getGrowthIntelligence workspace", () => {
     expect(view.priorityActions.opportunities[0]!.draftRequest).toMatchObject({
       status: "processing",
     });
+  });
+});
+
+describe("research composition", () => {
+  const branchId = "30000000-0000-4000-8000-000000000003";
+  const pipelineId = "31000000-0000-4000-8000-000000000031";
+  const runId = "71000000-0000-4000-8000-000000000071";
+  const itemId = "70000000-0000-4000-8000-000000000007";
+
+  function researchReader() {
+    return {
+      listItemProvenance: vi.fn().mockResolvedValue({
+        [runId]: {
+          pipelineId,
+          branchId,
+          stage: "ready",
+          statusPath: `/api/organizations/${organizationId}/market-profile/research/${pipelineId}`,
+          supportingClaimIds: [],
+        },
+      }),
+      listResearchActivity: vi.fn().mockResolvedValue([
+        {
+          kind: "started",
+          pipelineId,
+          branchId,
+          scopeLabel: "Marina",
+          title: "Market research started — Marina",
+          occurredAt: "2026-09-01T08:00:00.000Z",
+          stage: null,
+        },
+      ]),
+    };
+  }
+
+  function recommendationItemRow() {
+    return {
+      id: itemId,
+      kind: "recommendation" as const,
+      narrative: "Research advice.",
+      fingerprint: "aa00000000000000000000000000000000000000000000000000000000000001",
+      synthesisRunId: runId,
+      supportGrade: "corroborated",
+      freshness: "current",
+      urgency: "medium",
+      goalAlignment: "direct",
+      activityMonth: "2026-09",
+      generatedAt: "2026-09-02T08:00:00.000Z",
+      evidenceWindowStart: null,
+      evidenceWindowEnd: null,
+      marketObservedAt: null,
+      missingInput: null,
+      decision: null,
+      decidedAt: null,
+      snoozedUntil: null,
+      pinned: false,
+      myFeedback: null,
+    };
+  }
+
+  it("attaches provenance and activity without changing lane order", async () => {
+    const research = researchReader();
+    const read = service({
+      workspace: workspace({
+        listWorkspaceItems: vi.fn().mockResolvedValue([recommendationItemRow()]),
+      }),
+      research,
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId, branchId });
+    const plain = await service({
+      workspace: workspace({
+        listWorkspaceItems: vi.fn().mockResolvedValue([recommendationItemRow()]),
+      }),
+    }).getWorkspace({ organizationId, actorId });
+
+    expect(research.listItemProvenance).toHaveBeenCalledWith({
+      organizationId,
+      items: [{ itemId, runId }],
+    });
+    expect(research.listResearchActivity).toHaveBeenCalledWith({
+      organizationId,
+      branchId,
+      limit: undefined,
+    });
+    const attributed = view.priorityActions.recommendations.find((card) => card.id === itemId);
+    expect(attributed?.researchProvenance?.pipelineId).toBe(pipelineId);
+    // Ordering, filters and triage are untouched: the same cards in the same order.
+    expect(view.priorityActions.recommendations.map((card) => card.id)).toEqual(
+      plain.priorityActions.recommendations.map((card) => card.id),
+    );
+    expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
+      1,
+    );
+  });
+
+  it("reads organization-wide activity when no branch is selected", async () => {
+    const research = researchReader();
+    const read = service({ research });
+
+    await read.getWorkspace({ organizationId, actorId });
+
+    expect(research.listResearchActivity).toHaveBeenCalledWith({
+      organizationId,
+      branchId: null,
+      limit: undefined,
+    });
+  });
+
+  it("leaves cards without provenance when no research reader is wired", async () => {
+    const read = service({
+      workspace: workspace({
+        listWorkspaceItems: vi.fn().mockResolvedValue([recommendationItemRow()]),
+      }),
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(view.priorityActions.recommendations[0]!.researchProvenance).toBeNull();
+    expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe("research degradation", () => {
+  it("composes the workspace without provenance when the research read fails", async () => {
+    const onResearchError = vi.fn();
+    const research = {
+      listItemProvenance: vi.fn().mockRejectedValue(new Error("denied")),
+      listResearchActivity: vi.fn().mockResolvedValue([]),
+    };
+    const read = service({ research, onResearchError });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(view.activityMonth).toBe("2026-09");
+    expect(onResearchError).toHaveBeenCalledTimes(1);
+    expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe("the campaign proposal lane", () => {
+  const PROPOSAL = "40000000-0000-4000-8000-000000000004";
+  const VERSION = "50000000-0000-4000-8000-000000000005";
+
+  function bundle(state = "ready_for_review") {
+    return {
+      proposal: {
+        id: PROPOSAL,
+        sourceKind: "business_signal",
+        sourceId: null,
+        state,
+        currentVersionId: null,
+        linkedCampaignId: null,
+        snoozedUntil: null,
+        createdAt: "2026-09-03T08:00:00.000Z",
+        updatedAt: "2026-09-04T08:00:00.000Z",
+      },
+      version: null,
+      decisions: [],
+    };
+  }
+
+  it("carries no lane at all when no proposal reader is composed", async () => {
+    const read = service();
+
+    // Not an empty section: a surface that may not read proposals must not
+    // imply there are none. Before this slice, every surface was in this state.
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(view.campaignProposals).toEqual([]);
+  });
+
+  it("projects proposals into their own lane", async () => {
+    const listProposals = vi.fn().mockResolvedValue([bundle()]);
+    const read = service({
+      proposals: { listProposals, readProposal: vi.fn().mockResolvedValue(null) },
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    expect(listProposals).toHaveBeenCalledWith({ organizationId });
+    expect(view.campaignProposals).toHaveLength(1);
+    expect(view.campaignProposals[0]?.proposalId).toBe(PROPOSAL);
+    // Never folded into the recommendation counts: one number must not mean
+    // two different kinds of act.
+    expect(view.counts.recommendations).toBe(0);
+  });
+
+  it("keeps the rest of the workspace when the proposal read fails", async () => {
+    const onProposalError = vi.fn();
+    const read = service({
+      proposals: {
+        listProposals: vi.fn().mockRejectedValue(new Error("permission denied")),
+        readProposal: vi.fn().mockResolvedValue(null),
+      },
+      onProposalError,
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    // An operator locked out of their whole workspace by one failing lane has
+    // lost more than they gained. The failure is reported, never hidden.
+    expect(onProposalError).toHaveBeenCalledTimes(1);
+    expect(view.campaignProposals).toEqual([]);
+    expect(view.activityMonth).toBe("2026-09");
+  });
+
+  it("does not read proposals for a section the caller did not ask for", async () => {
+    const listProposals = vi.fn().mockResolvedValue([bundle()]);
+    const read = service({
+      proposals: { listProposals, readProposal: vi.fn().mockResolvedValue(null) },
+    });
+
+    const view = await read.getWorkspace({
+      organizationId,
+      actorId,
+      sections: ["recommendations"],
+    });
+
+    expect(view.campaignProposals).toEqual([]);
+  });
+
+  it("names the version id it would decide against once one exists", async () => {
+    const withVersion = {
+      ...bundle(),
+      proposal: { ...bundle().proposal, currentVersionId: VERSION },
+      version: {
+        id: VERSION,
+        proposalId: PROPOSAL,
+        version: 1,
+        document: { not: "a proposal document" },
+        digest: "a".repeat(64),
+        createdAt: "2026-09-04T07:00:00.000Z",
+      },
+    };
+    const read = service({
+      proposals: {
+        listProposals: vi.fn().mockResolvedValue([withVersion]),
+        readProposal: vi.fn().mockResolvedValue(null),
+      },
+    });
+
+    const view = await read.getWorkspace({ organizationId, actorId });
+
+    // An unreadable stored document reaches the lane as unreadable rather than
+    // taking the workspace down or rendering in part.
+    expect(view.campaignProposals[0]?.content.kind).toBe("unreadable");
+    expect(view.campaignProposals[0]?.decidable).toBe(false);
   });
 });

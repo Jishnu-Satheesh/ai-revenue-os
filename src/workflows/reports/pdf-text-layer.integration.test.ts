@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -123,5 +124,26 @@ describe("refusing what cannot be read deterministically", () => {
 describeIfPresent(LEGACY_XLS)("a real legacy .xls from the provider", () => {
   it("is detected by content so the operator gets an actionable message", () => {
     expect(isLegacyXlsBuffer(readFileSync(LEGACY_XLS))).toBe(true);
+  });
+});
+
+/**
+ * The one thing about reading a PDF that no amount of reading a PDF here can
+ * prove.
+ *
+ * This suite loads pdf.js straight out of `node_modules`, where
+ * `pdf.worker.mjs` sits beside `pdf.mjs` and the relative `await import()`
+ * that fetches it resolves. The deployed worker does not: unless pdf.js is
+ * left external, the bundler inlines `pdf.mjs` and that same relative import
+ * points at a file that was never copied. Every test above passes and every
+ * real upload fails as `UNREADABLE_WORKBOOK`, which is exactly what happened
+ * to the first PDF this platform was ever given.
+ */
+describe("shipping the PDF reader, not just writing it", () => {
+  it("keeps pdfjs-dist external so the worker it loads at runtime is still beside it", async () => {
+    const config = await readFile(resolve(process.cwd(), "trigger.config.ts"), "utf8");
+    const external = config.match(/external:\s*\[([^\]]*)\]/)?.[1] ?? "";
+
+    expect(external).toContain('"pdfjs-dist"');
   });
 });

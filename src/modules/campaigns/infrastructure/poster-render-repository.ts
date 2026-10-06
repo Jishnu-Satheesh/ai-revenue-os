@@ -1,6 +1,10 @@
 import { z } from "zod";
 
-import type { PosterRenderRecord, PosterRenderStore } from "@/workflows/campaigns/render-poster";
+import type {
+  PosterExistingRender,
+  PosterRenderRecord,
+  PosterRenderStore,
+} from "@/workflows/campaigns/render-poster";
 
 /**
  * Storage for what a poster render produced.
@@ -19,14 +23,53 @@ import type { PosterRenderRecord, PosterRenderStore } from "@/workflows/campaign
 
 type RpcResult = { data: unknown; error: { message?: string } | null };
 
+type MaybeSingleResult = { data: unknown; error: { message?: string } | null };
+
 export type PosterRenderPersistence = {
   rpc(name: "record_campaign_poster_render", args: Record<string, unknown>): Promise<RpcResult>;
+  from(table: string): {
+    select(columns: string): {
+      eq(
+        column: string,
+        value: string,
+      ): {
+        eq(
+          column: string,
+          value: string,
+        ): {
+          eq(
+            column: string,
+            value: string,
+          ): {
+            eq(
+              column: string,
+              value: string,
+            ): {
+              maybeSingle(): Promise<MaybeSingleResult>;
+            };
+          };
+        };
+      };
+    };
+  };
 };
 
 const recordedSchema = z.object({
   render_id: z.string().uuid(),
   state: z.enum(["rendered", "refused"]),
   replayed: z.boolean(),
+});
+
+const existingRenderSchema = z.object({
+  id: z.string().uuid(),
+  state: z.enum(["rendered", "refused"]),
+  refusal_code: z.string().nullable(),
+  text_values: z.record(z.string(), z.string()),
+  output_storage_path: z.string().nullable(),
+  output_content_hash: z.string().nullable(),
+  output_mime_type: z.string().nullable(),
+  output_width_px: z.number().nullable(),
+  output_height_px: z.number().nullable(),
 });
 
 export function createPosterRenderStore(persistence: PosterRenderPersistence): PosterRenderStore {
@@ -76,6 +119,54 @@ export function createPosterRenderStore(persistence: PosterRenderPersistence): P
         renderId: parsed.data.render_id,
         state: parsed.data.state,
         replayed: parsed.data.replayed,
+      };
+    },
+
+    /**
+     * The row a previous attempt already wrote for this exact digest, if any.
+     *
+     * The digest is over plate, template, words, script and fonts -- everything
+     * that changes the pixels -- so a hit means the output already exists and
+     * the worker can skip drawing it again. A miss is null, never an invented
+     * row. A row the application can no longer read is an error rather than a
+     * miss: reusing a render nobody understands is how the wrong picture ends
+     * up under the right words.
+     */
+    async findByDigest(input: {
+      organizationId: string;
+      campaignId: string;
+      bundleVersionId: string;
+      renderDigest: string;
+    }): Promise<PosterExistingRender | null> {
+      const { data, error } = await persistence
+        .from("campaign_poster_renders")
+        .select(
+          "id,state,refusal_code,text_values,output_storage_path,output_content_hash,output_mime_type,output_width_px,output_height_px",
+        )
+        .eq("organization_id", input.organizationId)
+        .eq("campaign_id", input.campaignId)
+        .eq("bundle_version_id", input.bundleVersionId)
+        .eq("render_digest", input.renderDigest)
+        .maybeSingle();
+
+      // A read that failed is not an absent render. Treating it as one would
+      // draw, store and record a second output for work already done.
+      if (error) throw new Error("The poster render could not be read.");
+      if (data === null) return null;
+
+      const parsed = existingRenderSchema.safeParse(data);
+      if (!parsed.success) throw new Error("The poster render store returned an unreadable row.");
+
+      return {
+        renderId: parsed.data.id,
+        state: parsed.data.state,
+        refusalCode: parsed.data.refusal_code,
+        textValues: parsed.data.text_values,
+        outputStoragePath: parsed.data.output_storage_path,
+        outputContentHash: parsed.data.output_content_hash,
+        outputMimeType: parsed.data.output_mime_type,
+        outputWidthPx: parsed.data.output_width_px,
+        outputHeightPx: parsed.data.output_height_px,
       };
     },
   };

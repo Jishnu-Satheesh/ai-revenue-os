@@ -2,6 +2,11 @@ import "server-only";
 
 import { z } from "zod";
 
+import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
+import {
+  RESEARCH_PIPELINE_STAGES,
+  researchCoverageEntrySchema,
+} from "@/domain/growth-intelligence/research-pipeline";
 import { DomainError } from "@/lib/errors";
 
 const identifierSchema = z.string().uuid();
@@ -32,6 +37,10 @@ const sourceSchema = z
     retrievedAt: timestampSchema,
     publishedAt: timestampSchema.nullable(),
     observedAt: timestampSchema.nullable(),
+    excerptText: z.string().min(1).max(2_000).nullable().optional(),
+    excerptDigest: digestSchema.nullable().optional(),
+    qualificationVersion: z.string().min(1).max(80).nullable().optional(),
+    retainUntil: timestampSchema.nullable().optional(),
   })
   .strict()
   .superRefine((source, context) => {
@@ -55,6 +64,22 @@ const sourceSchema = z
       context.addIssue({
         code: "custom",
         message: "Source availability must match its digest and safe failure code.",
+      });
+    }
+    const excerptText = source.excerptText ?? null;
+    const excerptDigest = source.excerptDigest ?? null;
+    const qualificationVersion = source.qualificationVersion ?? null;
+    const retainUntil = source.retainUntil ?? null;
+    if ((excerptText === null) !== (excerptDigest === null)) {
+      context.addIssue({
+        code: "custom",
+        message: "A retained excerpt needs both its text and its digest.",
+      });
+    }
+    if (excerptText !== null && (qualificationVersion === null || retainUntil === null)) {
+      context.addIssue({
+        code: "custom",
+        message: "A retained excerpt must record its qualification and retain-until policy.",
       });
     }
   });
@@ -178,6 +203,9 @@ const metadataSchema = z
     runFingerprint: digestSchema,
     queryPlanDigest: digestSchema,
     correlationId: identifierSchema,
+    briefManifestId: z.string().min(1).max(160).nullable().optional(),
+    briefDigest: z.string().min(1).max(160).nullable().optional(),
+    briefStatus: z.enum(["ready", "empty", "partial", "unavailable", "disabled"]).optional(),
   })
   .strict();
 
@@ -235,6 +263,61 @@ const appendOutcomeSchema = z
   })
   .strict();
 
+/**
+ * The atomic handoff input: the worker's bounded result digest plus the
+ * retrieval coverage manifest. Eligibility is decided server-side from
+ * persisted claims, never from these worker counts.
+ */
+const pipelineCoverageSchema = z
+  .array(researchCoverageEntrySchema)
+  .min(1)
+  .max(26, "Coverage cannot exceed the planned query slots.");
+
+const pipelineHandoffSchema = z
+  .object({
+    runId: identifierSchema,
+    pipelineStage: z.enum(RESEARCH_PIPELINE_STAGES),
+    synthesisRequestId: identifierSchema.nullable(),
+    eligibleClaimCount: z.number().int().min(0).max(200),
+    replayed: z.boolean(),
+  })
+  .strict();
+
+const synthesisFinalizeResultSchema = z
+  .object({
+    outcome: z.literal("completed"),
+    resultDigest: digestSchema,
+    // Items ride through to the fenced persistence RPC, which validates
+    // every item strictly. The boundary only bounds the envelope.
+    items: z.array(z.unknown()).max(200),
+  })
+  .strict();
+
+const synthesisFinalizeOutcomeSchema = z
+  .object({
+    runId: identifierSchema,
+    itemCount: z.number().int().min(0).max(200),
+    supersededItemIds: z.array(identifierSchema).max(200).optional().default([]),
+    pipelineStage: z.enum(RESEARCH_PIPELINE_STAGES),
+    replayed: z.boolean(),
+  })
+  .strict();
+
+const synthesisFailOutcomeSchema = z
+  .object({
+    runId: identifierSchema,
+    pipelineStage: z.enum(RESEARCH_PIPELINE_STAGES),
+    replayed: z.boolean(),
+  })
+  .strict();
+
+const pipelineFailOutcomeSchema = z
+  .object({
+    pipelineStage: z.enum(RESEARCH_PIPELINE_STAGES),
+    replayed: z.boolean(),
+  })
+  .strict();
+
 export type MarketEvidencePersistence = {
   rpc(name: string, args: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }>;
 };
@@ -274,6 +357,39 @@ export type MarketEvidenceRepository = {
     eventType: "expired" | "withdrawn" | "excluded" | "corrected" | "superseded";
     event: z.infer<typeof appendEventSchema>;
   }): Promise<z.infer<typeof appendOutcomeSchema>>;
+  completePipeline(input: {
+    organizationId: string;
+    pipelineId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    result: z.infer<typeof resultSchema>;
+    coverage: z.input<typeof pipelineCoverageSchema>;
+  }): Promise<z.infer<typeof pipelineHandoffSchema>>;
+  completeSynthesisPipeline(input: {
+    organizationId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    result: z.infer<typeof synthesisFinalizeResultSchema>;
+  }): Promise<z.infer<typeof synthesisFinalizeOutcomeSchema>>;
+  failSynthesisPipeline(input: {
+    organizationId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string;
+    failureCode: string;
+  }): Promise<z.infer<typeof synthesisFailOutcomeSchema>>;
+  failPipeline(input: {
+    organizationId: string;
+    pipelineId: string;
+    requestId: string;
+    claimToken: string;
+    runId: string | null;
+    failureCode: string;
+    adapterCostMicrosUsd: number;
+    adapterLatencyMs: number;
+  }): Promise<z.infer<typeof pipelineFailOutcomeSchema>>;
 };
 
 function boundaryError(): DomainError {
@@ -284,7 +400,16 @@ function boundaryError(): DomainError {
 }
 
 function persistenceError(
-  operation: "begin" | "record" | "complete" | "fail" | "append",
+  operation:
+    | "begin"
+    | "record"
+    | "complete"
+    | "fail"
+    | "append"
+    | "completePipeline"
+    | "completeSynthesis"
+    | "failSynthesis"
+    | "failPipeline",
 ): DomainError {
   const messages = {
     begin: "Market research could not be started.",
@@ -292,8 +417,26 @@ function persistenceError(
     complete: "Market research could not be completed.",
     fail: "Market research could not be marked as failed.",
     append: "Market Evidence state could not be updated.",
+    completePipeline: "Market research handoff could not be completed.",
+    completeSynthesis: "Market synthesis could not be finalized.",
+    failSynthesis: "Market synthesis could not be marked as failed.",
+    failPipeline: "Market research pipeline could not be marked as failed.",
   } as const;
   return new DomainError("DOMAIN_ERROR", messages[operation]);
+}
+
+function errorMessage(error: unknown): string {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return String((error as { message: unknown }).message);
+  }
+  return "";
+}
+
+function claimLostError(): GrowthIntelligenceError {
+  return new GrowthIntelligenceError(
+    "RESEARCH_CLAIM_LOST",
+    "The research lease is no longer current; no evidence was changed.",
+  );
 }
 
 async function invoke(
@@ -301,15 +444,31 @@ async function invoke(
   name: string,
   args: Record<string, unknown>,
   outputSchema: z.ZodType,
-  operation: "begin" | "record" | "complete" | "fail" | "append",
-): Promise<unknown> {
+  operation:
+    | "begin"
+    | "record"
+    | "complete"
+    | "fail"
+    | "append"
+    | "completePipeline"
+    | "completeSynthesis"
+    | "failSynthesis"
+    | "failPipeline",
+  ): Promise<unknown> {
   let result: { data: unknown; error: unknown };
   try {
     result = await persistence.rpc(name, args);
-  } catch {
+  } catch (error: unknown) {
+    // A lost lease (expiry or same-branch supersession, which cancels the
+    // claimed request) must surface distinctly so the worker stops mutating
+    // instead of retrying evidence writes under a dead claim token.
+    if (errorMessage(error).includes("market_research_claim_lost")) throw claimLostError();
     throw persistenceError(operation);
   }
-  if (result.error) throw persistenceError(operation);
+  if (result.error) {
+    if (errorMessage(result.error).includes("market_research_claim_lost")) throw claimLostError();
+    throw persistenceError(operation);
+  }
   const parsed = outputSchema.safeParse(result.data);
   if (!parsed.success) throw persistenceError(operation);
   return parsed.data;
@@ -343,6 +502,20 @@ export function createMarketEvidenceRepository(
 
     async record(input) {
       const payload = parseOrThrow(marketEvidencePayloadSchema, input.payload);
+      // Deterministic admission at the boundary: a claim may only cite
+      // available sources. Unavailable, excluded or erased sources are kept
+      // as retrieval lineage, but the link trigger would refuse them as
+      // support — fail here with safe copy before any RPC crosses.
+      const availabilityByKey = new Map(
+        payload.sources.map((source) => [source.key, source.availability] as const),
+      );
+      for (const claim of payload.claims) {
+        if (
+          !claim.sourceKeys.every((sourceKey) => availabilityByKey.get(sourceKey) === "available")
+        ) {
+          throw boundaryError();
+        }
+      }
       return (await invoke(
         persistence,
         "record_market_evidence_claims",
@@ -407,6 +580,93 @@ export function createMarketEvidenceRepository(
         appendOutcomeSchema,
         "append",
       )) as z.infer<typeof appendOutcomeSchema>;
+    },
+
+    async completePipeline(input) {
+      const result = parseOrThrow(resultSchema, input.result);
+      const coverage = parseOrThrow(pipelineCoverageSchema, input.coverage);
+      return (await invoke(
+        persistence,
+        "complete_market_research_pipeline",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_pipeline_id: parseOrThrow(identifierSchema, input.pipelineId),
+          p_request_id: parseOrThrow(identifierSchema, input.requestId),
+          p_claim_token: parseOrThrow(identifierSchema, input.claimToken),
+          p_market_research_run_id: parseOrThrow(identifierSchema, input.runId),
+          p_result: result,
+          p_coverage: coverage,
+        },
+        pipelineHandoffSchema,
+        "completePipeline",
+      )) as z.infer<typeof pipelineHandoffSchema>;
+    },
+
+    async completeSynthesisPipeline(input) {
+      const result = parseOrThrow(synthesisFinalizeResultSchema, input.result);
+      return (await invoke(
+        persistence,
+        "complete_market_synthesis_pipeline",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_request_id: parseOrThrow(identifierSchema, input.requestId),
+          p_claim_token: parseOrThrow(identifierSchema, input.claimToken),
+          p_synthesis_run_id: parseOrThrow(identifierSchema, input.runId),
+          p_result: result,
+        },
+        synthesisFinalizeOutcomeSchema,
+        "completeSynthesis",
+      )) as z.infer<typeof synthesisFinalizeOutcomeSchema>;
+    },
+
+    async failSynthesisPipeline(input) {
+      const failureCode = parseOrThrow(safeCodeSchema, input.failureCode);
+      return (await invoke(
+        persistence,
+        "fail_market_synthesis_pipeline",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_request_id: parseOrThrow(identifierSchema, input.requestId),
+          p_claim_token: parseOrThrow(identifierSchema, input.claimToken),
+          p_synthesis_run_id: parseOrThrow(identifierSchema, input.runId),
+          p_safe_failure_code: failureCode,
+        },
+        synthesisFailOutcomeSchema,
+        "failSynthesis",
+      )) as z.infer<typeof synthesisFailOutcomeSchema>;
+    },
+
+    async failPipeline(input) {
+      const failureCode = parseOrThrow(safeCodeSchema, input.failureCode);
+      const costs = parseOrThrow(
+        z
+          .object({
+            adapterCostMicrosUsd: z.number().int().min(0).max(50_000_000),
+            adapterLatencyMs: z.number().int().min(0).max(600_000),
+          })
+          .strict(),
+        {
+          adapterCostMicrosUsd: input.adapterCostMicrosUsd,
+          adapterLatencyMs: input.adapterLatencyMs,
+        },
+      );
+      return (await invoke(
+        persistence,
+        "fail_market_research_pipeline",
+        {
+          p_organization_id: parseOrThrow(identifierSchema, input.organizationId),
+          p_pipeline_id: parseOrThrow(identifierSchema, input.pipelineId),
+          p_request_id: parseOrThrow(identifierSchema, input.requestId),
+          p_claim_token: parseOrThrow(identifierSchema, input.claimToken),
+          p_market_research_run_id:
+            input.runId === null ? null : parseOrThrow(identifierSchema, input.runId),
+          p_safe_failure_code: failureCode,
+          p_adapter_cost_micros_usd: costs.adapterCostMicrosUsd,
+          p_adapter_latency_ms: costs.adapterLatencyMs,
+        },
+        pipelineFailOutcomeSchema,
+        "failPipeline",
+      )) as z.infer<typeof pipelineFailOutcomeSchema>;
     },
   };
 }

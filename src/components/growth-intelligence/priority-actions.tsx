@@ -21,10 +21,43 @@ export function PriorityActions({
   organizationId,
   timeZone,
   canManage,
+  hideHeading = false,
+  channelNames,
+  branchNames,
 }: SharedProps & {
   opportunities: readonly OpportunityCard[];
   recommendations: readonly RecommendationCard[];
+  hideHeading?: boolean;
+  channelNames?: ReadonlyMap<string, string>;
+  branchNames?: ReadonlyMap<string, string>;
 }) {
+  if (hideHeading) {
+    // Top preview matches the prototype: recommendations only, no
+    // opportunities lane and no all-clear lines. An empty preview names the
+    // reviewed state instead of leaving a blank gap.
+    if (recommendations.length === 0) {
+      return (
+        <div className="rounded-xl border border-border p-6 text-sm text-muted-foreground">
+          You have reviewed all current recommendations. Your choices are saved in Your actions.
+        </div>
+      );
+    }
+    return (
+      <div className="flex flex-col gap-3">
+        {recommendations.map((card) => (
+          <IntelligenceCard
+            key={card.id}
+            card={card}
+            organizationId={organizationId}
+            timeZone={timeZone}
+            canManage={canManage}
+            channelNames={channelNames}
+            branchNames={branchNames}
+          />
+        ))}
+      </div>
+    );
+  }
   return (
     <section aria-label="Priority actions" className="flex flex-col gap-4">
       <h2 className="text-lg font-semibold">Priority actions</h2>
@@ -40,6 +73,8 @@ export function PriorityActions({
             organizationId={organizationId}
             timeZone={timeZone}
             canManage={canManage}
+            channelNames={channelNames}
+            branchNames={branchNames}
           />
         ))}
       </div>
@@ -55,6 +90,8 @@ export function PriorityActions({
             organizationId={organizationId}
             timeZone={timeZone}
             canManage={canManage}
+            channelNames={channelNames}
+            branchNames={branchNames}
           />
         ))}
       </div>

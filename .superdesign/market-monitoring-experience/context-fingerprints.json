@@ -1,0 +1,20 @@
+{
+  ".superdesign/design-system.md": "87056df0a2fec772d8f15c75fa938f247fdb1206f0b4ce0e47e7fc43cebed608",
+  ".superdesign/market-monitoring-experience/brief.md": "52ade45214f751ac3ee831ac636a6882e7641645025b06f1cb6f14da14137c8a",
+  "src/app/globals.css": "c9277914defc17b2d2378e3e257f3d95dc4222e710e3f7e62a9b7bde62427114",
+  "src/app/(platform)/organizations/[organizationId]/growth-intelligence/page.tsx": "f093cc9006f5cbae675f79574f8b706aa10e6b3340f199a2eb726d5c49c5254a",
+  "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+  "src/components/layout/sidebar.tsx": "79e6b159c149d941f7d9472430c0cb3606cb4247a62d0e91c4187d7250dbcdc1",
+  "src/components/growth-intelligence/campaign-draft-action.tsx": "3659ce1ab8382925b831278853cd22d9a8ac92aa8778979c190717b8fa099652",
+  "src/components/growth-intelligence/data-gaps.tsx": "680f3446138327b9e4c6f091688208bd7970404a015e1e1f34658eb2de3f77cd",
+  "src/components/growth-intelligence/growth-intelligence-workspace.tsx": "a0867619d39c3a10d608fb9ba25f5c222c4d6c4165187acb2ec9e3661598d76e",
+  "src/components/growth-intelligence/insights-list.tsx": "914c324d195c8a3bb9ac6a3d14002fa1c39ea7455f124958f9a2ee2d38065115",
+  "src/components/growth-intelligence/intelligence-card.tsx": "f5f72e967239529f1a665ae9ee07652e1840684400f9d8d5ac6e79afaa244a4b",
+  "src/components/growth-intelligence/intelligence-timeline.tsx": "6f6c5af1a4ecca4ff592d8e711c8f5ba521b4a797a12db2bfdd24a8e8426a4ee",
+  "src/components/growth-intelligence/market-profile-review.tsx": "cc623cf2b4be58d4a483373e0a3a608f823a7ae5747589c78b8ddda7062c6bd2",
+  "src/components/growth-intelligence/market-watch.tsx": "f671058bab0f1668c8732a13c9348414e82e1c25550fa4823b671dde946a9777",
+  "src/components/growth-intelligence/priority-actions.tsx": "bc696ed8949cc823b387ed4fdccae3216c106905de70905a03ee8a11677512b9",
+  "src/components/growth-intelligence/source-evidence-drawer.tsx": "cc123a188c2b0c985c71076f9c6b3f94fd07237fb4dc1308cc70e28ff3d22ec1",
+  ".superdesign/growth-intelligence/primitives-context.md": "8507600ace8a803dde1abf8f15f1b1e5c746bbd9a7c41aabbdf6b792856892c5",
+  "src/components/growth-intelligence/market-monitoring-dialog.tsx": "4c667be1754cc58ea016f0d1a45239a97d307c834a7597fd12448d25f7479a1c"
+}

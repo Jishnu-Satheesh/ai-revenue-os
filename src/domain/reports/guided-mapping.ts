@@ -83,7 +83,10 @@ export const guidedReportMappingSchema = z
       });
     }
     const label = answers.totalsRow?.sourceHeader;
-    if (label && (label === answers.salesColumn || label === answers.ordersColumn || label === period)) {
+    if (
+      label &&
+      (label === answers.salesColumn || label === answers.ordersColumn || label === period)
+    ) {
       context.addIssue({
         code: "custom",
         path: ["totalsRow"],

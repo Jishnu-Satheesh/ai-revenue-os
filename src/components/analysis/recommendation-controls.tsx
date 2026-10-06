@@ -2,9 +2,15 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ThumbsDown, ThumbsUp, Zap } from "lucide-react";
+import { Clock, ThumbsDown, ThumbsUp, X, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ContextUsedDrawer, type ContextUsedData } from "@/components/memory/context-used";
 import type { WorkspaceRecommendationView } from "@/modules/analysis/application/read-model";
 
 /**
@@ -45,9 +52,16 @@ type DecisionKind = "acknowledged" | "dismissed" | "planned";
 export function RecommendationControls({
   organizationId,
   recommendation,
+  memoryContext,
 }: {
   organizationId: string;
   recommendation: WorkspaceRecommendationView;
+  /**
+   * Governed context provenance for this recommendation, once the read model
+   * carries it. Absent renders exactly the previous controls: no drawer is
+   * offered for an answer whose context is unknown rather than invented.
+   */
+  memoryContext?: ContextUsedData | null;
 }) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -57,7 +71,10 @@ export function RecommendationControls({
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [snoozeUntil, setSnoozeUntil] = useState("");
 
-  async function answer(body: Record<string, unknown>, path: "decisions" | "feedback"): Promise<boolean> {
+  async function answer(
+    body: Record<string, unknown>,
+    path: "decisions" | "feedback",
+  ): Promise<boolean> {
     setPending(true);
     setError(null);
     try {
@@ -120,26 +137,102 @@ export function RecommendationControls({
       // border, leading with the lightning mark and then the narrator's words.
       className="flex flex-col gap-5 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-6"
     >
-      <div className="flex gap-4">
+      {/* Top row: mark plus the four answers as one nowrap icon group.
+          Second row below carries the words full-width, so the text is never
+          squeezed beside the buttons. */}
+      <div className="flex items-center justify-between gap-3">
         <span
           aria-hidden="true"
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-500 text-white"
         >
-          <Zap className="size-5" />
+          <Zap className="size-4" />
         </span>
-        <div className="flex min-w-0 flex-col gap-1.5">
-          {recommendation.label === "needs_data" ? (
-            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-              {LABELS[recommendation.label]}
-            </p>
-          ) : null}
-          <p className="text-[13px] font-medium leading-relaxed">{recommendation.headline}</p>
-          {recommendation.detail ? (
-            <p className="text-[13px] leading-relaxed text-muted-foreground">
-              {recommendation.detail}
-            </p>
-          ) : null}
-        </div>
+        {!recommendation.decision ? (
+          <TooltipProvider>
+            <div className="flex shrink-0 flex-nowrap items-center gap-1">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Helpful"
+                    className="size-8 shrink-0 justify-center rounded-full border border-emerald-200 bg-white p-0 text-emerald-600"
+                    aria-pressed={recommendation.myFeedback === true}
+                    disabled={pending}
+                    onClick={() => answer({ helpful: true }, "feedback")}
+                  >
+                    <ThumbsUp aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Mark as helpful</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Not helpful"
+                    className="size-8 shrink-0 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
+                    aria-pressed={recommendation.myFeedback === false}
+                    disabled={pending}
+                    onClick={() => answer({ helpful: false }, "feedback")}
+                  >
+                    <ThumbsDown aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Mark as not helpful</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Snooze"
+                    className="size-8 shrink-0 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
+                    disabled={pending}
+                    onClick={() => setSnoozeOpen(true)}
+                  >
+                    <Clock aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Snooze until later</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Dismiss"
+                    className="size-8 shrink-0 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
+                    disabled={pending}
+                    onClick={() => setDismissOpen(true)}
+                  >
+                    <X aria-hidden="true" className="size-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="top">Dismiss with a reason</TooltipContent>
+              </Tooltip>
+            </div>
+          </TooltipProvider>
+        ) : null}
+      </div>
+
+      <div className="flex min-w-0 flex-col gap-1.5">
+        {recommendation.label === "needs_data" ? (
+          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+            {LABELS[recommendation.label]}
+          </p>
+        ) : null}
+        <p className="text-[13px] font-medium leading-relaxed">{recommendation.headline}</p>
+        {recommendation.detail ? (
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            {recommendation.detail}
+          </p>
+        ) : null}
       </div>
 
       {recommendation.supportedActions.length > 0 ? (
@@ -161,6 +254,16 @@ export function RecommendationControls({
         </p>
       ) : null}
 
+      {memoryContext ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <ContextUsedDrawer
+            organizationId={organizationId}
+            recommendationHeadline={recommendation.headline}
+            data={memoryContext}
+          />
+        </div>
+      ) : null}
+
       {error ? (
         <p role="alert" className="text-[11px] font-medium text-warning">
           {error}
@@ -177,9 +280,7 @@ export function RecommendationControls({
             day: "numeric",
           })}
           {recommendation.decision.reason ? (
-            <span className="block font-normal italic">
-              “{recommendation.decision.reason}”
-            </span>
+            <span className="block font-normal italic">“{recommendation.decision.reason}”</span>
           ) : null}
           {recommendation.decision.decision === "snoozed" &&
           recommendation.decision.snoozedUntil ? (
@@ -194,7 +295,9 @@ export function RecommendationControls({
           ) : null}
         </p>
       ) : (
-        <div className="flex items-center gap-2 pt-1">
+        // Decision pair only: the four icon answers live in the header row, so
+        // this row keeps just Acknowledge and Planned and cannot overflow.
+        <div className="flex flex-wrap items-center gap-2 pt-1">
           <Button
             type="button"
             variant="outline"
@@ -215,52 +318,6 @@ export function RecommendationControls({
           >
             Planned
           </Button>
-          <div className="ml-auto flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Helpful"
-              className="size-8 justify-center rounded-full border border-emerald-200 bg-white p-0 text-emerald-600"
-              aria-pressed={recommendation.myFeedback === true}
-              disabled={pending}
-              onClick={() => answer({ helpful: true }, "feedback")}
-            >
-              <ThumbsUp aria-hidden="true" className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              aria-label="Not helpful"
-              className="size-8 justify-center rounded-full border border-border bg-white p-0 text-muted-foreground"
-              aria-pressed={recommendation.myFeedback === false}
-              disabled={pending}
-              onClick={() => answer({ helpful: false }, "feedback")}
-            >
-              <ThumbsDown aria-hidden="true" className="size-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground"
-              disabled={pending}
-              onClick={() => setSnoozeOpen(true)}
-            >
-              Snooze
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="text-muted-foreground"
-              disabled={pending}
-              onClick={() => setDismissOpen(true)}
-            >
-              Dismiss
-            </Button>
-          </div>
         </div>
       )}
 
@@ -269,8 +326,8 @@ export function RecommendationControls({
           <DialogHeader>
             <DialogTitle>Snooze this recommendation</DialogTitle>
             <DialogDescription>
-              Hidden until the time below, then back in the queue. The horizon
-              travels with the answer so the record explains itself later.
+              Hidden until the time below, then back in the queue. The horizon travels with the
+              answer so the record explains itself later.
             </DialogDescription>
           </DialogHeader>
           <input
@@ -286,12 +343,7 @@ export function RecommendationControls({
             </p>
           ) : null}
           <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setSnoozeOpen(false)}
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={() => setSnoozeOpen(false)}>
               Cancel
             </Button>
             <Button
@@ -319,8 +371,8 @@ export function RecommendationControls({
           <DialogHeader>
             <DialogTitle>Dismiss this recommendation</DialogTitle>
             <DialogDescription>
-              Say why in a few words. The reason is kept with the answer so the
-              record explains itself later.
+              Say why in a few words. The reason is kept with the answer so the record explains
+              itself later.
             </DialogDescription>
           </DialogHeader>
           <textarea
@@ -336,12 +388,7 @@ export function RecommendationControls({
             </p>
           ) : null}
           <DialogFooter>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setDismissOpen(false)}
-            >
+            <Button type="button" variant="ghost" size="sm" onClick={() => setDismissOpen(false)}>
               Cancel
             </Button>
             <Button

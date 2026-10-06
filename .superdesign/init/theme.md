@@ -7,7 +7,7 @@ codebase. Anything designed against that snapshot will come out the wrong colour
 ## Compact token summary
 
 - Framework: Tailwind CSS v4 with `@theme inline`; shadcn/ui New York, Radix base.
-- Font: Arial, Helvetica, sans-serif (current implementation).
+- Font: Manrope via `next/font/google`, bound to `--font-sans` and applied as `font-sans` on `<html>` in `src/app/layout.tsx`. (Corrected 2026-09-22: the old Arial line contradicted the real root layout and produced off-language drafts.)
 - **Neutral greys, emerald brand.** Every neutral is pure achromatic (`chroma 0`); the
   only colour in the palette is the emerald ramp around hue 163–167.
 - Primary: `oklch(0.508 0.118 165.612)` — emerald. This is the brand colour: primary

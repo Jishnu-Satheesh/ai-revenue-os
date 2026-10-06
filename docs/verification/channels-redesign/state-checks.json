@@ -1,0 +1,62 @@
+[
+  {
+    "id": "C38",
+    "name": "empty viewer sees no Add",
+    "pass": true
+  },
+  {
+    "id": "C38-manager",
+    "name": "empty manager keeps header + in-section Add",
+    "pass": true
+  },
+  {
+    "id": "C40",
+    "name": "archives-only honest empty",
+    "pass": true
+  },
+  {
+    "id": "select-kbd",
+    "name": "Select keyboard activates (navigates)",
+    "pass": true
+  },
+  {
+    "id": "chart-space",
+    "name": "Space opens D02",
+    "pass": true
+  },
+  {
+    "id": "C53-trap",
+    "name": "focus stays inside D05",
+    "pass": true
+  },
+  {
+    "id": "C53-return",
+    "name": "focus returns to ellipsis",
+    "pass": false
+  },
+  {
+    "id": "C52-confirm",
+    "name": "D06 effect copy",
+    "pass": true
+  },
+  {
+    "id": "C52-focus",
+    "name": "D06 initial focus on Cancel",
+    "pass": true
+  },
+  {
+    "id": "C51-archive",
+    "name": "archive closes both + toast",
+    "pass": true
+  },
+  {
+    "id": "C48-viewer",
+    "name": "viewer zero mutation controls",
+    "pass": true
+  },
+  {
+    "id": "C48-viewer-title",
+    "name": "viewer title",
+    "pass": true
+  }
+]

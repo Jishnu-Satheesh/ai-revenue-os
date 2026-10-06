@@ -40,8 +40,8 @@ export const channelAnalysisTask = schemaTask({
     const reads = createAuthenticatedChannelAnalysisRepository(supabase);
 
     const result = await runChannelAnalysis(payload, {
-      async loadMonthHorizon(input) {
-        return reads.loadAnalysisMonthTimeline(input);
+      async loadCoverageSegments(input) {
+        return reads.loadCoverageSegments(input);
       },
       async claim(input) {
         const data = await rpc<Record<string, unknown> | null>("claim_channel_analysis", {

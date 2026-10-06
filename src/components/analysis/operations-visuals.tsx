@@ -2,7 +2,15 @@ import { addLocalDays, localDaysBetween } from "@/domain/analysis/calendar";
 import { formatCount, formatMoney, formatPercent } from "@/components/analysis/format";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
-import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import type {
   WorkspaceChapterView,
   WorkspaceFindingView,
@@ -24,6 +32,40 @@ function monthLabel(date: string): string {
 
 function dayNumber(date: string): number {
   return Number(date.slice(8, 10));
+}
+
+/**
+ * Minutes arrive with long fractional tails (1079.98333333333), which no
+ * operator can read in a hover title. Hours at one decimal place keep the
+ * same ratio and fit in a tooltip.
+ */
+function formatHours(minutes: number): string {
+  return new Intl.NumberFormat("en-GB", { maximumFractionDigits: 1 }).format(minutes / 60);
+}
+
+function velocityTickLabel(date: string, grain?: string): string {
+  const point = new Date(`${date}T00:00:00Z`);
+  if (grain === "month") {
+    return new Intl.DateTimeFormat("en-GB", {
+      month: "short",
+      year: "2-digit",
+      timeZone: "UTC",
+    }).format(point);
+  }
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC",
+  }).format(point);
+}
+
+function velocityTooltipLabel(date: string): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00Z`));
 }
 
 function heatClass(closedMinutes: number, scheduledMinutes: number): string {
@@ -72,9 +114,15 @@ function AvailabilityCalendar({
     months.set(month, entries);
   }
 
+  const monthGroups = [...months.values()];
+
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-      {[...months.values()].map((monthDates) => {
+    <div
+      className={
+        monthGroups.length > 1 ? "grid grid-cols-1 gap-6 xl:grid-cols-2" : "grid grid-cols-1 gap-6"
+      }
+    >
+      {monthGroups.map((monthDates) => {
         const first = monthDates[0];
         const leadingBlankCount = new Date(`${first}T00:00:00Z`).getUTCDay();
         return (
@@ -96,8 +144,8 @@ function AvailabilityCalendar({
                 const hasPair =
                   point?.closedMinutes !== undefined && point.scheduledMinutes !== undefined;
                 const label = hasPair
-                  ? `${date}: ${point.closedMinutes} closed minutes of ${point.scheduledMinutes} scheduled minutes.`
-                  : `${date}: no closed and scheduled minute pair is cited by this finding.`;
+                  ? `${date}: ${formatHours(point.closedMinutes as number)} closed hours of ${formatHours(point.scheduledMinutes as number)} scheduled hours.`
+                  : `${date}: no closed and scheduled hour pair is cited by this finding.`;
                 return (
                   <span
                     key={date}
@@ -377,7 +425,14 @@ export function RetentionVisual({
   const periodUnit = run?.periodGrain ?? "period";
 
   return (
-    <section aria-label="Customer mix and retention" className="flex flex-col gap-8">
+    <section
+      aria-label="Customer mix and retention"
+      className={
+        velocity.length > 0
+          ? "grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start"
+          : "flex flex-col gap-2"
+      }
+    >
       {/* Acquisition mix: two columns sized by the stored share. */}
       <div className="flex flex-col gap-2">
         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
@@ -427,15 +482,27 @@ export function RetentionVisual({
               </p>
             ) : null}
           </div>
-          <div className="h-32 w-full rounded-lg border border-border bg-slate-50 p-2">
+          <div className="h-36 w-full rounded-lg border border-border bg-slate-50 p-2">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={velocity} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                 <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="periodStart" hide />
+                <XAxis
+                  dataKey="periodStart"
+                  tickFormatter={(value: string) =>
+                    velocityTickLabel(value, run?.periodGrain ?? undefined)
+                  }
+                  interval="preserveStartEnd"
+                  minTickGap={32}
+                  tickLine={false}
+                  axisLine={false}
+                  height={22}
+                  tickMargin={4}
+                  tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
+                />
                 <YAxis hide domain={["dataMin", "dataMax"]} />
                 <Tooltip
                   formatter={(value) => [`${formatCount(Number(value))} orders`, "Orders"]}
-                  labelFormatter={(label) => String(label)}
+                  labelFormatter={(label) => velocityTooltipLabel(String(label))}
                 />
                 <Line
                   type="monotone"

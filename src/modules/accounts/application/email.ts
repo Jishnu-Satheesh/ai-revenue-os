@@ -8,10 +8,21 @@ import {
   invitationEmailHtml,
   invitationEmailSubject,
   invitationEmailText,
+  invitationSenderFrom,
+  organizationInvitationEmailHtml,
+  organizationInvitationEmailSubject,
+  organizationInvitationEmailText,
   type InvitationEmailInput,
+  type OrganizationInvitationEmailInput,
 } from "@/modules/accounts/application/invitation-email";
 
 export type InvitationEmailRequest = InvitationEmailInput & {
+  to: string;
+  /** Used as the idempotency key, so a retried send cannot deliver twice. */
+  invitationId: string;
+};
+
+export type OrganizationInvitationEmailRequest = OrganizationInvitationEmailInput & {
   to: string;
   /** Used as the idempotency key, so a retried send cannot deliver twice. */
   invitationId: string;
@@ -43,38 +54,95 @@ export function createNoopInvitationEmailSender(): InvitationEmailSender {
   };
 }
 
-export function createResendInvitationEmailSender(apiKey: string): InvitationEmailSender {
+/**
+ * The one transport both invitation kinds share. The Resend SDK resolves with
+ * `{ data, error }` rather than throwing, so an unchecked call looks
+ * successful while delivering nothing.
+ */
+async function deliverViaResend(
+  apiKey: string,
+  message: { from: string; to: string[]; subject: string; html: string; text: string },
+  idempotencyKey: string,
+  logScope: string,
+  invitationId: string,
+): Promise<InvitationEmailResult> {
   const resend = new Resend(apiKey);
+  // Scoped to the invitation, so a retry of the same send is collapsed
+  // rather than delivered again.
+  const { data, error } = await resend.emails.send(message, { idempotencyKey });
 
+  if (error || !data) {
+    // The address is deliberately absent: `LogContext` has no field for it,
+    // which is what stops a recipient's email reaching the logs.
+    logger.error(`${logScope}.failed`, {
+      invitationId,
+      errorCode: error?.name ?? "unknown",
+    });
+    return { sent: false };
+  }
+
+  logger.info(`${logScope}.sent`, { invitationId });
+  return { sent: true };
+}
+
+export function createResendInvitationEmailSender(apiKey: string): InvitationEmailSender {
   return {
     async send(request) {
-      // The Resend SDK resolves with `{ data, error }` rather than throwing, so
-      // an unchecked call looks successful while delivering nothing.
-      const { data, error } = await resend.emails.send(
+      return deliverViaResend(
+        apiKey,
         {
-          from: env.INVITATION_FROM_ADDRESS,
+          from: invitationSenderFrom(request.accountName, env.INVITATION_FROM_ADDRESS),
           to: [request.to],
           subject: invitationEmailSubject(request.accountName),
           html: invitationEmailHtml(request),
           text: invitationEmailText(request),
         },
-        // Scoped to the invitation, so a retry of the same send is collapsed
-        // rather than delivered again.
-        { idempotencyKey: `account-invitation/${request.invitationId}` },
+        `account-invitation/${request.invitationId}`,
+        "invitation_email",
+        request.invitationId,
       );
+    },
+  };
+}
 
-      if (error || !data) {
-        // The address is deliberately absent: `LogContext` has no field for it,
-        // which is what stops a recipient's email reaching the logs.
-        logger.error("invitation_email.failed", {
+export type OrganizationInvitationEmailSender = {
+  send(request: OrganizationInvitationEmailRequest): Promise<InvitationEmailResult>;
+};
+
+/**
+ * The organization variant: same transport, client-scoped copy, and the sender
+ * derived from the organization name. Without an API key nothing leaves the
+ * process, exactly like the account sender.
+ */
+export function createOrganizationInvitationEmailSender(
+  apiKey: string | undefined,
+): OrganizationInvitationEmailSender {
+  if (!apiKey) {
+    return {
+      async send(request) {
+        logger.info("organization_invitation_email.skipped", {
           invitationId: request.invitationId,
-          errorCode: error?.name ?? "unknown",
         });
         return { sent: false };
-      }
+      },
+    };
+  }
 
-      logger.info("invitation_email.sent", { invitationId: request.invitationId });
-      return { sent: true };
+  return {
+    async send(request) {
+      return deliverViaResend(
+        apiKey,
+        {
+          from: invitationSenderFrom(request.organizationName, env.INVITATION_FROM_ADDRESS),
+          to: [request.to],
+          subject: organizationInvitationEmailSubject(request.organizationName),
+          html: organizationInvitationEmailHtml(request),
+          text: organizationInvitationEmailText(request),
+        },
+        `organization-invitation/${request.invitationId}`,
+        "organization_invitation_email",
+        request.invitationId,
+      );
     },
   };
 }
@@ -89,4 +157,14 @@ export function invitationEmailSender(): InvitationEmailSender {
       : createNoopInvitationEmailSender();
   }
   return cached;
+}
+
+let cachedOrganization: OrganizationInvitationEmailSender | null = null;
+
+/** Same resolution for the organization variant. */
+export function organizationInvitationEmailSender(): OrganizationInvitationEmailSender {
+  if (!cachedOrganization) {
+    cachedOrganization = createOrganizationInvitationEmailSender(env.RESEND_API_KEY);
+  }
+  return cachedOrganization;
 }

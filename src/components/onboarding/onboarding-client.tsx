@@ -327,6 +327,7 @@ export function OnboardingClient({
       <ChannelsPresenceSection
         defaultValues={sectionPayload(sectionStates.get("channels_presence"))}
         onSave={save("channels_presence")}
+        organizationId={organizationId}
       />
     ),
     historical_performance: (

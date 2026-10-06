@@ -1,3 +1,4 @@
+import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import {
   approvalInputSchema,
@@ -69,6 +70,27 @@ export type CampaignPersistence = {
 function constraintName(message: string | undefined): string | undefined {
   return /constraint "([a-z0-9_]+)"/i.exec(message ?? "")?.[1];
 }
+
+/**
+ * What the database refused, in Creative-tab words. A raised `campaign_*`
+ * code would otherwise surface as "something went wrong" over a refusal the
+ * operator can act on — reload, attest again, or review the current version.
+ */
+const APPROVAL_REFUSAL_COPY: Record<string, string> = {
+  campaign_approval_digest_mismatch:
+    "This version changed since you read it. Reload and try again.",
+  campaign_approval_version_superseded:
+    "A newer version exists. Review the current version and approve that instead.",
+  campaign_attestation_missing_for_version:
+    "The attestation does not match this version. Attest again and retry.",
+  campaign_approval_actions_missing: "The approval names no actions. Reload and try again.",
+  campaign_approval_actions_mismatch:
+    "The actions changed since you read them. Reload and try again.",
+  campaign_approval_expires_before_policy:
+    "The approval lapses before the authorized window ends. Pick a later date and try again.",
+  campaign_approval_spend_mismatch: "The spend under review changed. Reload and try again.",
+  campaign_approval_already_live: "This version is already approved. Reload to see the live approval.",
+};
 
 function campaignDatabaseError(context?: {
   operation: string;
@@ -174,7 +196,7 @@ export function createCampaignReadRepository(
       if (!organizationId || !campaignId) campaignDatabaseError();
       const { data, error } = await persistence
         .from("campaign_generation_runs")
-        .select("status, failure_code, lease_expires_at")
+        .select("status, failure_code, lease_expires_at, updated_at, source_snapshot_id")
         .order("created_at", { ascending: false })
         .limit(1)
         .eq("organization_id", organizationId)
@@ -184,12 +206,16 @@ export function createCampaignReadRepository(
         status: string;
         failure_code: string | null;
         lease_expires_at: string | null;
+        updated_at: string;
+        source_snapshot_id: string;
       }[];
       return row
         ? {
             status: row.status,
             failureCode: row.failure_code,
             leaseExpiresAt: row.lease_expires_at,
+            updatedAt: row.updated_at,
+            sourceSnapshotId: row.source_snapshot_id,
           }
         : null;
     },
@@ -248,6 +274,28 @@ export function createCampaignReadRepository(
       return row ? toApproval(row) : null;
     },
 
+    /**
+     * The latest approval including revoked ones, for display only.
+     *
+     * Deliberately does not filter `revoked_at`: the caller is explaining what
+     * happened, not deciding what may happen. `approvalStatus` still reports a
+     * revoked row as not approved, so a display path cannot accidentally become
+     * an authorization path by reading this instead.
+     */
+    async getLatestApproval(organizationId, campaignId) {
+      if (!organizationId || !campaignId) campaignDatabaseError();
+      const { data, error } = await persistence
+        .from("campaign_approvals")
+        .select(APPROVAL_COLUMNS)
+        .order("approved_at", { ascending: false })
+        .limit(1)
+        .eq("organization_id", organizationId)
+        .eq("campaign_id", campaignId);
+      if (error) campaignDatabaseError();
+      const [row] = data ?? [];
+      return row ? toApproval(row) : null;
+    },
+
     async recordAttestation(input) {
       const validated = attestationInputSchema.parse(input);
       const { data, error } = await persistence.rpc("record_campaign_visual_attestation", {
@@ -276,7 +324,12 @@ export function createCampaignReadRepository(
           total_spend_ceiling: validated.totalSpendCeiling,
         },
       });
-      if (error || typeof data !== "string") campaignDatabaseError();
+      if (error) {
+        const refusal = error.message ? APPROVAL_REFUSAL_COPY[error.message] : undefined;
+        if (refusal) throw new DomainError("DOMAIN_ERROR", refusal);
+        campaignDatabaseError();
+      }
+      if (typeof data !== "string") campaignDatabaseError();
       return data;
     },
   };

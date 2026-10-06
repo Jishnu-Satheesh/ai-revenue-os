@@ -1,8 +1,5 @@
 import { matchProviderDefinitions } from "@/domain/reports/provider-library/match";
-import {
-  reportPackageRouteParamsSchema,
-  runReportRoute,
-} from "@/modules/reports/application/api";
+import { reportPackageRouteParamsSchema, runReportRoute } from "@/modules/reports/application/api";
 
 /**
  * What this upload looks like, and which known report families it could be.
@@ -109,7 +106,9 @@ function headerCandidates(value: unknown): HeaderCandidate[] {
     return [
       {
         rowPosition: candidate.rowPosition,
-        normalizedHeaderDigests: digests.filter((digest): digest is string => typeof digest === "string"),
+        normalizedHeaderDigests: digests.filter(
+          (digest): digest is string => typeof digest === "string",
+        ),
       },
     ];
   });

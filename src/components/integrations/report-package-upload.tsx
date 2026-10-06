@@ -2,10 +2,10 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Upload } from "tus-js-client";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Banknote,
   Calculator,
+  Calendar as CalendarIcon,
   ChevronDown,
   FileSpreadsheet,
   Lock,
@@ -17,17 +17,29 @@ import {
   UserCheck,
 } from "lucide-react";
 import { toast } from "sonner";
+import { format, parseISO } from "date-fns";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Progress } from "@/components/ui/progress";
 import { ReportAdmissionApproval } from "@/components/integrations/report-admission-approval";
-import { ReportIntakeMapping, type RecognisedFamily } from "@/components/integrations/report-intake-mapping";
+import {
+  ReportIntakeMapping,
+  type RecognisedFamily,
+} from "@/components/integrations/report-intake-mapping";
+import {
+  ReportPackageDrawer,
+  type DrawerFocus,
+} from "@/components/integrations/report-package-drawer";
+import { ReportReviewQueue } from "@/components/integrations/report-review-queue";
 import {
   isBareCategoricalValueNotDeclared,
   isDeclarableCategoricalValue,
@@ -35,7 +47,6 @@ import {
   parseCategoricalRefusalDetail,
   type ParsedCategoricalRefusal,
 } from "@/domain/reports/projection-error";
-import { summarizeReportProjection } from "@/domain/reports/projection-copy";
 import {
   Select,
   SelectContent,
@@ -46,11 +57,7 @@ import {
 import { currencyOptions } from "@/domain/reference/currencies";
 import { REPORT_PACKAGE_LIMITS, type ReportPackageStatus } from "@/domain/reports/types";
 import { hasReportPermission } from "@/domain/reports/permissions";
-import {
-  explainReportValidationCode,
-  parserLabel,
-  summarizeReportContract,
-} from "@/domain/reports/validation-copy";
+import { summarizeReportContract } from "@/domain/reports/validation-copy";
 import type { OrganizationRole } from "@/domain/organizations/types";
 import type {
   ReportPackageSnapshot,
@@ -138,7 +145,7 @@ function formatReportDate(value: string | null): string | null {
   }).format(new Date(`${value}T00:00:00Z`));
 }
 
-function ReconciliationAction({
+export function ReconciliationAction({
   group,
   canResolve,
   pending,
@@ -263,7 +270,7 @@ function ReconciliationAction({
   );
 }
 
-function stateLabel(status: ReportPackageStatus): string {
+export function stateLabel(status: ReportPackageStatus): string {
   return {
     awaiting_upload: "Awaiting upload",
     uploaded: "Upload verified",
@@ -285,7 +292,7 @@ function stateLabel(status: ReportPackageStatus): string {
   }[status];
 }
 
-function stateVariant(
+export function stateVariant(
   status: ReportPackageStatus,
 ): "default" | "secondary" | "destructive" | "outline" {
   if (status === "failed" || status === "validation_failed" || status === "projection_failed")
@@ -326,7 +333,7 @@ const contentTypeFor: Readonly<Record<UploadFileKind, string>> = {
   pdf: "application/pdf",
 };
 
-function approvedProjectionSources(
+export function approvedProjectionSources(
   version: ReportPackageSnapshot["contractVersions"][number] | undefined,
 ): string[] {
   const document = version?.mapping_document;
@@ -392,10 +399,114 @@ function toSnapshotView(data: ReportPackageSnapshot | undefined): ReportPackageS
   };
 }
 
-function safeValidationCodes(value: unknown): string[] {
+export function safeValidationCodes(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((code): code is string => typeof code === "string").slice(0, 20)
     : [];
+}
+
+function formatContractFieldLabel(canonicalField: string, sourceHeader: string): string {
+  return `${canonicalField} (${sourceHeader})`;
+}
+
+/**
+ * Optional fields per sheet from the already-loaded approved contract.
+ *
+ * `summarizeReportContract` keeps required fields only, so the optional side
+ * is read from the same mapping document with the same field shape:
+ * `required !== true` with non-empty `canonicalField` + `sourceHeader`.
+ * Nothing here invents a name -- every label is contract text verbatim.
+ */
+export function optionalContractFieldLabelsBySheet(
+  mappingDocument: unknown,
+): Map<string, string[]> {
+  const bySheet = new Map<string, string[]>();
+  if (!mappingDocument || typeof mappingDocument !== "object" || Array.isArray(mappingDocument)) {
+    return bySheet;
+  }
+  const sheets = (mappingDocument as { sheets?: unknown }).sheets;
+  if (!Array.isArray(sheets)) return bySheet;
+  for (const sheet of sheets) {
+    if (!sheet || typeof sheet !== "object" || Array.isArray(sheet)) continue;
+    const record = sheet as { normalizedSheetName?: unknown; fields?: unknown };
+    if (typeof record.normalizedSheetName !== "string" || !Array.isArray(record.fields)) continue;
+    const labels: string[] = [];
+    for (const field of record.fields) {
+      if (!field || typeof field !== "object" || Array.isArray(field)) continue;
+      const candidate = field as {
+        canonicalField?: unknown;
+        sourceHeader?: unknown;
+        required?: unknown;
+      };
+      if (candidate.required === true) continue;
+      if (typeof candidate.canonicalField !== "string" || candidate.canonicalField.length === 0)
+        continue;
+      if (typeof candidate.sourceHeader !== "string" || candidate.sourceHeader.length === 0)
+        continue;
+      labels.push(formatContractFieldLabel(candidate.canonicalField, candidate.sourceHeader));
+    }
+    bySheet.set(record.normalizedSheetName, labels);
+  }
+  return bySheet;
+}
+
+/**
+ * The middle of a compact validation row: field names or a sheet name.
+ *
+ * Validation tables store codes only by design (bounded evidence, never
+ * workbook content), so field identity comes from the approved contract the
+ * run already points at. When the contract is unavailable there is nothing
+ * honest to list, so the affected sheet name stands in instead.
+ */
+export function validationCodeContextDetail(options: {
+  code: string;
+  contractSummary: ReturnType<typeof summarizeReportContract>;
+  optionalBySheet: Map<string, string[]>;
+  affectedSheetNames: string[];
+}): string | null {
+  const { code, contractSummary, optionalBySheet, affectedSheetNames } = options;
+  const uniqueAffected = [...new Set(affectedSheetNames)];
+  const sheetLabel = uniqueAffected.length > 0 ? `Sheet ${uniqueAffected.join(", ")}` : null;
+
+  if (code === "OPTIONAL_FIELD_MISSING") {
+    const sheetsToUse =
+      uniqueAffected.length > 0
+        ? uniqueAffected
+        : ((contractSummary?.sheets.map((sheet) => sheet.normalizedSheetName) ?? [
+            ...optionalBySheet.keys(),
+          ]) as string[]);
+    const parts: string[] = [];
+    for (const sheetName of sheetsToUse) {
+      const labels = optionalBySheet.get(sheetName) ?? [];
+      if (labels.length > 0) parts.push(`${sheetName}: ${labels.join(", ")}`);
+    }
+    if (parts.length > 0) return parts.join(" · ");
+    if (sheetLabel) return sheetLabel;
+    if (contractSummary && contractSummary.sheets.length > 0) {
+      return `Sheet ${contractSummary.sheets.map((sheet) => sheet.normalizedSheetName).join(", ")}`;
+    }
+    return null;
+  }
+
+  if (code === "REQUIRED_FIELD_MISSING" || code === "REQUIRED_SOURCE_HEADER_MISSING") {
+    if (!contractSummary) return sheetLabel;
+    const matching = contractSummary.sheets.filter((sheet) =>
+      uniqueAffected.includes(sheet.normalizedSheetName),
+    );
+    const effective =
+      matching.length > 0 || uniqueAffected.length > 0 ? matching : contractSummary.sheets;
+    const parts: string[] = [];
+    for (const sheet of effective) {
+      const labels = sheet.requiredFields.map((field) =>
+        formatContractFieldLabel(field.canonicalField, field.sourceHeader),
+      );
+      if (labels.length > 0) parts.push(`${sheet.normalizedSheetName}: ${labels.join(", ")}`);
+    }
+    if (parts.length > 0) return parts.join(" · ");
+    return sheetLabel;
+  }
+
+  return sheetLabel;
 }
 
 type ReportFamilyRecognition = { sheets: unknown[]; recognisedFamilies: RecognisedFamily[] };
@@ -416,7 +527,7 @@ type ReportFamilyRecognition = { sheets: unknown[]; recognisedFamilies: Recognis
  * which would just be refused on submit) tells them anything useful to look
  * at while they wait for an owner or admin.
  */
-function ReportContractStep({
+export function ReportContractStep({
   organizationId,
   packageId,
   canApprove,
@@ -462,7 +573,13 @@ function ReportContractStep({
     );
   }
 
-  return <ReportIntakeMapping organizationId={organizationId} packageId={packageId} onProposed={onDone} />;
+  return (
+    <ReportIntakeMapping
+      organizationId={organizationId}
+      packageId={packageId}
+      onProposed={onDone}
+    />
+  );
 }
 
 /**
@@ -474,7 +591,7 @@ function ReportContractStep({
  * it before anything is read. An operator without approval permission sees
  * who must act instead of a button that would only be refused.
  */
-function CategoricalRefusalDeclaration({
+export function CategoricalRefusalDeclaration({
   organizationId,
   projectionVersionId,
   failureDetail,
@@ -504,9 +621,7 @@ function CategoricalRefusalDeclaration({
       void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
     },
     onError: (error) =>
-      toast.error(
-        error instanceof Error ? error.message : "The label could not be declared.",
-      ),
+      toast.error(error instanceof Error ? error.message : "The label could not be declared."),
   });
 
   if (!refusal) {
@@ -522,8 +637,8 @@ function CategoricalRefusalDeclaration({
         <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
           <RotateCcw className="mt-0.5 size-3.5 shrink-0" />
           This refusal predates the detail the platform now records, so the label it stopped on
-          cannot be shown here. Use Retry projection above -- it re-runs the same file and will
-          name the label, after which Declare appears here too.
+          cannot be shown here. Use Retry projection above -- it re-runs the same file and will name
+          the label, after which Declare appears here too.
         </p>
       );
     }
@@ -542,10 +657,10 @@ function CategoricalRefusalDeclaration({
     return (
       <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
         <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-        The file uses a label starting {refusal.value} ({dates}), too long to record in full and
-        cut off before it reached the platform. It may not be the provider&rsquo;s exact text, so
-        it cannot be declared as shown. Ask an engineer to open the source file and add the full
-        label to this output&rsquo;s label map.
+        The file uses a label starting {refusal.value} ({dates}), too long to record in full and cut
+        off before it reached the platform. It may not be the provider&rsquo;s exact text, so it
+        cannot be declared as shown. Ask an engineer to open the source file and add the full label
+        to this output&rsquo;s label map.
       </p>
     );
   }
@@ -553,11 +668,13 @@ function CategoricalRefusalDeclaration({
     return (
       <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
         <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
-        The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
-        ({dates}), which is not a declared {outputLabel} value. It is written as the provider&rsquo;s
-        own prose, not a short code, so it cannot be declared with one click. Ask an engineer to add
-        it to this output&rsquo;s label map, translating it to a short code such as{" "}
-        <span className="font-mono">{outputLabel.toUpperCase().replaceAll(" ", "_")}</span>.
+        The file uses the label <span className="font-medium text-foreground">
+          {refusal.value}
+        </span>{" "}
+        ({dates}), which is not a declared {outputLabel} value. It is written as the
+        provider&rsquo;s own prose, not a short code, so it cannot be declared with one click. Ask
+        an engineer to add it to this output&rsquo;s label map, translating it to a short code such
+        as <span className="font-mono">{outputLabel.toUpperCase().replaceAll(" ", "_")}</span>.
       </p>
     );
   }
@@ -565,8 +682,8 @@ function CategoricalRefusalDeclaration({
     return (
       <p className="mt-2 flex items-start gap-2 text-xs text-muted-foreground">
         <Lock className="mt-0.5 size-3.5 shrink-0" />
-        The file uses the label {refusal.value} ({dates}), which nobody has declared yet. An
-        owner or admin declares it once, then the figures can be approved and read.
+        The file uses the label {refusal.value} ({dates}), which nobody has declared yet. An owner
+        or admin declares it once, then the figures can be approved and read.
       </p>
     );
   }
@@ -574,9 +691,8 @@ function CategoricalRefusalDeclaration({
     <div className="mt-2 space-y-2 rounded-md border p-2 text-xs">
       <p className="text-muted-foreground">
         The file uses the label <span className="font-medium text-foreground">{refusal.value}</span>{" "}
-        ({dates}), which is not a declared {outputLabel} value.
-        Declaring it proposes the figures again with that label counted -- nothing is approved
-        until an owner or admin says so below.
+        ({dates}), which is not a declared {outputLabel} value. Declaring it proposes the figures
+        again with that label counted -- nothing is approved until an owner or admin says so below.
       </p>
       <Button
         size="sm"
@@ -596,6 +712,7 @@ export function ReportPackageUpload({
   role,
   timeZone,
   fixedChannelId,
+  defaultCurrency,
 }: Readonly<{
   organizationId: string;
   role: OrganizationRole;
@@ -606,6 +723,12 @@ export function ReportPackageUpload({
    * on the Integrations view, which behaves exactly as before.
    */
   fixedChannelId?: string;
+  /**
+   * The organization's base currency, used as the form's starting currency.
+   * The select still allows an override per upload. Absent (for example in
+   * tests) leaves currency manual, exactly as before.
+   */
+  defaultCurrency?: string;
 }>) {
   const queryClient = useQueryClient();
   const [channelId, setChannelId] = useState("");
@@ -613,12 +736,29 @@ export function ReportPackageUpload({
   const [reportType, setReportType] = useState("");
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
-  const [currency, setCurrency] = useState("");
+  const [currency, setCurrency] = useState(defaultCurrency ?? "");
+  // The default arrives with the page's own props, so a late value still
+  // reaches the form. Adjusted during render rather than in an effect (the
+  // repo forbids synchronous setState in effects): comparing against the
+  // previously seen prop means a currency the operator chose by hand is
+  // never overwritten -- only a changed prop resets it.
+  const [seenDefaultCurrency, setSeenDefaultCurrency] = useState(defaultCurrency);
+  if (seenDefaultCurrency !== defaultCurrency) {
+    setSeenDefaultCurrency(defaultCurrency);
+    if (defaultCurrency) setCurrency(defaultCurrency);
+  }
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [proposalPackageId, setProposalPackageId] = useState("");
   const [rejectionReason, setRejectionReason] = useState("");
   const [projectionContractVersionId, setProjectionContractVersionId] = useState("");
+  // Drawer state, mirrored in `?package=` + `?focus=` so a row can be
+  // deep-linked: row clicks push, the sync effect below reads params back.
+  const [openPackageId, setOpenPackageId] = useState<string | null>(null);
+  const [openFocus, setOpenFocus] = useState<DrawerFocus>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const canUpload = hasReportPermission(role, "report.upload");
   const canRetry = hasReportPermission(role, "report.retry");
   const canApproveContract = hasReportPermission(role, "report.contract_approve");
@@ -632,29 +772,105 @@ export function ReportPackageUpload({
   const view = useMemo(() => toSnapshotView(snapshot.data), [snapshot.data]);
   // The channel page answers for one channel, so it lists only that
   // channel's uploads. The Integrations view keeps answering for all of them.
-  const visiblePackages = fixedChannelId
-    ? view.packages.filter((reportPackage) => reportPackage.channel_id === fixedChannelId)
-    : view.packages;
-  // Versions belong to a channel through their package. A fixed view hides
-  // every other channel's mappings and figures rather than offering
-  // approvals for work happening elsewhere.
-  const contractVersionVisible = (version: { report_package_id: string }): boolean =>
-    !fixedChannelId ||
-    view.packages.some(
-      (reportPackage) =>
-        reportPackage.id === version.report_package_id &&
-        reportPackage.channel_id === fixedChannelId,
-    );
-  const projectionVersionVisible = (version: { report_contract_version_id: string }): boolean => {
-    if (!fixedChannelId) return true;
-    const contractVersion = view.contractVersions.find(
-      (candidate) => candidate.id === version.report_contract_version_id,
-    );
-    return contractVersion ? contractVersionVisible(contractVersion) : false;
-  };
+  // Memoized: the param-sync effect below keys off this list's identity, and
+  // a fresh filter each render would re-run it for no reason.
+  const visiblePackages = useMemo(
+    () =>
+      fixedChannelId
+        ? view.packages.filter((reportPackage) => reportPackage.channel_id === fixedChannelId)
+        : view.packages,
+    [fixedChannelId, view.packages],
+  );
+  // Versions belong to a channel through their package. The queue and the
+  // drawer receive only this view's packages and filter versions to the open
+  // package, so every other channel's mappings and figures stay out of reach
+  // rather than offering approvals for work happening elsewhere.
   const activeBranches = view.branches;
   const invalidate = () =>
     void queryClient.invalidateQueries({ queryKey: ["report-packages", organizationId] });
+
+  /**
+   * The single way a package opens: row clicks and the `?package=` sync
+   * below both go through it, so a deep link (or back/forward) preselects
+   * the mapping box exactly like a row click does.
+   */
+  const applyOpenState = useCallback(
+    (packageId: string, focus: DrawerFocus) => {
+      setOpenPackageId(packageId);
+      setOpenFocus(focus);
+      // A mapping row lands on its upload's mapping box with that
+      // upload already chosen. Anything else leaves the selector
+      // wherever the operator last put it.
+      if (focus === "mapping") {
+        const reportPackage = visiblePackages.find((candidate) => candidate.id === packageId);
+        if (reportPackage?.status === "awaiting_contract") {
+          setProposalPackageId(packageId);
+        }
+      }
+    },
+    [visiblePackages],
+  );
+
+  /**
+   * What the last param sync settled: the raw query plus the package ids it
+   * resolved against. The effect only acts when one of them moved -- without
+   * this, the render between a row click's setState and its push landing
+   * would read the stale (empty) params and close the drawer the click just
+   * opened. It never calls the router itself, so no loop is possible.
+   */
+  const lastParamSync = useRef<{ params: string; packageIds: string } | null>(null);
+  useEffect(() => {
+    const paramsKey = searchParams.toString();
+    const packageIds = visiblePackages.map((reportPackage) => reportPackage.id).join(",");
+    if (
+      lastParamSync.current?.params === paramsKey &&
+      lastParamSync.current.packageIds === packageIds
+    ) {
+      return;
+    }
+    lastParamSync.current = { params: paramsKey, packageIds };
+    const paramId = searchParams.get("package");
+    const rawFocus = searchParams.get("focus");
+    const paramFocus: DrawerFocus =
+      rawFocus === "mapping" || rawFocus === "figures" || rawFocus === "validation"
+        ? rawFocus
+        : null;
+    const nextId =
+      paramId !== null && visiblePackages.some((pkg) => pkg.id === paramId) ? paramId : null;
+    // An unknown or malformed id, or one outside this view's channel
+    // scoping, resolves to closed: the page renders normally, never a crash.
+    const nextFocus = nextId === null ? null : paramFocus;
+    if (nextId === openPackageId && nextFocus === openFocus) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- param→state sync is this effect's whole
+    job (§7): it sets state only when the derived open state differs from the current one, and it
+    never calls the router, so no render loop is possible. */
+    if (nextId === null) {
+      setOpenPackageId(null);
+      setOpenFocus(null);
+    } else {
+      applyOpenState(nextId, nextFocus);
+    }
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [searchParams, visiblePackages, openPackageId, openFocus, applyOpenState]);
+
+  const handleOpen = (packageId: string, focus: DrawerFocus) => {
+    applyOpenState(packageId, focus);
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("package", packageId);
+    if (focus === null) params.delete("focus");
+    else params.set("focus", focus);
+    router.push(`${pathname}?${params.toString()}`);
+  };
+
+  const handleClose = () => {
+    setOpenPackageId(null);
+    setOpenFocus(null);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("package");
+    params.delete("focus");
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname);
+  };
 
   /**
    * The report type this channel is already known to carry, if -- and only
@@ -698,44 +914,49 @@ export function ReportPackageUpload({
           decision.report_contract_version_id === version.id && decision.decision === "approved",
       );
       if (!approved) return [];
-      return [{ familyKey: version.provider_definition_key, reportType: owningPackage.report_type }];
+      return [
+        { familyKey: version.provider_definition_key, reportType: owningPackage.report_type },
+      ];
     });
     if (approvedLibraryReportTypes.length === 0) return null;
     const distinctFamilies = new Set(approvedLibraryReportTypes.map((entry) => entry.familyKey));
-    const distinctReportTypes = new Set(approvedLibraryReportTypes.map((entry) => entry.reportType));
+    const distinctReportTypes = new Set(
+      approvedLibraryReportTypes.map((entry) => entry.reportType),
+    );
     if (distinctFamilies.size > 1 || distinctReportTypes.size > 1) return null;
     return approvedLibraryReportTypes[0].reportType;
   }, [effectiveChannelId, view.contractVersions, view.packages, view.contractDecisions]);
 
-  // What actually gets submitted: the derived value once the channel's report
-  // type is known, the hand-typed one otherwise. Computed at render rather
-  // than synced into state, so there is no moment where the free-text field's
-  // last-typed value and the derived one could disagree about what a submit
-  // sends.
-  const effectiveReportType = recognisedReportTypeForChannel ?? reportType;
-
-  const selectedProjectionContract = view.contractVersions.find(
-    (version) => version.id === projectionContractVersionId,
-  );
   /**
-   * Whether the selected mapping already has figures nobody has rejected.
+   * The operator saying "this is not that report", for the one channel they
+   * said it about.
    *
-   * Two live declarations for one mapping would either agree, and be
-   * redundant, or disagree, and leave no honest answer about which one the
-   * ledger follows.
+   * The derivation above only disqualifies itself once a second family has
+   * *already* been uploaded and approved. The upload that introduces the
+   * second family arrives while the channel still agrees on one, so without
+   * this the field is read-only and names the wrong report -- and being
+   * read-only, there is no way to correct it. Keeta alone sends three
+   * different exports to one channel.
+   *
+   * Stored as the channel it applies to rather than a bare flag, so changing
+   * the channel drops it: an override declared for Keeta must not silently
+   * govern the next upload to Talabat.
    */
-  const alreadyProposed = view.projectionVersions.some(
-    (version) =>
-      version.report_contract_version_id === projectionContractVersionId &&
-      view.projectionDecisions.find(
-        (decision) => decision.report_projection_version_id === version.id,
-      )?.decision !== "rejected",
+  const [reportTypeOverrideChannelId, setReportTypeOverrideChannelId] = useState<string | null>(
+    null,
   );
+  const overridingReportType =
+    reportTypeOverrideChannelId !== null && reportTypeOverrideChannelId === effectiveChannelId;
 
-  const projectionSources = useMemo(
-    () => approvedProjectionSources(selectedProjectionContract),
-    [selectedProjectionContract],
-  );
+  // What actually gets submitted: the derived value once the channel's report
+  // type is known and the operator has not said otherwise, the hand-typed one
+  // otherwise. Computed at render rather than synced into state, so there is
+  // no moment where the free-text field's last-typed value and the derived one
+  // could disagree about what a submit sends.
+  const effectiveReportType =
+    overridingReportType || recognisedReportTypeForChannel === null
+      ? reportType
+      : recognisedReportTypeForChannel;
 
   const upload = useMutation({
     mutationFn: async () => {
@@ -1007,8 +1228,13 @@ export function ReportPackageUpload({
           }),
         },
       );
-      if (response.resolution.outcome !== "resolved" && response.resolution.outcome !== "completed") {
-        throw new Error("This field was already resolved differently. Refresh to see the recorded choice.");
+      if (
+        response.resolution.outcome !== "resolved" &&
+        response.resolution.outcome !== "completed"
+      ) {
+        throw new Error(
+          "This field was already resolved differently. Refresh to see the recorded choice.",
+        );
       }
       return response;
     },
@@ -1017,7 +1243,9 @@ export function ReportPackageUpload({
       invalidate();
     },
     onError: (error) =>
-      toast.error(error instanceof Error ? error.message : "The field decision could not be saved."),
+      toast.error(
+        error instanceof Error ? error.message : "The field decision could not be saved.",
+      ),
   });
 
   return (
@@ -1027,6 +1255,35 @@ export function ReportPackageUpload({
           <div>
             <CardTitle className="flex items-center gap-2">
               <FileSpreadsheet className="size-5" /> Governed reports
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="ghost" size="sm">
+                    How it works
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="start">
+                  <ul className="space-y-2 text-sm text-muted-foreground">
+                    <li className="flex gap-2">
+                      <Lock className="mt-0.5 size-4 shrink-0" />
+                      It stays in private storage. Nobody outside your organization can reach it.
+                    </li>
+                    <li className="flex gap-2">
+                      <ScanLine className="mt-0.5 size-4 shrink-0" />
+                      Recognition looks at column headings only — never at a customer, an order or
+                      an amount.
+                    </li>
+                    <li className="flex gap-2">
+                      <UserCheck className="mt-0.5 size-4 shrink-0" />A person approves twice before
+                      any figure is recorded, and both decisions are kept.
+                    </li>
+                    <li className="flex gap-2">
+                      <Calculator className="mt-0.5 size-4 shrink-0" />
+                      Where the file states its own total, the rows have to add up to it or the
+                      import stops.
+                    </li>
+                  </ul>
+                </PopoverContent>
+              </Popover>
             </CardTitle>
             <CardDescription>
               Upload one declared CSV, XLSX, or PDF report directly to private storage. A PDF is
@@ -1042,7 +1299,7 @@ export function ReportPackageUpload({
       <CardContent className="space-y-5">
         {canUpload ? (
           <form
-            className="grid gap-4 md:grid-cols-2"
+            className="grid gap-3 lg:grid-cols-6"
             onSubmit={(event) => {
               event.preventDefault();
               upload.mutate();
@@ -1051,13 +1308,13 @@ export function ReportPackageUpload({
             <div className="space-y-2">
               <Label htmlFor="report-channel">Business channel</Label>
               {fixedChannelId ? (
-                <p className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium">
+                <p className="flex h-8 w-full items-center rounded-md border bg-muted/30 px-3 text-sm font-medium">
                   {view.channels.find((channel) => channel.id === fixedChannelId)?.display_name ??
                     "This channel"}
                 </p>
               ) : (
                 <Select value={channelId} onValueChange={setChannelId}>
-                  <SelectTrigger id="report-channel">
+                  <SelectTrigger id="report-channel" className="w-full">
                     <SelectValue placeholder="Select channel" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1073,7 +1330,7 @@ export function ReportPackageUpload({
             <div className="space-y-2">
               <Label htmlFor="report-branch">Branch / outlet</Label>
               <Select value={branchId} onValueChange={setBranchId}>
-                <SelectTrigger id="report-branch">
+                <SelectTrigger id="report-branch" className="w-full">
                   <SelectValue placeholder="Select branch" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1087,34 +1344,57 @@ export function ReportPackageUpload({
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-type">Report type</Label>
-              {recognisedReportTypeForChannel ? (
+              {recognisedReportTypeForChannel !== null && !overridingReportType ? (
                 <>
                   <p
                     id="report-type"
-                    className="rounded-md border bg-muted/30 px-3 py-2 text-sm font-medium"
+                    className="flex h-8 w-full items-center rounded-md border bg-muted/30 px-3 text-sm font-medium"
                   >
                     {recognisedReportTypeForChannel}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    This channel already reads a known report. Every upload of it is filed under
-                    the same type automatically.
-                  </p>
+                  {/*
+                    One provider can send a channel several different exports,
+                    and the first upload of a second one arrives before
+                    anything can know it is different. Reusing the derived
+                    text is still the default, because a reuse key that gets
+                    retyped stops being a key.
+                  */}
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => setReportTypeOverrideChannelId(effectiveChannelId)}
+                  >
+                    This is a different report
+                  </Button>
                 </>
               ) : (
-                <Input
-                  id="report-type"
-                  value={reportType}
-                  onChange={(event) => setReportType(event.target.value)}
-                  maxLength={120}
-                  placeholder="e.g. Marketplace settlement"
-                  required
-                />
+                <>
+                  <Input
+                    id="report-type"
+                    value={reportType}
+                    onChange={(event) => setReportType(event.target.value)}
+                    maxLength={120}
+                    placeholder="e.g. Marketplace settlement"
+                    required
+                  />
+                  {overridingReportType ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-xs"
+                      onClick={() => setReportTypeOverrideChannelId(null)}
+                    >
+                      Use this channel&rsquo;s known report type instead
+                    </Button>
+                  ) : null}
+                </>
               )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="report-currency">Declared currency</Label>
               <Select value={currency} onValueChange={setCurrency}>
-                <SelectTrigger id="report-currency">
+                <SelectTrigger id="report-currency" className="w-full">
                   <SelectValue placeholder="Select currency" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1126,45 +1406,116 @@ export function ReportPackageUpload({
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="report-period-start">Period start</Label>
-              <Input
-                id="report-period-start"
-                type="date"
-                value={periodStart}
-                onChange={(event) => setPeriodStart(event.target.value)}
-                required
-              />
+            <div className="space-y-2 lg:col-span-2">
+              <Label id="report-period-label">Start &amp; end date</Label>
+              <div
+                className="grid grid-cols-2 gap-2"
+                role="group"
+                aria-labelledby="report-period-label"
+              >
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="report-period-start"
+                      variant="outline"
+                      data-empty={!periodStart}
+                      className="h-8 w-full justify-start px-2.5 text-left font-normal data-[empty=true]:text-muted-foreground"
+                    >
+                      <CalendarIcon data-icon="inline-start" />
+                      {periodStart ? (
+                        format(parseISO(periodStart), "PPP")
+                      ) : (
+                        <span>Pick start date</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={periodStart ? parseISO(periodStart) : undefined}
+                      onSelect={(day) => {
+                        if (!day) return;
+                        const next = format(day, "yyyy-MM-dd");
+                        setPeriodStart(next);
+                        if (periodEnd && periodEnd < next) setPeriodEnd("");
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="report-period-end"
+                      variant="outline"
+                      data-empty={!periodEnd}
+                      className="h-8 w-full justify-start px-2.5 text-left font-normal data-[empty=true]:text-muted-foreground"
+                    >
+                      <CalendarIcon data-icon="inline-start" />
+                      {periodEnd ? format(parseISO(periodEnd), "PPP") : <span>Pick end date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={periodEnd ? parseISO(periodEnd) : undefined}
+                      disabled={periodStart ? { before: parseISO(periodStart) } : undefined}
+                      onSelect={(day) => {
+                        if (day) setPeriodEnd(format(day, "yyyy-MM-dd"));
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="report-period-end">Period end</Label>
-              <Input
-                id="report-period-end"
-                type="date"
-                value={periodEnd}
-                onChange={(event) => setPeriodEnd(event.target.value)}
-                required
-              />
-            </div>
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="report-file">CSV, XLSX, or PDF, up to 50 MiB</Label>
+            {recognisedReportTypeForChannel !== null && !overridingReportType ? (
+              <p className="text-xs text-muted-foreground italic lg:col-span-6">
+                * This channel already reads a known report. Every upload of it is filed under the
+                same type automatically.
+              </p>
+            ) : null}
+            <div
+              className="lg:col-span-6"
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                setFile(event.dataTransfer.files?.[0] ?? null);
+              }}
+            >
+              <Label
+                htmlFor="report-file"
+                className="flex flex-col items-center justify-center rounded-lg border border-dashed p-6 text-center cursor-pointer"
+              >
+                <UploadCloud className="size-5 text-muted-foreground" aria-hidden="true" />
+                <span className="mt-2 text-sm">
+                  Drag files here, or <span className="font-medium underline">Choose file</span>
+                </span>
+                <span className="mt-1 text-xs text-muted-foreground">
+                  CSV, XLSX, or PDF, up to 50 MiB
+                </span>
+                {file ? (
+                  <span className="mt-2 text-xs font-medium">
+                    {file.name} · {(file.size / 1_048_576).toFixed(2)} MiB
+                  </span>
+                ) : null}
+              </Label>
               <Input
                 id="report-file"
                 type="file"
                 accept=".csv,.xlsx,.pdf,text/csv,application/pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="sr-only"
                 onChange={(event) => setFile(event.target.files?.[0] ?? null)}
                 required
               />
             </div>
             {progress !== null ? (
-              <div className="space-y-2 md:col-span-2">
+              <div className="space-y-2 lg:col-span-6">
                 <Progress value={progress} />
                 <p className="text-xs text-muted-foreground">
                   Uploading directly to private storage · {progress}%
                 </p>
               </div>
             ) : null}
-            <div className="md:col-span-2">
+            <div className="lg:col-span-6">
               <Button
                 type="submit"
                 disabled={
@@ -1172,7 +1523,9 @@ export function ReportPackageUpload({
                   snapshot.isLoading ||
                   !effectiveChannelId ||
                   !branchId ||
-                  !currency
+                  !currency ||
+                  !periodStart ||
+                  !periodEnd
                 }
               >
                 <UploadCloud data-icon="inline-start" />{" "}
@@ -1186,557 +1539,56 @@ export function ReportPackageUpload({
           </p>
         )}
 
-        <div className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">
-            {fixedChannelId ? "1 · This channel's uploads" : "1 · Recent uploads"}
-          </h3>
-          {visiblePackages.length ? (
-            visiblePackages.map((reportPackage) => {
-              const latestValidation = view.validationRuns.find(
-                (run) => run.report_package_id === reportPackage.id,
-              );
-              const validationErrorCodes = safeValidationCodes(latestValidation?.error_codes);
-              const validationWarningCodes = safeValidationCodes(latestValidation?.warning_codes);
-              const validationSheetResults = latestValidation
-                ? view.validationSheetResults.filter(
-                    (result) => result.validation_run_id === latestValidation.id,
-                  )
-                : [];
-              const latestProjection = view.projectionRuns.find(
-                (run) => run.report_package_id === reportPackage.id,
-              );
-              const projectionFailed =
-                reportPackage.status === "projection_failed" ||
-                latestProjection?.status === "failed";
-              const canRequestProjection =
-                reportPackage.status === "validated" ||
-                reportPackage.status === "partially_validated" ||
-                projectionFailed;
-              const reconciliationGroups = view.reconciliationGroups.filter(
-                (group) => group.report_package_id === reportPackage.id,
-              );
-              const affectedRecordCount = reconciliationGroups.reduce(
-                (total, group) => total + group.affected_record_count,
-                0,
-              );
-              const readyRecordCount = Math.max(
-                0,
-                (latestProjection?.output_count ?? 0) - affectedRecordCount,
-              );
-              const absentRowCount = latestProjection?.absent_row_count ?? 0;
-              return (
-                <div key={reportPackage.id} className="rounded-lg border p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="font-medium">
-                        {reportPackage.report_type} · {reportPackage.declared_period_start} to{" "}
-                        {reportPackage.declared_period_end}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {reportPackage.file_kind.toUpperCase()} · {reportPackage.declared_currency}{" "}
-                        · retained until{" "}
-                        {new Intl.DateTimeFormat(undefined, {
-                          dateStyle: "medium",
-                          timeZone,
-                        }).format(new Date(reportPackage.retained_until))}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Badge variant={stateVariant(reportPackage.status)}>
-                        {stateLabel(reportPackage.status)}
-                      </Badge>
-                      {reportPackage.status === "failed" &&
-                      canRetry &&
-                      reportPackage.storage_object_id ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={retry.isPending}
-                          onClick={() => retry.mutate(reportPackage.id)}
-                        >
-                          <RotateCcw data-icon="inline-start" /> Retry
-                        </Button>
-                      ) : null}
-                      {(reportPackage.status === "validation_failed" ||
-                        reportPackage.status === "awaiting_validation") &&
-                      canRetry ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={retryValidation.isPending}
-                          onClick={() => retryValidation.mutate(reportPackage.id)}
-                        >
-                          <RotateCcw data-icon="inline-start" />{" "}
-                          {reportPackage.status === "awaiting_validation"
-                            ? "Start validation"
-                            : "Retry validation"}
-                        </Button>
-                      ) : null}
-                      {canRequestProjection && canRetry ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={requestProjection.isPending}
-                          onClick={() => requestProjection.mutate(reportPackage.id)}
-                        >
-                          {projectionFailed ? (
-                            <RotateCcw data-icon="inline-start" />
-                          ) : (
-                            <ShieldCheck data-icon="inline-start" />
-                          )}
-                          {projectionFailed ? "Retry projection" : "Project safely"}
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                  {reconciliationGroups.map((group) => (
-                    <ReconciliationAction
-                      key={`${group.projection_run_id}:${group.projection_output_key}`}
-                      group={group}
-                      canResolve={canApproveContract}
-                      pending={resolveOverlapGroup.isPending}
-                      onResolve={(input) => resolveOverlapGroup.mutate(input)}
-                    />
-                  ))}
-                  {latestValidation ? (
-                    <div className="mt-2 space-y-2">
-                      <p className="text-xs text-muted-foreground">
-                        Validation {latestValidation.status.replaceAll("_", " ")} ·{" "}
-                        {validationErrorCodes.length} error code(s) ·{" "}
-                        {validationWarningCodes.length} warning code(s)
-                        {latestValidation.result_digest
-                          ? ` · evidence ${latestValidation.result_digest.slice(0, 12)}…`
-                          : ""}
-                      </p>
-                      {validationSheetResults.map((result) => (
-                        <div key={result.id} className="rounded-md border bg-muted/30 p-2 text-xs">
-                          <p className="font-medium">
-                            Sheet {result.normalized_sheet_name} · {result.outcome}
-                          </p>
-                          <p className="mt-1 text-muted-foreground">
-                            {result.row_count} sheet rows · {result.parsed_field_success_count}{" "}
-                            mapped values parsed · {result.parsed_field_failure_count} failed
-                          </p>
-                        </div>
-                      ))}
-                      {validationErrorCodes.length > 0 ? (
-                        <Alert variant="destructive">
-                          <AlertTitle>Why validation stopped</AlertTitle>
-                          <AlertDescription className="space-y-2">
-                            {validationErrorCodes.map((code) => {
-                              const explanation = explainReportValidationCode(code);
-                              return (
-                                <div key={code}>
-                                  <p className="font-medium">
-                                    {explanation.title} <span className="font-mono">({code})</span>
-                                  </p>
-                                  <p>{explanation.detail}</p>
-                                  <p>Next step: {explanation.nextStep}</p>
-                                </div>
-                              );
-                            })}
-                          </AlertDescription>
-                        </Alert>
-                      ) : null}
-                      {validationWarningCodes.length > 0 ? (
-                        <Alert>
-                          <AlertTitle>Validation warnings</AlertTitle>
-                          <AlertDescription className="space-y-2">
-                            {validationWarningCodes.map((code) => {
-                              const explanation = explainReportValidationCode(code);
-                              return (
-                                <div key={code}>
-                                  <p className="font-medium">
-                                    {explanation.title} <span className="font-mono">({code})</span>
-                                  </p>
-                                  <p>{explanation.detail}</p>
-                                  <p>Next step: {explanation.nextStep}</p>
-                                </div>
-                              );
-                            })}
-                          </AlertDescription>
-                        </Alert>
-                      ) : null}
-                    </div>
-                  ) : reportPackage.status === "awaiting_validation" ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      The exact contract is approved. Start validation to run the deterministic
-                      checks.
-                    </p>
-                  ) : null}
-                  {latestProjection && typeof latestProjection.output_count === "number" ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {latestProjection.output_count} records checked
-                      {affectedRecordCount > 0
-                        ? ` · ${readyRecordCount} ready for Analysis · ${affectedRecordCount} need review`
-                        : ""}
-                      {absentRowCount > 0
-                        ? ` · ${absentRowCount} source rows had no reported value and stayed missing`
-                        : ""}
-                    </p>
-                  ) : reportPackage.status === "awaiting_projection" ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      An approved declaration was selected. Deterministic projection starts when
-                      this rollout is enabled.
-                    </p>
-                  ) : null}
-                  {/*
-                    What the failure knew about itself. A code alone names a
-                    category -- "processing failed" -- and leaves an operator
-                    with nothing to act on and nothing to report. The detail is
-                    the error's own words, recorded by the run that failed.
-                  */}
-                  {latestProjection?.status === "failed" && latestProjection.failure_detail ? (
-                    <>
-                      <p className="mt-2 text-xs text-muted-foreground">
-                        <span className="font-medium text-foreground">Why it stopped: </span>
-                        {latestProjection.failure_detail}
-                      </p>
-                      <CategoricalRefusalDeclaration
-                        organizationId={organizationId}
-                        projectionVersionId={latestProjection.report_projection_version_id}
-                        failureDetail={latestProjection.failure_detail}
-                        canDeclare={canApproveContract}
-                      />
-                    </>
-                  ) : null}
-                </div>
-              );
-            })
-          ) : (
-            <p className="text-sm text-muted-foreground">No governed report packages yet.</p>
-          )}
-        </div>
-
-        <div className="space-y-3 border-t pt-4">
-          <div>
-            <h3 className="text-sm font-medium">2 · Approve what the columns mean</h3>
-            <p className="text-xs text-muted-foreground">
-              An owner or admin decides. Until then the file has been profiled and nothing more.
-            </p>
-          </div>
-          {view.contractVersions.filter(contractVersionVisible).length ? (
-            view.contractVersions.filter(contractVersionVisible).map((version) => {
-              const decision = view.contractDecisions.find(
-                (item) => item.report_contract_version_id === version.id,
-              );
-              const contractSummary = summarizeReportContract(version.mapping_document);
-              return (
-                <div key={version.id} className="rounded-lg border p-3 text-sm">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="flex flex-wrap items-center gap-2 font-medium">
-                      Mapping v{version.version}
-                      <Badge variant="secondary" className="font-normal">
-                        {version.provider_definition_key
-                          ? `From the known ${version.provider_definition_key} report`
-                          : "Described by hand"}
-                      </Badge>
-                    </span>
-                    <Badge variant={decision?.decision === "rejected" ? "destructive" : "outline"}>
-                      {decision?.decision === "approved"
-                        ? "Approved · validation next"
-                        : decision?.decision === "rejected"
-                          ? "Rejected"
-                          : "Awaiting approval"}
-                    </Badge>
-                  </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Fingerprint {version.schema_fingerprint.slice(0, 12)}… · mapping digest{" "}
-                    {version.mapping_digest.slice(0, 12)}…
-                  </p>
-                  {contractSummary ? (
-                    <div className="mt-3 space-y-2 rounded-md bg-muted/30 p-2 text-xs">
-                      <p className="font-medium">What this contract checks</p>
-                      <p className="text-muted-foreground">
-                        Currency {contractSummary.currency} · outlet grain{" "}
-                        {contractSummary.outletGrain} · unmapped fields:{" "}
-                        {contractSummary.unmappedFieldDisposition}
-                      </p>
-                      {contractSummary.sheets.map((sheet) => (
-                        <div
-                          key={sheet.normalizedSheetName}
-                          className="rounded border bg-background p-2"
-                        >
-                          <p className="font-medium">Sheet {sheet.normalizedSheetName}</p>
-                          <p className="mt-1 text-muted-foreground">
-                            Header row {sheet.headerRow} · data starts at row {sheet.dataStartRow} ·{" "}
-                            formulas {sheet.allowFormula ? "allowed" : "rejected"} · merged cells{" "}
-                            {sheet.allowMergedCells ? "allowed" : "rejected"}
-                          </p>
-                          {sheet.requiredFields.length > 0 ? (
-                            <div className="mt-2 space-y-1">
-                              <p className="font-medium">Required fields</p>
-                              {sheet.requiredFields.map((field) => (
-                                <p
-                                  key={`${sheet.normalizedSheetName}.${field.canonicalField}`}
-                                  className="text-muted-foreground"
-                                >
-                                  {field.canonicalField} · source header {field.sourceHeader} ·{" "}
-                                  {parserLabel(field.parser, field.financialSign)}
-                                </p>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  ) : null}
-                  {canApproveContract && !decision ? (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        disabled={decideContract.isPending}
-                        onClick={() =>
-                          decideContract.mutate({ versionId: version.id, decision: "approved" })
-                        }
-                      >
-                        Approve exact contract
-                      </Button>
-                      <Input
-                        aria-label={`Rejection reason for contract version ${version.version}`}
-                        value={rejectionReason}
-                        onChange={(event) => setRejectionReason(event.target.value)}
-                        placeholder="Reason required to reject"
-                        className="max-w-xs"
-                      />
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={decideContract.isPending || rejectionReason.trim().length === 0}
-                        onClick={() =>
-                          decideContract.mutate({ versionId: version.id, decision: "rejected" })
-                        }
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              {fixedChannelId ? "Nothing has been mapped for this channel yet." : "Nothing has been mapped yet."}
-            </p>
-          )}
-          {canApproveContract || canUpload ? (
-            <div className="space-y-3 rounded-lg border border-dashed p-4">
-              <div className="space-y-2">
-                <Label htmlFor="report-contract-package">Which upload are you mapping?</Label>
-                <Select value={proposalPackageId} onValueChange={setProposalPackageId}>
-                  <SelectTrigger id="report-contract-package">
-                    <SelectValue placeholder="Select an upload waiting to be mapped" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {visiblePackages
-                      .filter((reportPackage) => reportPackage.status === "awaiting_contract")
-                      .map((reportPackage) => (
-                        <SelectItem key={reportPackage.id} value={reportPackage.id}>
-                          {reportPackage.report_type} · {reportPackage.declared_period_start}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {proposalPackageId ? (
-                <ReportContractStep
-                  key={proposalPackageId}
-                  organizationId={organizationId}
-                  packageId={proposalPackageId}
-                  canApprove={canApproveContract}
-                  onDone={() => {
-                    setProposalPackageId("");
-                    invalidate();
-                  }}
-                />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Choose an upload and we will tell you whether we already know how to read it.
-                </p>
-              )}
-            </div>
-          ) : null}
-          <div className="border-t pt-4">
-            <h3 className="text-sm font-medium">3 · Approve what gets recorded</h3>
-            <p className="mt-1 text-xs text-muted-foreground">
-              A separate decision, because it is a separate consequence: this is what enters the
-              ledger and drives every figure downstream. No workbook value appears here.
-            </p>
-            {view.projectionVersions.filter(projectionVersionVisible).map((version) => {
-              const decision = view.projectionDecisions.find(
-                (item) => item.report_projection_version_id === version.id,
-              );
-              const contractVersion = view.contractVersions.find(
-                (candidate) => candidate.id === version.report_contract_version_id,
-              );
-              // The last thing a person reads before figures enter the ledger.
-              // A digest proves two documents are the same and is useless for
-              // deciding whether to approve one.
-              const summary = summarizeReportProjection(
-                version.projection_document,
-                contractVersion?.mapping_document,
-              );
-              return (
-                <div key={version.id} className="mt-2 rounded-lg border p-3 text-sm">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-medium">Figures v{version.version}</span>
-                    <Badge variant={decision?.decision === "rejected" ? "destructive" : "outline"}>
-                      {decision?.decision === "approved"
-                        ? "Approved"
-                        : decision?.decision === "rejected"
-                          ? "Rejected"
-                          : "Awaiting approval"}
-                    </Badge>
-                  </div>
-                  {summary ? (
-                    <div className="mt-2 space-y-2">
-                      <ul className="space-y-1">
-                        {summary.entries.map((entry) => (
-                          <li key={entry.label} className="flex items-start gap-2">
-                            <Banknote className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
-                            <span>
-                              <span className="font-medium capitalize">{entry.label}</span>
-                              <span className="text-muted-foreground">
-                                {" — "}
-                                {summary.shape}
-                                {entry.sourceColumn ? `, from ${entry.sourceColumn}` : ""}
-                              </span>
-                            </span>
-                          </li>
-                        ))}
-                      </ul>
-                      {summary.checkedAgainst ? (
-                        <p className="text-xs text-muted-foreground">
-                          Checked against {summary.checkedAgainst}. The import stops if the rows do
-                          not reach it.
-                        </p>
-                      ) : null}
-                      {summary.mayHaveGaps ? (
-                        <p className="text-xs text-muted-foreground">
-                          Days the provider left blank stay blank. They are not recorded as zero, so
-                          a quiet day and a day nobody reported on never look the same.
-                        </p>
-                      ) : null}
-                    </div>
-                  ) : (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      This declaration was written in a form this screen cannot read back. Reject it
-                      and map the upload again rather than approving what you cannot see.
-                    </p>
-                  )}
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Declaration digest {version.projection_digest.slice(0, 12)}…
-                  </p>
-                  {canApproveContract && !decision ? (
-                    <div className="mt-2 flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={() =>
-                          decideProjection.mutate({ versionId: version.id, decision: "approved" })
-                        }
-                        disabled={decideProjection.isPending}
-                      >
-                        Approve these figures
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          decideProjection.mutate({ versionId: version.id, decision: "rejected" })
-                        }
-                        disabled={decideProjection.isPending}
-                      >
-                        Reject
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })}
-            {canApproveContract ? (
-              <div className="mt-3 space-y-3 rounded-lg border border-dashed p-4">
-                <div className="space-y-2">
-                  <Label htmlFor="report-projection-contract">Approved mapping</Label>
-                  <Select
-                    value={projectionContractVersionId}
-                    onValueChange={setProjectionContractVersionId}
-                  >
-                    <SelectTrigger id="report-projection-contract">
-                      <SelectValue placeholder="Select an approved mapping" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {view.contractVersions
-                        .filter(contractVersionVisible)
-                        .filter((version) =>
-                          view.contractDecisions.some(
-                            (decision) =>
-                              decision.report_contract_version_id === version.id &&
-                              decision.decision === "approved",
-                          ),
-                        )
-                        .map((version) => (
-                          <SelectItem key={version.id} value={version.id}>
-                            Mapping v{version.version}
-                            {version.provider_definition_key
-                              ? ` · ${version.provider_definition_key}`
-                              : ""}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {projectionSources.length ? (
-                  <p className="text-xs text-muted-foreground">
-                    Reads from {projectionSources.join(", ")}.
-                  </p>
-                ) : null}
-                <p className="text-xs text-muted-foreground">
-                  The figures follow from the mapping that was approved, so nothing here can differ
-                  from what an owner already agreed to.
-                </p>
-                {alreadyProposed ? (
-                  <p className="text-xs text-muted-foreground">
-                    This mapping already has a set of figures above. Reject that one before
-                    proposing another, so there is never a question about which one governs.
-                  </p>
-                ) : null}
-                <Button
-                  size="sm"
-                  disabled={
-                    proposeProjection.isPending || !projectionContractVersionId || alreadyProposed
-                  }
-                  onClick={() => proposeProjection.mutate(projectionContractVersionId)}
-                >
-                  {proposeProjection.isPending ? "Proposing…" : "Propose the figures to read"}
-                </Button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-
-        <div className="space-y-3 border-t pt-4">
-          <h3 className="text-sm font-medium">What happens to your file</h3>
-          <ul className="space-y-2 text-sm text-muted-foreground">
-            <li className="flex gap-2">
-              <Lock className="mt-0.5 size-4 shrink-0" />
-              It stays in private storage. Nobody outside your organization can reach it.
-            </li>
-            <li className="flex gap-2">
-              <ScanLine className="mt-0.5 size-4 shrink-0" />
-              Recognition looks at column headings only — never at a customer, an order or an
-              amount.
-            </li>
-            <li className="flex gap-2">
-              <UserCheck className="mt-0.5 size-4 shrink-0" />A person approves twice before any
-              figure is recorded, and both decisions are kept.
-            </li>
-            <li className="flex gap-2">
-              <Calculator className="mt-0.5 size-4 shrink-0" />
-              Where the file states its own total, the rows have to add up to it or the import
-              stops.
-            </li>
-          </ul>
-        </div>
+        <ReportReviewQueue
+          packages={visiblePackages}
+          view={view}
+          fixedChannelId={fixedChannelId}
+          canRetry={canRetry}
+          onRetry={(packageId) => retry.mutate(packageId)}
+          retryPending={retry.isPending}
+          onRetryValidation={(packageId) => retryValidation.mutate(packageId)}
+          retryValidationPending={retryValidation.isPending}
+          onRequestProjection={(packageId) => requestProjection.mutate(packageId)}
+          requestProjectionPending={requestProjection.isPending}
+          onOpen={handleOpen}
+        />
+        <ReportPackageDrawer
+          packageId={openPackageId}
+          focus={openFocus}
+          organizationId={organizationId}
+          timeZone={timeZone}
+          view={view}
+          packages={visiblePackages}
+          fixedChannelId={fixedChannelId}
+          canUpload={canUpload}
+          canRetry={canRetry}
+          canApproveContract={canApproveContract}
+          onRetry={(packageId) => retry.mutate(packageId)}
+          retryPending={retry.isPending}
+          onRetryValidation={(packageId) => retryValidation.mutate(packageId)}
+          retryValidationPending={retryValidation.isPending}
+          onRequestProjection={(packageId) => requestProjection.mutate(packageId)}
+          requestProjectionPending={requestProjection.isPending}
+          onResolveOverlap={(input) => resolveOverlapGroup.mutate(input)}
+          resolveOverlapPending={resolveOverlapGroup.isPending}
+          rejectionReason={rejectionReason}
+          onRejectionReasonChange={setRejectionReason}
+          proposalPackageId={proposalPackageId}
+          onProposalPackageIdChange={setProposalPackageId}
+          onMappingDone={() => {
+            setProposalPackageId("");
+            invalidate();
+          }}
+          projectionContractVersionId={projectionContractVersionId}
+          onProjectionContractVersionIdChange={setProjectionContractVersionId}
+          onDecideContract={(input) => decideContract.mutate(input)}
+          decideContractPending={decideContract.isPending}
+          onDecideProjection={(input) => decideProjection.mutate(input)}
+          decideProjectionPending={decideProjection.isPending}
+          onProposeProjection={(contractVersionId) => proposeProjection.mutate(contractVersionId)}
+          proposeProjectionPending={proposeProjection.isPending}
+          onClose={handleClose}
+        />
       </CardContent>
     </Card>
   );

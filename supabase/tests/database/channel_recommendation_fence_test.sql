@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(57);
+select extensions.plan(72);
 
 -- The narrator's fence (ADR 0037): three worker RPCs that are the only write
 -- path into the recommendations tables. Exercised against real completed runs
@@ -66,7 +66,11 @@ select observation_id::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
   numerator, 'AED', 'measured', state, repeat('c', 64), period_end::timestamptz
 from (values
   ('fa210000-0000-4000-8000-000000000511', '2026-01-01 00:00:00+04', '2026-01-02 00:00:00+04', 120000, 'current'),
-  ('fa210000-0000-4000-8000-000000000512', '2026-01-02 00:00:00+04', '2026-01-03 00:00:00+04', 90000, 'blocked_overlap')
+  ('fa210000-0000-4000-8000-000000000512', '2026-01-02 00:00:00+04', '2026-01-03 00:00:00+04', 90000, 'blocked_overlap'),
+  ('fa210000-0000-4000-8000-000000000513', '2026-01-08 00:00:00+04', '2026-01-09 00:00:00+04', 70000, 'current'),
+  ('fa210000-0000-4000-8000-000000000514', '2026-02-01 00:00:00+04', '2026-02-02 00:00:00+04', 3863, 'current'),
+  ('fa210000-0000-4000-8000-000000000515', '2026-02-02 00:00:00+04', '2026-02-03 00:00:00+04', 2, 'current'),
+  ('fa210000-0000-4000-8000-000000000516', '2026-02-03 00:00:00+04', '2026-02-04 00:00:00+04', 41000, 'current')
 ) as observations(observation_id, period_start, period_end, numerator, state);
 
 insert into public.channel_analysis_runs (
@@ -94,7 +98,17 @@ insert into public.channel_analysis_runs (
    'fa210000-0000-4000-8000-000000000401'::uuid, 'fa210000-0000-4000-8000-000000000301'::uuid,
    date '2026-01-08', date '2026-01-12', 'day', 'Asia/Dubai', 1,
    '[{"key":"evidence.period_coverage","calculationVersion":1}]'::jsonb, '[]'::jsonb,
-   repeat('e', 64), 'completed', null, repeat('7', 64), 'fa210000-0000-4000-8000-000000000705'::uuid, now());
+   repeat('e', 64), 'completed', null, repeat('7', 64), 'fa210000-0000-4000-8000-000000000705'::uuid, now()),
+  ('fa210000-0000-4000-8000-000000000606'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000401'::uuid, 'fa210000-0000-4000-8000-000000000301'::uuid,
+   date '2026-02-01', date '2026-02-05', 'day', 'Asia/Dubai', 1,
+   '[{"key":"funnel.stage_conversion","calculationVersion":1},{"key":"customer.new_share","calculationVersion":1}]'::jsonb, '[]'::jsonb,
+   repeat('c', 64), 'completed', null, repeat('5', 64), 'fa210000-0000-4000-8000-000000000706'::uuid, now()),
+  ('fa210000-0000-4000-8000-000000000607'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000401'::uuid, 'fa210000-0000-4000-8000-000000000301'::uuid,
+   date '2026-02-03', date '2026-02-04', 'day', 'Asia/Dubai', 1,
+   '[{"key":"evidence.period_coverage","calculationVersion":1}]'::jsonb, '[]'::jsonb,
+   repeat('9', 64), 'completed', null, repeat('4', 64), 'fa210000-0000-4000-8000-000000000707'::uuid, now());
 
 insert into public.channel_analysis_runs (
   id, organization_id, channel_id, branch_id, window_start, window_end, period_grain,
@@ -122,7 +136,23 @@ insert into public.channel_findings (
   ('fa210000-0000-4000-8000-000000000503'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
    'fa210000-0000-4000-8000-000000000601'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
    'fa210000-0000-4000-8000-000000000301'::uuid, 'evidence.period_coverage', 1, 'observation',
-   'PERIOD_COVERAGE_INCOMPLETE', 'complete', repeat('3', 64));
+   'PERIOD_COVERAGE_INCOMPLETE', 'complete', repeat('3', 64)),
+  ('fa210000-0000-4000-8000-000000000505'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000605'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
+   'fa210000-0000-4000-8000-000000000301'::uuid, 'evidence.period_coverage', 1, 'observation',
+   'PERIOD_COVERAGE_INCOMPLETE', 'complete', repeat('5', 64)),
+  ('fa210000-0000-4000-8000-000000000506'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000606'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
+   'fa210000-0000-4000-8000-000000000301'::uuid, 'funnel.stage_conversion', 1, 'observation',
+   'FUNNEL_STAGE_CONVERSION', 'complete', repeat('6', 64)),
+  ('fa210000-0000-4000-8000-000000000507'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000606'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
+   'fa210000-0000-4000-8000-000000000301'::uuid, 'customer.new_share', 1, 'observation',
+   'CUSTOMER_REPEAT_SHARE', 'complete', repeat('7', 64)),
+  ('fa210000-0000-4000-8000-000000000508'::uuid, 'fa210000-0000-4000-8000-000000000201'::uuid,
+   'fa210000-0000-4000-8000-000000000607'::uuid, 'fa210000-0000-4000-8000-000000000401'::uuid,
+   'fa210000-0000-4000-8000-000000000301'::uuid, 'evidence.period_coverage', 1, 'observation',
+   'PERIOD_COVERAGE_INCOMPLETE', 'complete', repeat('8', 64));
 
 -- The cross-tenant finding: same shape, another organization's run entirely.
 insert into public.channel_findings (
@@ -140,7 +170,15 @@ insert into public.channel_finding_evidence (
   ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000501'::uuid,
    'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000511'::uuid),
   ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000502'::uuid,
-   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000512'::uuid);
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000512'::uuid),
+  ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000505'::uuid,
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000513'::uuid),
+  ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000506'::uuid,
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000514'::uuid),
+  ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000507'::uuid,
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000515'::uuid),
+  ('fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000508'::uuid,
+   'normalized_metric', 'component', 'fa210000-0000-4000-8000-000000000516'::uuid);
 
 create or replace function pg_temp.claim(
   p_run text, p_correlation text, p_token text,
@@ -219,9 +257,9 @@ select extensions.is(pg_temp.complete('fa210000-0000-4000-8000-000000000602', 'f
 
 select extensions.throws_ok(
   $$ select pg_temp.complete('fa210000-0000-4000-8000-000000000602', 'fa210000-0000-4000-8000-000000000802',
-       coalesce((select jsonb_agg(pg_temp.item()) from generate_series(1, 7)), '[]'::jsonb)) $$,
+       coalesce((select jsonb_agg(pg_temp.item()) from generate_series(1, 9)), '[]'::jsonb)) $$,
   'P0001', 'RECOMMENDATION_CAP_EXCEEDED',
-  'seven narrated answers for six chapters is two too many, and is refused outright');
+  'nine narrated answers for six chapters and two data gaps is one too many, and is refused outright');
 
 select extensions.throws_ok(
   $$ select pg_temp.complete('fa210000-0000-4000-8000-000000000602', 'fa210000-0000-4000-8000-000000000802', '[]'::jsonb) $$,
@@ -296,7 +334,7 @@ select extensions.throws_ok(
   $$ select pg_temp.complete('fa210000-0000-4000-8000-000000000602', 'fa210000-0000-4000-8000-000000000802', jsonb_build_array(pg_temp.item()), repeat('3', 64)) $$,
   '23514', 'channel recommendations were already filed for this analysis run',
   'a second answer under one run''s identity is refused; regeneration belongs to a new analysis run');
-select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000602', 'channel-recs-correlation-000001', 'fa210000-0000-4000-8000-000000000803') ->> 'outcome'), 'completed', 'and claiming a narrated run says so instead of handing out another lease');
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000602', 'channel-recs-correlation-000001', 'fa210000-0000-4000-8000-000000000803') ->> 'outcome'), 'gapfill_acquired', 'a narrated run with an uncited finding leases its one gap-fill instead of reporting done');
 
 -- Failing a run ------------------------------------------------------------------------
 
@@ -320,6 +358,51 @@ select extensions.is((pg_temp.operation_row('fa210000-0000-4000-8000-00000000020
 select extensions.is((pg_temp.operation_row('fa210000-0000-4000-8000-000000000201', 'fa210000-0000-4000-8000-000000000605') ->> 'result_digest'), repeat('7', 64), 'with the digest of the submission that failed, and nothing deleted');
 select extensions.is((select count(*)::integer from public.channel_recommendations where analysis_run_id = 'fa210000-0000-4000-8000-000000000605'::uuid), 0, 'a failed narration leaves no recommendation behind');
 select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000605', 'channel-recs-correlation-000003', 'fa210000-0000-4000-8000-000000000806') ->> 'outcome'), 'acquired', 'and the run may be claimed again within its retry budget');
+
+-- The Amendment C cap: eight items file ---------------------------------------------
+
+select extensions.is((pg_temp.complete('fa210000-0000-4000-8000-000000000605', 'fa210000-0000-4000-8000-000000000806',
+  coalesce((select jsonb_agg(pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000505"]}'::jsonb)) from generate_series(1, 8)), '[]'::jsonb)
+) ->> 'recommendationCount'), '8', 'eight items — six chapters plus two data gaps — file under the raised cap');
+
+-- The gap-fill lifecycle (Amendment C, ADR 0053) --------------------------------------
+
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000606', 'channel-recs-correlation-000004', 'fa210000-0000-4000-8000-000000000807') ->> 'outcome'), 'acquired', 'a run with no narration yet claims its first lease');
+select extensions.is((pg_temp.complete('fa210000-0000-4000-8000-000000000606', 'fa210000-0000-4000-8000-000000000807',
+  jsonb_build_array(pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000506"]}'::jsonb))) ->> 'recommendationCount'), '1', 'the first narration cites the funnel finding only');
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000606', 'channel-recs-correlation-000005', 'fa210000-0000-4000-8000-000000000807') ->> 'outcome'), 'gapfill_acquired', 'a narrated run with an uncited finding leases its one gap-fill');
+select extensions.throws_ok(
+  $$ select pg_temp.complete('fa210000-0000-4000-8000-000000000606', 'fa210000-0000-4000-8000-000000000807', jsonb_build_array(
+       pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000507"]}'::jsonb),
+       pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000506"]}'::jsonb)), repeat('e', 64)) $$,
+  '23514', 'GAPFILL_CITES_FILED_FINDING',
+  'a gap-fill mixing an uncited finding with an already-cited one is refused outright');
+select extensions.throws_ok(
+  $$ select pg_temp.complete('fa210000-0000-4000-8000-000000000606', 'fa210000-0000-4000-8000-000000000807',
+       coalesce((select jsonb_agg(pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000507"]}'::jsonb)) from generate_series(1, 8)), '[]'::jsonb), repeat('f', 64)) $$,
+  'P0001', 'RECOMMENDATION_CAP_EXCEEDED',
+  'one filed plus eight more would pass the per-run budget of eight');
+select extensions.is((pg_temp.complete('fa210000-0000-4000-8000-000000000606', 'fa210000-0000-4000-8000-000000000807',
+  jsonb_build_array(pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000507"]}'::jsonb)), repeat('c', 64)) ->> 'recommendationCount'), '1', 'the gap-fill files the bare retention finding');
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000606', 'channel-recs-correlation-000006', 'fa210000-0000-4000-8000-000000000807') ->> 'outcome'), 'completed', 'a twice-narrated run is done: no third lease');
+select extensions.throws_ok(
+  $$ select pg_temp.complete('fa210000-0000-4000-8000-000000000606', 'fa210000-0000-4000-8000-000000000807',
+       jsonb_build_array(pg_temp.item('{"citations": ["fa210000-0000-4000-8000-000000000507"]}'::jsonb)), repeat('d', 64)) $$,
+  '23514', 'channel recommendations were already filed for this analysis run',
+  're-citing a filed finding after the gap-fill is still a second answer');
+
+-- Retry after failure (provider 400 follow-up) ----------------------------------------
+
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000607', 'channel-recs-correlation-000007', 'fa210000-0000-4000-8000-000000000810') ->> 'outcome'), 'acquired', 'a fresh completed run hands out its own lease');
+select extensions.lives_ok(
+  $$ select public.fail_channel_recommendations(
+       'fa210000-0000-4000-8000-000000000201'::uuid, 'fa210000-0000-4000-8000-000000000607'::uuid,
+       'fa210000-0000-4000-8000-000000000810'::uuid, 'MODEL_PROVIDER_UNAVAILABLE', repeat('8', 64)) $$,
+  'a narration the provider refused fails safely');
+select extensions.is((pg_temp.operation_row('fa210000-0000-4000-8000-000000000201', 'fa210000-0000-4000-8000-000000000607') ->> 'failure_code'), 'MODEL_PROVIDER_UNAVAILABLE', 'and says why');
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000607', 'channel-recs-correlation-000008', 'fa210000-0000-4000-8000-000000000811') ->> 'outcome'), 'acquired', 'the press after a failure resumes the terminal lease instead of conflicting forever');
+select extensions.is((pg_temp.operation_row('fa210000-0000-4000-8000-000000000201', 'fa210000-0000-4000-8000-000000000607') ->> 'attempt_count'), '2', 'and the retry budget counts the resumption');
+select extensions.is((pg_temp.claim('fa210000-0000-4000-8000-000000000607', 'channel-recs-correlation-000009', 'fa210000-0000-4000-8000-000000000812') ->> 'outcome'), 'conflict', 'while a resumed lease is live and unforgiven, another workflow is still a conflict');
 
 -- Session denial -------------------------------------------------------------------------
 

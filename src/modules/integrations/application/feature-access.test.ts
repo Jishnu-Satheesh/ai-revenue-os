@@ -8,10 +8,13 @@ vi.hoisted(() => {
 vi.mock("server-only", () => ({}));
 
 import {
+  assertAgentChatEnabled,
   assertGovernedEconomicsReadinessEnabled,
   assertIntegrationHubEnabled,
+  isAgentChatEnabled,
   isGovernedEconomicsReadinessEnabled,
   isIntegrationHubEnabled,
+  parseAgentChatOrganizationIds,
   parseIntegrationOrganizationIds,
 } from "@/modules/integrations/application/feature-access";
 
@@ -67,9 +70,12 @@ describe("governed economics readiness rollout", () => {
   it("is off for everyone when the variable is unset", () => {
     // The default the rollback plan depends on. An unset variable parses to an
     // empty set, and an empty set enables nobody.
-    expect(isGovernedEconomicsReadinessEnabled(organizationA, parseIntegrationOrganizationIds(undefined))).toBe(
-      false,
-    );
+    expect(
+      isGovernedEconomicsReadinessEnabled(
+        organizationA,
+        parseIntegrationOrganizationIds(undefined),
+      ),
+    ).toBe(false);
   });
 
   it("is on for an enabled organization whatever case its ID arrives in", () => {
@@ -82,6 +88,40 @@ describe("governed economics readiness rollout", () => {
     // FEATURE_NOT_AVAILABLE becomes a 404 at the boundary. A 403 would confirm
     // the surface exists, which is a roadmap leak rather than an access answer.
     expect(() => assertGovernedEconomicsReadinessEnabled(organizationB)).toThrowError(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+  });
+});
+
+describe("agent chat rollout access", () => {
+  it("is off for everyone when the variable is unset", () => {
+    // The default the rollout plan depends on. An unset variable parses to
+    // an empty set, and an empty set enables nobody.
+    expect(parseAgentChatOrganizationIds(undefined)).toEqual(new Set());
+    expect(isAgentChatEnabled(organizationA, parseAgentChatOrganizationIds(undefined))).toBe(false);
+  });
+
+  it("parses trimmed organization UUIDs and rejects empties and duplicates", () => {
+    expect(parseAgentChatOrganizationIds(`${organizationA}, ${organizationB}`)).toEqual(
+      new Set([organizationA, organizationB]),
+    );
+    expect(() => parseAgentChatOrganizationIds(`${organizationA},,${organizationB}`)).toThrow();
+    expect(() =>
+      parseAgentChatOrganizationIds(`${organizationA},${organizationA.toUpperCase()}`),
+    ).toThrow();
+    expect(() => parseAgentChatOrganizationIds("not-a-uuid")).toThrow();
+  });
+
+  it("matches organization ids case-insensitively", () => {
+    expect(isAgentChatEnabled(organizationA.toUpperCase(), new Set([organizationA]))).toBe(true);
+    expect(isAgentChatEnabled(organizationB, new Set([organizationA]))).toBe(false);
+  });
+
+  it("blocks organizations outside the enabled rollout", () => {
+    expect(() => assertAgentChatEnabled(organizationB)).toThrowError(
+      expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
+    );
+    expect(() => assertAgentChatEnabled(organizationA)).toThrowError(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
   });

@@ -95,36 +95,6 @@
 }
 
 /*
- * The public landing page renders its own atmosphere regardless of the app
- * theme. Overriding the semantic variables inside one scope keeps every
- * component on tokens — no component hardcodes a palette value.
- */
-.marketing {
-  --background: oklch(0.135 0.012 275);
-  --foreground: oklch(0.955 0.005 275);
-  --card: oklch(0.17 0.014 275);
-  --card-foreground: oklch(0.955 0.005 275);
-  --popover: oklch(0.17 0.014 275);
-  --popover-foreground: oklch(0.955 0.005 275);
-  --primary: oklch(0.62 0.13 164);
-  --primary-foreground: oklch(0.17 0.04 165);
-  --secondary: oklch(0.235 0.02 280);
-  --secondary-foreground: oklch(0.955 0.005 275);
-  --muted: oklch(0.205 0.016 275);
-  --muted-foreground: oklch(0.72 0.018 275);
-  --accent: oklch(0.22 0.02 280);
-  --accent-foreground: oklch(0.955 0.005 275);
-  --input: oklch(1 0 0 / 10%);
-  --ring: oklch(0.68 0.13 164);
-  --surface: oklch(0.17 0.014 275);
-  --surface-subtle: oklch(0.205 0.016 275);
-  --border: oklch(1 0 0 / 8%);
-  --success: oklch(0.75 0.17 160);
-  --warning: oklch(0.82 0.14 85);
-  --glow-accent: oklch(0.72 0.16 162);
-}
-
-/*
  * Layered on purpose.
  *
  * These were unlayered, and unlayered CSS beats anything inside a layer. Since
@@ -229,5 +199,97 @@
   }
   html {
     @apply font-sans;
+  }
+}
+
+/*
+ * Platform scrollbars: one quiet, modern treatment everywhere.
+ *
+ * Native scrolling is kept intact (keyboard, touch, screen readers and
+ * overlay-scroll OS settings all behave as before); only the paint changes:
+ * a slim rounded grey thumb on a transparent track, darkening on hover.
+ * Thumb color derives from --foreground so light and dark modes adapt
+ * without new tokens. Rules are global (not scoped to a wrapper) because
+ * Radix portals (dialogs, dropdowns, selects) render at document.body.
+ * True fade-out-when-idle is deliberately not implemented: it needs scroll
+ * spying in JS, which would trade native behavior for decoration.
+ */
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  /* No steppers: the up/down nubs at track ends (seen on Linux Chromium,
+   * most annoying inside modals) are never wanted in this design language. */
+  *::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: color-mix(in oklch, var(--foreground) 22%, transparent);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in oklch, var(--foreground) 45%, transparent);
+    border: 3px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  @media (forced-colors: active) {
+    * {
+      scrollbar-width: auto;
+      scrollbar-color: auto;
+    }
+  }
+}
+
+/* Universal agent shell: circulating glow ring around the text area.
+   A conic-gradient arc orbits the panel via a registered angle custom
+   property; under prefers-reduced-motion the ring renders once as a
+   static glow. Prototype hue language: warm orange into violet/cyan. */
+@property --agent-glow-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes agent-glow-orbit {
+  to {
+    --agent-glow-angle: 360deg;
+  }
+}
+
+.agent-glow-ring {
+  background: conic-gradient(
+    from var(--agent-glow-angle),
+    rgb(249 115 22 / 0) 0deg,
+    rgb(249 115 22 / 0.95) 35deg,
+    rgb(217 70 239 / 0.9) 110deg,
+    rgb(139 92 246 / 0.95) 160deg,
+    rgb(56 189 248 / 0.85) 230deg,
+    rgb(249 115 22 / 0) 300deg,
+    rgb(249 115 22 / 0) 360deg
+  );
+  box-shadow:
+    0 0 18px 0 rgb(139 92 246 / 0.5),
+    0 0 52px -6px rgb(249 115 22 / 0.4),
+    0 18px 48px -18px rgb(0 0 0 / 0.55);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .agent-glow-ring-animated {
+    animation: agent-glow-orbit 5s linear infinite;
   }
 }

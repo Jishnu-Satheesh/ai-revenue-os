@@ -1,6 +1,9 @@
 import type { ReportContractDocument } from "@/domain/reports/contracts";
 
-type ContractSheet = Pick<ReportContractDocument["sheets"][number], "normalizedSheetName" | "sheetLocator">;
+type ContractSheet = Pick<
+  ReportContractDocument["sheets"][number],
+  "normalizedSheetName" | "sheetLocator"
+>;
 
 /**
  * Find the sheet in an uploaded file that a contract sheet describes.

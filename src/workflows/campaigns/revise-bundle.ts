@@ -33,6 +33,12 @@ export type RevisionSourceReader = {
     /** The newest version of this campaign, which may not be the base. */
     latestVersionId: string;
     assetStoragePaths: Record<string, string>;
+    /**
+     * The pinned shared-memory manifest for this run, if any. Pinned to the
+     * claimed run so revalidation is a new bounded attempt, never a silent
+     * swap. Text-only: it may shape copy, never assertions, spend, or pixels.
+     */
+    memoryContext?: { manifestId: string; digest: string } | null;
   } | null>;
 };
 
@@ -68,6 +74,17 @@ export type ReviseBundleDependencies = {
   publisher: BundleVersionPublisher;
   isCancelled: () => boolean;
   leaseSeconds?: number;
+  /**
+   * Revalidates the pinned shared-memory manifest before patching. A changed
+   * pack is a new bounded attempt, never a silent swap: the run fails with
+   * `memory_context_changed` so the caller enqueues a fresh attempt against
+   * the new manifest. A material revision always publishes a new immutable
+   * version under the existing lifecycle; revalidation never edits in place.
+   */
+  revalidateMemoryContext?: (input: {
+    manifestId: string | null;
+    digest: string | null;
+  }) => Promise<"valid" | "changed" | "revoked" | "absent">;
 };
 
 export type ReviseBundleResult =
@@ -162,6 +179,15 @@ export async function reviseCampaignBundle(
       claimToken,
     });
     if (!instruction) return failWith("revision_prompt_missing");
+
+    if (dependencies.revalidateMemoryContext) {
+      const revalidation = await dependencies.revalidateMemoryContext({
+        manifestId: base.memoryContext?.manifestId ?? null,
+        digest: base.memoryContext?.digest ?? null,
+      });
+      if (revalidation === "changed") return failWith("memory_context_changed");
+      if (revalidation === "revoked") return failWith("memory_context_revoked");
+    }
 
     const allowedPaths = allowedPathsForScope(instruction.scope);
 

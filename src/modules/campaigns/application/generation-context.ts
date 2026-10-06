@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { brandPaletteSchema, type BrandPalette } from "@/domain/brand/guidelines";
 import type { CampaignGenerationProfile } from "@/domain/campaigns/schemas";
 
 /**
@@ -43,10 +44,18 @@ export const evidenceFactSchema = z.strictObject({
 });
 export type EvidenceFact = z.infer<typeof evidenceFactSchema>;
 
+export const memoryContextRefSchema = z.strictObject({
+  manifestId: z.string().uuid(),
+  digest: z.string().regex(/^[0-9a-f]{64}$/),
+});
+export type MemoryContextRef = z.infer<typeof memoryContextRefSchema>;
+
 export const generationContextSchema = z.strictObject({
   organizationId: z.string().uuid(),
   campaignId: z.string().uuid(),
   sourceSnapshotId: z.string().uuid(),
+  memoryContextManifestId: z.string().uuid().nullable(),
+  memoryContextDigest: z.string().regex(/^[0-9a-f]{64}$/).nullable(),
   generationProfile: z.enum(["brand_restricted", "brand_guided", "full_visual_freedom"]),
   objective: z.string().trim().min(1).max(600),
   audience: z.string().trim().min(1).max(600),
@@ -59,6 +68,28 @@ export const generationContextSchema = z.strictObject({
   /** The brand's own habits. Only these may be stretched, where a profile allows. */
   softConventions: z.array(z.string().trim().min(1).max(400)).max(60),
   restrictedTerms: z.array(z.string().trim().min(1).max(80)).max(200),
+  /**
+   * The brand's colours, or null when it has not set any.
+   *
+   * Null rather than `{}`: an empty object reads downstream as "three colours,
+   * all unset", which is a different claim from "this brand has no palette".
+   *
+   * Exact where the platform draws and advisory where a model draws. The
+   * compositor may use these values literally; an image model is told them and
+   * may still drift, which is what the `off_palette` review reason exists to
+   * catch. Nothing may present model output as palette-guaranteed.
+   */
+  palette: brandPaletteSchema.nullable(),
+  /**
+   * The version that is actually this organization's mark, or null.
+   *
+   * The reference resolver admits any usable `brand_mark` asset, so a brand
+   * with three old logos in its library had one picked for it. This names the
+   * current one. Null when none is set, or when the one set points at a
+   * version that is no longer usable or whose latest review is a rejection —
+   * a rejected mark must not keep being used because a pointer still resolves.
+   */
+  canonicalLogoVersionId: z.string().uuid().nullable(),
   brandAssetVersionIds: z.array(z.string().uuid()).max(40),
   /** True only when the organization accepted a synthetic setting. */
   syntheticAssetsAllowed: z.boolean(),
@@ -97,6 +128,13 @@ export type GenerationContextInput = {
   /** Injected rather than read from the clock, so generation is reproducible. */
   now: Date;
   scheduleLeadMinutes?: number;
+  /**
+   * The pinned shared-memory manifest for this run, if any. Text-only planning
+   * context: it may shape words, never assertions, spend, policy, or pixels.
+   * Null when memory context is disabled or unavailable; generation still runs
+   * on the pinned snapshot alone.
+   */
+  memoryContext?: MemoryContextRef | null;
 };
 
 /**
@@ -130,10 +168,13 @@ export function buildGenerationContext(input: GenerationContextInput): Generatio
     return { outcome: "needs_data", missing: [...new Set(missing)] };
   }
 
+  const memoryContext = input.memoryContext ?? null;
   const parsed = generationContextSchema.safeParse({
     organizationId: input.organizationId,
     campaignId: input.campaignId,
     sourceSnapshotId: input.sourceSnapshotId,
+    memoryContextManifestId: memoryContext?.manifestId ?? null,
+    memoryContextDigest: memoryContext?.digest ?? null,
     generationProfile: input.generationProfile,
     objective,
     audience,
@@ -144,6 +185,8 @@ export function buildGenerationContext(input: GenerationContextInput): Generatio
     hardConstraints: readStringArray(snapshot, "hardConstraints"),
     softConventions: readStringArray(snapshot, "softConventions"),
     restrictedTerms: readStringArray(snapshot, "restrictedTerms"),
+    palette: readPalette(snapshot),
+    canonicalLogoVersionId: readString(snapshot, "canonicalLogoVersionId") ?? null,
     brandAssetVersionIds: [...input.brandAssetVersionIds],
     syntheticAssetsAllowed: input.syntheticAssetsAllowed,
     primaryMetricKey,
@@ -200,6 +243,17 @@ export function renderGenerationPrompt(context: GenerationContext): string {
     context.hardConstraints.map((entry) => `- ${entry}`).join("\n") || "none",
     "</hard_constraints>",
     "",
+    "<brand_palette>",
+    context.palette
+      ? Object.entries(context.palette)
+          .map(([slot, value]) => `- ${slot}: ${value}`)
+          .join("\n")
+      : "none",
+    "</brand_palette>",
+    "These are the brand's own colours. Work within them where the composition",
+    "allows. They are a statement of the brand, not a constraint this request",
+    "can verify, and the result is reviewed against them by a person.",
+    "",
     "<soft_conventions>",
     context.softConventions.map((entry) => `- ${entry}`).join("\n") || "none",
     "</soft_conventions>",
@@ -233,6 +287,12 @@ export function renderGenerationPrompt(context: GenerationContext): string {
     "",
     "Only state a fact that appears in <verified_facts>, and cite its source key.",
     "Never invent an offer, a price, a metric, a result, or a permission.",
+    "",
+    "<memory_context>",
+    context.memoryContextDigest
+      ? `digest: ${context.memoryContextDigest}\nmanifest: ${context.memoryContextManifestId}\nShared Business Memory supplied text-only planning context for this run. It may shape words, never assertions, spend, policy, or pixels.`
+      : "none. No shared memory context was pinned to this run; build from the verified facts above only.",
+    "</memory_context>",
   ].join("\n");
 }
 
@@ -260,6 +320,18 @@ function localDate(instant: string, timeZone: string): string {
     // is still correct and is the value the schedule is actually checked against.
     return `${instant.slice(0, 10)} (UTC; timezone ${timeZone} not recognized)`;
   }
+}
+
+/**
+ * The palette, or null. Anything malformed is null rather than partially
+ * accepted: half a brand's colours would be presented as the whole palette.
+ */
+function readPalette(source: Record<string, unknown>): BrandPalette | null {
+  const value = source.palette;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const parsed = brandPaletteSchema.safeParse(value);
+  if (!parsed.success) return null;
+  return Object.keys(parsed.data).length > 0 ? parsed.data : null;
 }
 
 function readString(source: Record<string, unknown>, key: string): string | undefined {

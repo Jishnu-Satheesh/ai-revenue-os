@@ -370,7 +370,10 @@ select extensions.throws_ok(
   delete from public.growth_intelligence_item_decisions
   where organization_id = 'c9000000-0000-4000-8000-000000000201'::uuid
   $$,
-  '55000', 'market_evidence_immutable',
+  -- DELETE carries its own refusal string since the Task 5 retention rewrite
+  -- of private.reject_market_evidence_immutable_mutation(); the behavior —
+  -- refusal — is unchanged, only the message names the operation.
+  '55000', 'market_evidence_delete_forbidden',
   'triage history cannot be deleted directly'
 );
 

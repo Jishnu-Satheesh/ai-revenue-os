@@ -23,7 +23,7 @@ export async function POST(
           reportPackage: result.package,
           upload: {
             endpoint: new URL(
-              "/storage/v1/upload/resumable/sign",
+              "/storage/v1/upload/resumable",
               env.NEXT_PUBLIC_SUPABASE_URL,
             ).toString(),
             token: result.upload.token,

@@ -27,17 +27,27 @@ const serverEnvSchema = z.object({
   RESEND_API_KEY: optionalNonEmptyString,
   INVITATION_FROM_ADDRESS: z.preprocess(
     emptyToUndefined,
-    z.string().min(3).default("AI Revenue OS <invitations@themarga.in>"),
+    z.string().min(3).default("Lunes AI <admin@lunes.in>"),
   ),
   OPENAI_API_KEY: optionalNonEmptyString,
   ANTHROPIC_API_KEY: optionalNonEmptyString,
   GOOGLE_GENERATIVE_AI_API_KEY: optionalNonEmptyString,
   AI_DEFAULT_MODEL: optionalNonEmptyString,
+  AI_ROUTER_MODEL: optionalNonEmptyString,
   MEMORY_EMBEDDING_MODEL: optionalNonEmptyString,
   REDIS_URL: optionalNonEmptyString,
   TRIGGER_SECRET_KEY: optionalNonEmptyString,
   TRIGGER_PROJECT_REF: optionalNonEmptyString,
+  /**
+   * Research day-allowance policy (ADR 0077). `capped` keeps the USD 5
+   * organization-day rule everywhere; `uncapped` lets a worker pass the
+   * service_role-only allowance bypass on reservation RPCs. Default is
+   * capped, so production can never change by accident. Set `uncapped`
+   * only in non-production worker environments.
+   */
+  RESEARCH_BUDGET_POLICY: z.enum(["capped", "uncapped"]).default("capped"),
   INTEGRATION_HUB_V1_ORGANIZATION_IDS: optionalNonEmptyString,
+  AGENT_CHAT_V1_ORGANIZATION_IDS: optionalNonEmptyString,
   GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS: optionalNonEmptyString,
   GOVERNED_REPORT_PROJECTION_ORGANIZATION_IDS: optionalNonEmptyString,
   GOVERNED_ECONOMICS_READINESS_ORGANIZATION_IDS: optionalNonEmptyString,
@@ -47,6 +57,7 @@ const serverEnvSchema = z.object({
   GROWTH_INTELLIGENCE_TRIAGE_ORGANIZATION_IDS: optionalNonEmptyString,
   GROWTH_INTELLIGENCE_CAMPAIGN_DRAFT_ORGANIZATION_IDS: optionalNonEmptyString,
   CAMPAIGNS_V1_ORGANIZATION_IDS: optionalNonEmptyString,
+  OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS: optionalNonEmptyString,
   CAMPAIGN_TEXT_MODEL: optionalNonEmptyString,
   CAMPAIGN_PLAN_MODEL: optionalNonEmptyString,
   CAMPAIGN_PATCH_MODEL: optionalNonEmptyString,
@@ -63,6 +74,8 @@ const serverEnvSchema = z.object({
    * anywhere, while this one is quoted back in a query string by design.
    */
   META_WEBHOOK_VERIFY_TOKEN: optionalNonEmptyString,
+  COMING_SOON_ORIGINS: optionalNonEmptyString,
+  LEADS_EMAIL_HASH_KEY: optionalNonEmptyString,
   SENTRY_DSN: optionalUrl,
   OTEL_EXPORTER_OTLP_ENDPOINT: optionalUrl,
 });
@@ -86,11 +99,14 @@ const parsedEnv = serverEnvSchema.safeParse({
   ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
   GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   AI_DEFAULT_MODEL: process.env.AI_DEFAULT_MODEL,
+  AI_ROUTER_MODEL: process.env.AI_ROUTER_MODEL,
   MEMORY_EMBEDDING_MODEL: process.env.MEMORY_EMBEDDING_MODEL,
   REDIS_URL: process.env.REDIS_URL,
   TRIGGER_SECRET_KEY: process.env.TRIGGER_SECRET_KEY,
   TRIGGER_PROJECT_REF: process.env.TRIGGER_PROJECT_REF,
+  RESEARCH_BUDGET_POLICY: process.env.RESEARCH_BUDGET_POLICY,
   INTEGRATION_HUB_V1_ORGANIZATION_IDS: process.env.INTEGRATION_HUB_V1_ORGANIZATION_IDS,
+  AGENT_CHAT_V1_ORGANIZATION_IDS: process.env.AGENT_CHAT_V1_ORGANIZATION_IDS,
   GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS:
     process.env.GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS,
   GOVERNED_REPORT_PROJECTION_ORGANIZATION_IDS:
@@ -108,6 +124,7 @@ const parsedEnv = serverEnvSchema.safeParse({
   GROWTH_INTELLIGENCE_CAMPAIGN_DRAFT_ORGANIZATION_IDS:
     process.env.GROWTH_INTELLIGENCE_CAMPAIGN_DRAFT_ORGANIZATION_IDS,
   CAMPAIGNS_V1_ORGANIZATION_IDS: process.env.CAMPAIGNS_V1_ORGANIZATION_IDS,
+  OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS: process.env.OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS,
   CAMPAIGN_TEXT_MODEL: process.env.CAMPAIGN_TEXT_MODEL,
   CAMPAIGN_PLAN_MODEL: process.env.CAMPAIGN_PLAN_MODEL,
   CAMPAIGN_PATCH_MODEL: process.env.CAMPAIGN_PATCH_MODEL,
@@ -119,6 +136,8 @@ const parsedEnv = serverEnvSchema.safeParse({
   META_APP_ID: process.env.META_APP_ID,
   META_APP_SECRET: process.env.META_APP_SECRET,
   META_WEBHOOK_VERIFY_TOKEN: process.env.META_WEBHOOK_VERIFY_TOKEN,
+  COMING_SOON_ORIGINS: process.env.COMING_SOON_ORIGINS,
+  LEADS_EMAIL_HASH_KEY: process.env.LEADS_EMAIL_HASH_KEY,
   SENTRY_DSN: process.env.SENTRY_DSN,
   OTEL_EXPORTER_OTLP_ENDPOINT: process.env.OTEL_EXPORTER_OTLP_ENDPOINT,
 });

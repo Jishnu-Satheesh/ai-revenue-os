@@ -5,14 +5,29 @@ import { Megaphone, Palette } from "lucide-react";
 import { type AllocationLedgerEvent } from "@/components/campaigns/allocation-ledger";
 import { type OutcomeProofData } from "@/components/campaigns/outcome-proof";
 import { type LearningProposalData } from "@/components/campaigns/learning-review";
-import { CampaignStudio } from "@/components/campaigns/campaign-studio";
+import { CampaignDetailWorkspace } from "@/components/campaigns/campaign-detail-workspace";
+import { CampaignGenerateButton } from "@/components/campaigns/campaign-generate-button";
+import type { ReviewableDeliverable } from "@/components/campaigns/campaign-creative-review";
 import { RegisterRouteLabel } from "@/components/layout/route-context";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { campaignPhase, type DeliverableTally } from "@/domain/campaigns/phase";
+import { hasOrganizationPermission } from "@/domain/access/permissions";
+import { createDeliverableRepository } from "@/modules/campaigns/infrastructure/deliverable-repository";
+import type { DeliverablePersistence } from "@/modules/campaigns/infrastructure/deliverable-repository";
+import { createDeliverableService } from "@/modules/campaigns/application/deliverable-service";
+import {
+  readLaunchAuthorized,
+  type LaunchAuthorityReader,
+} from "@/modules/campaigns/infrastructure/launch-repository";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { toGeneration } from "@/modules/campaigns/application/studio-view";
 import { createCampaignReadRepository } from "@/modules/campaigns/infrastructure/repository";
+import {
+  readCampaignPostPerformance,
+  type PostPerformancePersistence,
+} from "@/modules/campaigns/infrastructure/post-performance-reader";
 import type { CampaignPersistence } from "@/modules/campaigns/infrastructure/repository";
 import { readStudioView } from "@/modules/campaigns/infrastructure/studio-reader";
 import { createCampaignVariantStore } from "@/modules/campaigns/infrastructure/variant-repository";
@@ -57,6 +72,20 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
     const run = await read.latestGenerationRun(context.organizationId, resolved.campaignId);
     const generation = toGeneration(run, false, new Date().toISOString());
 
+    // The approval-to-generation link: a campaign minted by an approved
+    // proposal starts with no bundle version, and this is the only place that
+    // state renders. The control shows only here — never a second live button
+    // once a run is underway — and never fires on its own.
+    const isProposalBorn = campaign.sourceKind === "campaign_proposal";
+    const canGenerate = hasOrganizationPermission(context.membership.role, "campaign.edit");
+    const showGenerate =
+      isProposalBorn && generation.status !== "generating" && generation.retryable;
+
+    // Finished outputs read through the existing deliverable service, so the
+    // page reports what exists rather than assuming. A failure to read is a
+    // failure, never an empty list.
+    const preVersionDeliverables = await readDeliverables(context, resolved.campaignId);
+
     return (
       <div className="flex min-h-0 flex-col gap-6">
         <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
@@ -85,21 +114,59 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
             exists to review yet.
           </AlertDescription>
         </Alert>
+
+        {showGenerate ? (
+          <div className="flex flex-col gap-2 rounded-lg border bg-card p-4">
+            <h2 className="text-base font-semibold">Start creative preparation</h2>
+            <p className="text-sm text-muted-foreground">
+              {isProposalBorn
+                ? "The approved proposal authorized preparation inside its cost ceiling. Starting generation spends from that purse — it never starts on its own."
+                : null}
+            </p>
+            <CampaignGenerateButton
+              organizationId={context.organizationId}
+              campaignId={resolved.campaignId}
+              disabled={!canGenerate}
+              disabledReason={
+                canGenerate
+                  ? undefined
+                  : "This needs the campaign.edit capability, which your role does not hold."
+              }
+            />
+          </div>
+        ) : null}
+
+        <section className="flex flex-col gap-2 rounded-lg border bg-card p-4" aria-label="Finished outputs">
+          <h2 className="text-base font-semibold">Finished outputs</h2>
+          {preVersionDeliverables === null ? (
+            <p className="text-sm text-muted-foreground">
+              Finished outputs could not be read. That is a failed read, not an empty list.
+            </p>
+          ) : preVersionDeliverables.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No finished outputs yet — nothing has been generated, so there is nothing to review.
+              This is an empty record, not a complete set.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              {preVersionDeliverables.filter((entry) => entry.currentVersion !== null).length} of{" "}
+              {preVersionDeliverables.length} planned outputs produced. The review screen lists
+              each one with what is still missing.
+            </p>
+          )}
+        </section>
       </div>
     );
   }
 
-  // Read only once an approval exists: before that there is no envelope for
-  // creative to live inside, and the query would be work with no answer.
-  const fleet =
-    view.approval.status === "live"
-      ? await readFleet(context, view)
-      : { variants: [] as VariantCard[], remaining: {} as Record<string, number> };
-
-  // Same gate as the fleet. The ledger is the fast loop's reasoning, and there
-  // is nothing to reason about before an approval authorizes anything.
-  const allocationEvents =
-    view.approval.status === "live" ? await readAllocationEvents(context, resolved.campaignId) : [];
+  // Read unconditionally. These were previously gated on a LIVE approval, which
+  // meant a campaign that ran under an approval that has since expired showed an
+  // empty fleet and an empty ledger — its own history erased by the clock. C09
+  // requires the opposite: rollback stops new admissions and leaves history
+  // readable. Whether anything new may be authorized is a separate question,
+  // asked at the point of mutation, not at the point of reading.
+  const fleet = await readFleet(context, view);
+  const allocationEvents = await readAllocationEvents(context, resolved.campaignId);
 
   // The settled result is independent of whether an approval is still live: a
   // campaign that ran and settled keeps its proof after the approval lapses.
@@ -111,59 +178,87 @@ export default async function CampaignDetailPage({ params, searchParams }: PageP
   const learningProposal = await readLearningProposal(context, resolved.campaignId);
   const canDecideLearning = context.membership.role !== "viewer";
 
+  // Read through the caller's own session, so RLS decides what is visible. A
+  // failure here is reported as a failure, never as an empty list: "no outputs"
+  // and "we could not look" would otherwise be indistinguishable, and only one
+  // of them means it is safe to conclude nothing is waiting for review.
+  const deliverables = await readDeliverables(context, resolved.campaignId);
+
+  // Asked, not assumed. Passing a flat `false` here would have claimed every
+  // campaign lacks publication authority; passing a permanent `null` would have
+  // shown a "could not be read" warning on every campaign forever, which is how
+  // a warning that means something real gets trained out of people.
+  const launchAuthorized = await readLaunchAuthorized(
+    context.supabase as unknown as LaunchAuthorityReader,
+    { organizationId: context.organizationId, campaignId: resolved.campaignId },
+  );
+
+  // Capability checks, not role checks. Reviewing an output and authorizing a
+  // publication are separate rights, and collapsing them into "not a viewer"
+  // would hand an operator the publish button C04 keeps above their line.
+  const canReviewOutputs = hasOrganizationPermission(context.membership.role, "campaign.approve");
+  const canPublish = hasOrganizationPermission(context.membership.role, "campaign.publish");
+
+  // Rendered here, in the organization's timezone, so the client component
+  // never reads the clock during render.
+  const lastUpdatedLabel = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: organization.default_timezone,
+  }).format(new Date(view.versions.find((entry) => entry.isCurrent)?.createdAt ?? Date.now()));
+
+  // Read on the caller's own session, so row level security decides what this
+  // member sees. A failed read becomes null rather than an empty list: "we
+  // could not ask" and "nothing was reported" must not look the same.
+  const postPerformance = await readCampaignPostPerformance(
+    context.supabase as unknown as PostPerformancePersistence,
+    { organizationId: context.organizationId, campaignId: resolved.campaignId },
+  )
+    .then((series) =>
+      series.map((entry) => ({
+        actionRunId: entry.actionRunId,
+        postLabel: postLabelFor(entry.channel, entry.placement),
+        points: entry.points,
+      })),
+    )
+    .catch(() => null);
+
+  const phase = campaignPhase({
+    state: view.state,
+    hasVersion: true,
+    approvalStatus: view.approval.status,
+    deliverables: deliverables === null ? null : tallyOf(deliverables),
+    launchAuthorized,
+    settledAt: outcome?.settledAt ?? null,
+  });
+
   return (
     <div className="flex min-h-0 flex-col gap-6">
       <RegisterRouteLabel segment={context.organizationId} label={organization.name} />
       <RegisterRouteLabel segment={resolved.campaignId} label={view.title} />
 
-      <div className="flex shrink-0 flex-wrap items-start justify-between gap-3">
-        <div className="flex items-start gap-3">
-          <span className="flex size-11 items-center justify-center rounded-xl bg-accent text-accent-foreground">
-            <Megaphone />
-          </span>
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{view.title}</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              {view.sourceLabel} · version {view.versionNumber} · {organization.name}
-            </p>
-          </div>
-        </div>
-        {/*
-          The Studio is a sub-page rather than a section: the control room asks
-          whether this should be approved, and the Studio asks what it looks
-          like printed. Reachable from here because a page nothing links to is
-          a page nobody finds.
-        */}
-        <Button asChild variant="outline">
-          <Link
-            href={`/organizations/${context.organizationId}/campaigns/${resolved.campaignId}/studio?version=${view.versionId}`}
-          >
-            <Palette />
-            Creative Studio
-          </Link>
-        </Button>
-      </div>
-
-      <Alert>
-        <AlertTitle>Objective</AlertTitle>
-        <AlertDescription className="flex flex-col gap-2">
-          <span>{view.objective}</span>
-          <span className="text-xs">{view.rationale}</span>
-        </AlertDescription>
-      </Alert>
-
-      <CampaignStudio
+      <CampaignDetailWorkspace
         view={view}
+        phase={phase}
+        postPerformance={postPerformance}
         organizationId={context.organizationId}
         organizationName={organization.name}
         timeZone={organization.default_timezone}
+        currency={organization.base_currency}
         variants={fleet.variants}
         variantsRemaining={fleet.remaining}
+        deliverables={deliverables ?? []}
+        deliverablesReadFailed={deliverables === null}
+        launchAuthorized={launchAuthorized}
+        lastUpdatedLabel={lastUpdatedLabel}
         allocationEvents={allocationEvents}
         outcome={outcome}
         learningProposal={learningProposal}
+        canReviewOutputs={canReviewOutputs}
+        canPublish={canPublish}
         canDecideLearning={canDecideLearning}
-        currency={organization.base_currency}
       />
     </div>
   );
@@ -499,4 +594,58 @@ async function readFleet(
       ]),
     ),
   };
+}
+
+/**
+ * Every finished output for this campaign, with its publication verdict.
+ *
+ * Returns `null` when the read failed, which the page reports as a failure
+ * rather than as an empty list. An empty list is a claim — "nothing is waiting
+ * for you" — and it must not be made on the strength of a query that did not
+ * come back.
+ */
+async function readDeliverables(
+  context: { supabase: unknown; organizationId: string },
+  campaignId: string,
+): Promise<readonly ReviewableDeliverable[] | null> {
+  const service = createDeliverableService({
+    store: createDeliverableRepository(context.supabase as unknown as DeliverablePersistence),
+  });
+
+  try {
+    const listed = await service.listForCampaign({
+      organizationId: context.organizationId,
+      campaignId,
+    });
+    return listed.map((entry) => ({ ...entry }));
+  } catch {
+    return null;
+  }
+}
+
+/** Counts of things that exist. Never an estimate, never a tidied-up number. */
+function tallyOf(deliverables: readonly ReviewableDeliverable[]): DeliverableTally {
+  const produced = deliverables.filter((entry) => entry.currentVersion !== null);
+  return {
+    planned: deliverables.length,
+    produced: produced.length,
+    approved: produced.filter((entry) => entry.eligibility.publishable).length,
+    rejected: produced.filter((entry) => entry.eligibility.reasonCode === "rejected").length,
+  };
+}
+
+/**
+ * What to call a published post on screen.
+ *
+ * Channel and placement rather than the creative's title, because these
+ * readings belong to the action that actually went out. An action whose row
+ * cannot be read is named as unknown rather than given a plausible label.
+ */
+function postLabelFor(channel: string | null, placement: string | null): string {
+  if (channel === null || placement === null) return "A published post";
+  return `${sentence(channel)} · ${placement.replace(/_/g, " ")}`;
+}
+
+function sentence(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }

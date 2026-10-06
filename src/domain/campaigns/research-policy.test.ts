@@ -1,0 +1,225 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  admitResearchRequest,
+  researchPolicyInputSchema,
+  researchPolicySchema,
+  type ResearchPolicy,
+} from "@/domain/campaigns/research-policy";
+
+const ORGANIZATION_ID = "fb430000-0000-4000-8000-000000000201";
+
+function policy(overrides: Partial<ResearchPolicy> = {}): ResearchPolicy {
+  return {
+    schemaVersion: 1,
+    organizationId: ORGANIZATION_ID,
+    version: 3,
+    enabled: true,
+    timezone: "Asia/Dubai",
+    evidenceQualificationRuleVersion: "evidence-qualification@2",
+    evidenceMaxAgeDays: 30,
+    cooldownSeconds: 3600,
+    maxPendingProposals: 2,
+    maxAttempts: 2,
+    perRunAllowance: { amountMinor: 5000, currency: "AED" },
+    windowAllowance: { amountMinor: 20000, currency: "AED" },
+    windowDays: 30,
+    ...overrides,
+  };
+}
+
+const NOW = new Date("2026-09-13T12:00:00.000Z");
+
+function admitted(overrides: Partial<Parameters<typeof admitResearchRequest>[0]> = {}) {
+  return admitResearchRequest({
+    policy: policy(),
+    knownPolicyVersion: 3,
+    triggerKind: "manual_request",
+    requestedBudget: { amountMinor: 1000, currency: "AED" },
+    pendingCount: 0,
+    windowSpentMinor: 0,
+    lastAdmittedAt: null,
+    now: NOW,
+    ...overrides,
+  });
+}
+
+describe("research policy admission", () => {
+  it("admits a request inside every limit and records the policy version", () => {
+    const result = admitted();
+    expect(result).toEqual({
+      outcome: "admitted",
+      policyVersion: 3,
+      reservedBudget: { amountMinor: 1000, currency: "AED" },
+    });
+  });
+
+  it("refuses as needs_setup when no policy exists", () => {
+    expect(admitted({ policy: null })).toEqual({
+      outcome: "refused",
+      reasonCode: "needs_setup",
+    });
+  });
+
+  it("refuses as needs_setup when the policy is switched off", () => {
+    expect(admitted({ policy: policy({ enabled: false }) })).toEqual({
+      outcome: "refused",
+      reasonCode: "needs_setup",
+    });
+  });
+
+  it("refuses a requester acting on an older policy version", () => {
+    expect(admitted({ knownPolicyVersion: 2 })).toEqual({
+      outcome: "refused",
+      reasonCode: "stale_policy",
+    });
+  });
+
+  it("admits when the requester never saw a policy version", () => {
+    // Workers enqueue without a seen version; the current policy still binds.
+    expect(admitted({ knownPolicyVersion: null }).outcome).toBe("admitted");
+  });
+
+  it("refuses inside the cooldown window, whatever the trigger kind", () => {
+    for (const triggerKind of ["manual_request", "business_signal", "scheduled"] as const) {
+      expect(
+        admitted({
+          triggerKind,
+          lastAdmittedAt: "2026-09-13T11:30:00.000Z",
+        }),
+      ).toEqual({ outcome: "refused", reasonCode: "cooldown_active" });
+    }
+  });
+
+  it("admits once the cooldown has fully elapsed", () => {
+    expect(admitted({ lastAdmittedAt: "2026-09-13T11:00:00.000Z" }).outcome).toBe("admitted");
+  });
+
+  it("refuses when pending proposals reach the configured limit", () => {
+    expect(admitted({ pendingCount: 2 })).toEqual({
+      outcome: "refused",
+      reasonCode: "pending_limit_reached",
+    });
+  });
+
+  it("refuses a request above the per-run allowance", () => {
+    expect(admitted({ requestedBudget: { amountMinor: 5001, currency: "AED" } })).toEqual({
+      outcome: "refused",
+      reasonCode: "allowance_exceeded",
+    });
+  });
+
+  it("refuses when the window allowance cannot cover the request", () => {
+    expect(admitted({ windowSpentMinor: 19500 })).toEqual({
+      outcome: "refused",
+      reasonCode: "allowance_exceeded",
+    });
+  });
+
+  it("refuses a currency the policy never authorized", () => {
+    expect(admitted({ requestedBudget: { amountMinor: 100, currency: "USD" } })).toEqual({
+      outcome: "refused",
+      reasonCode: "currency_mismatch",
+    });
+  });
+
+  it("never reserves more than asked", () => {
+    const result = admitted({ requestedBudget: { amountMinor: 4999, currency: "AED" } });
+    expect(result).toEqual({
+      outcome: "admitted",
+      policyVersion: 3,
+      reservedBudget: { amountMinor: 4999, currency: "AED" },
+    });
+  });
+});
+
+describe("research policy attempt cap", () => {
+  it("refuses a policy that does not say how many attempts a run may have", () => {
+    // A missing cap is not "unlimited" and not a default. It is an
+    // organization that has not been asked yet, and admitting under it would
+    // be inventing an operating limit (D06).
+    const { maxAttempts: _omitted, ...withoutCap } = policy();
+    expect(researchPolicySchema.safeParse(withoutCap).success).toBe(false);
+  });
+
+  it("refuses a cap of zero, which would admit a run nothing may ever attempt", () => {
+    expect(researchPolicySchema.safeParse({ ...policy(), maxAttempts: 0 }).success).toBe(false);
+  });
+
+  it("accepts a stated cap", () => {
+    const parsed = researchPolicySchema.safeParse(policy({ maxAttempts: 5 }));
+    expect(parsed.success).toBe(true);
+    expect(parsed.success && parsed.data.maxAttempts).toBe(5);
+  });
+
+  it("does not let the attempt cap change who may spend", () => {
+    // The cap governs recovery from a dead worker, never admission. A run
+    // admitted under a cap of 1 is admitted exactly as one under a cap of 10.
+    expect(admitted({ policy: policy({ maxAttempts: 1 }) })).toEqual(
+      admitted({ policy: policy({ maxAttempts: 10 }) }),
+    );
+  });
+});
+
+describe("what someone may set when configuring research", () => {
+  function input(overrides: Record<string, unknown> = {}) {
+    const { schemaVersion: _v, organizationId: _o, version: _n, ...rest } = policy();
+    return { ...rest, ...overrides };
+  }
+
+  it("accepts a complete policy", () => {
+    expect(researchPolicyInputSchema.safeParse(input()).success).toBe(true);
+  });
+
+  it("does not let the caller choose its own version number", () => {
+    // The database mints it, so two people saving at once cannot claim the
+    // same one and no caller can rewrite what earlier spending was allowed to
+    // be by re-using a version.
+    expect(researchPolicyInputSchema.safeParse({ ...input(), version: 9 }).success).toBe(false);
+  });
+
+  it("refuses a policy with any threshold left out", () => {
+    for (const field of [
+      "maxAttempts",
+      "maxPendingProposals",
+      "cooldownSeconds",
+      "evidenceMaxAgeDays",
+      "windowDays",
+      "perRunAllowance",
+    ]) {
+      const partial = input();
+      delete (partial as Record<string, unknown>)[field];
+      // Filling a blank in on the organization's behalf would be inventing an
+      // operating limit (D06).
+      expect(researchPolicyInputSchema.safeParse(partial).success).toBe(false);
+    }
+  });
+
+  it("refuses a window allowance smaller than a single run", () => {
+    const result = researchPolicyInputSchema.safeParse(
+      input({
+        perRunAllowance: { amountMinor: 9000, currency: "AED" },
+        windowAllowance: { amountMinor: 1000, currency: "AED" },
+      }),
+    );
+    // It would read as a budget while admitting nothing.
+    expect(result.success).toBe(false);
+  });
+
+  it("refuses two allowances in different currencies", () => {
+    const result = researchPolicyInputSchema.safeParse(
+      input({
+        perRunAllowance: { amountMinor: 5000, currency: "AED" },
+        windowAllowance: { amountMinor: 20000, currency: "USD" },
+      }),
+    );
+    expect(result.success).toBe(false);
+  });
+
+  it("allows research to be configured while switched off", () => {
+    // Setting a budget and turning it on are different decisions, and someone
+    // should be able to make the first without the second.
+    const result = researchPolicyInputSchema.safeParse(input({ enabled: false }));
+    expect(result.success).toBe(true);
+  });
+});

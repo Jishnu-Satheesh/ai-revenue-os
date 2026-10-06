@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
-import { DataGaps } from "@/components/growth-intelligence/data-gaps";
 import { InsightsList } from "@/components/growth-intelligence/insights-list";
 import { PriorityActions } from "@/components/growth-intelligence/priority-actions";
 import type {
@@ -28,6 +27,7 @@ const base = {
   pinned: false,
   carriedOver: false,
   ageLabel: null,
+  itemFingerprint: null,
 } as const;
 
 function opportunityCard(): OpportunityCard {
@@ -59,6 +59,9 @@ function recommendationCard(): RecommendationCard {
     title: "Extend Friday hours",
     channelId: CHANNEL,
     branchId: null,
+    myFeedback: null,
+    supportedActions: [],
+    limitations: [],
   };
 }
 
@@ -102,26 +105,87 @@ describe("workspace sections", () => {
     expect(screen.getByText("Operator recommendations")).toBeTruthy();
     expect(screen.getByText(/Shift budget/)).toBeTruthy();
     expect(screen.getByText(/Extend Friday hours/)).toBeTruthy();
+    // The full tab renders the same prototype card as the preview; Why this
+    // waits inside the card expander.
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
+  });
+
+  it("matches the prototype preview: recommendations only, no opportunities lane", () => {
+    render(
+      <PriorityActions
+        opportunities={[opportunityCard()]}
+        recommendations={[recommendationCard()]}
+        {...shared}
+        hideHeading
+      />,
+    );
+    expect(screen.queryByText("Platform opportunities")).toBeNull();
+    expect(screen.queryByText(/No open platform opportunities/)).toBeNull();
+    expect(screen.queryByText(/Shift budget/)).toBeNull();
+    expect(screen.getByText(/Extend Friday hours/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Read more" }));
+    expect(screen.getByRole("button", { name: /Why this/ })).toBeTruthy();
+    cleanup();
+    render(<PriorityActions opportunities={[]} recommendations={[]} {...shared} hideHeading />);
+    expect(screen.getByText(/reviewed all current recommendations/)).toBeTruthy();
   });
 
   it("names empty lanes instead of leaving blank gaps", () => {
     render(<PriorityActions opportunities={[]} recommendations={[]} {...shared} />);
     expect(screen.getByText(/No open platform opportunities/)).toBeTruthy();
     expect(screen.getByText(/No operator recommendations/)).toBeTruthy();
-    render(<InsightsList insights={[]} {...shared} />);
+    render(<InsightsList insights={[]} dataGaps={[]} organizationId={ORGANIZATION} timeZone="Asia/Dubai" />);
     expect(screen.getByText(/No insights for this month/)).toBeTruthy();
-    render(<DataGaps dataGaps={[]} {...shared} />);
     expect(screen.getByText(/No missing evidence/)).toBeTruthy();
   });
 
-  it("lists insights and data gaps with their repair paths", () => {
-    render(<InsightsList insights={[insightCard()]} {...shared} />);
+  it("lists insight rows with evidence links and gaps in the improve rail", () => {
+    render(
+      <InsightsList
+        insights={[insightCard()]}
+        dataGaps={[gapCard()]}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+      />,
+    );
     expect(screen.getByText(/Rainy Thursdays/)).toBeTruthy();
-    cleanup();
-    render(<DataGaps dataGaps={[gapCard()]} {...shared} />);
-    expect(screen.getByRole("link", { name: "Repair in channels" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /inspect evidence/i })).toHaveAttribute(
+      "href",
+      `/organizations/${ORGANIZATION}/channels`,
+    );
+    expect(screen.getByText("Improve the next report")).toBeTruthy();
+    expect(screen.getByRole("link", { name: /august delivery costs/i })).toHaveAttribute(
       "href",
       `/organizations/${ORGANIZATION}/channels/${CHANNEL}`,
     );
+    // A single gap needs no overflow drawer.
+    expect(screen.queryByRole("button", { name: /review missing context/i })).toBeNull();
+  });
+
+  it("caps the improve rail at three items with the rest behind Review missing context", () => {
+    const gaps = [0, 1, 2, 3].map((index) => ({
+      ...gapCard(),
+      id: `71000000-0000-4000-8000-00000000007${index}`,
+      title: `Gap ${index}`,
+    }));
+    render(
+      <InsightsList
+        insights={[]}
+        dataGaps={gaps}
+        organizationId={ORGANIZATION}
+        timeZone="Asia/Dubai"
+      />,
+    );
+    expect(screen.getByText("Gap 0")).toBeTruthy();
+    expect(screen.getByText("Gap 2")).toBeTruthy();
+    expect(screen.queryByText("Gap 3")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /review missing context/i }));
+    const drawer = screen.getByRole("dialog", { name: "Improve the next report" });
+    expect(within(drawer).getByText("Gap 3")).toBeTruthy();
+    expect(within(drawer).getByText("Business context")).toBeTruthy();
+    // Footer Close is first; the sheet's corner X comes after the content.
+    fireEvent.click(within(drawer).getAllByRole("button", { name: "Close" })[0]);
   });
 });

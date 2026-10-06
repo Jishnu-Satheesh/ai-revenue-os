@@ -195,7 +195,9 @@ describe("report package repository", () => {
         idempotencyKey: "report-overlap-resolution-test",
         correlationId: "55555555-5555-4555-8555-555555555555",
       }),
-    ).rejects.toThrow("You do not have permission to resolve this overlap. Ask an organization owner or admin to review it.");
+    ).rejects.toThrow(
+      "You do not have permission to resolve this overlap. Ask an organization owner or admin to review it.",
+    );
   });
 
   it("sends one owner decision to the atomic overlap-group RPC", async () => {

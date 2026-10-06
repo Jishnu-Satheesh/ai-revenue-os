@@ -2,7 +2,12 @@
 
 ## Status
 
-Done — shipped 2026-08-26. Walkthrough CTA currently points at a placeholder mailto
+Retired 2026-10-06 — the public site moved to the separate Astro project and `/`
+is app-only (resolver redirect for every visitor). `src/components/marketing/`
+and its token scope are removed. Kept for history; do not reintroduce a
+marketing surface in this repo.
+
+Shipped 2026-08-26. Walkthrough CTA currently points at a placeholder mailto
 (`walkthroughs@airevenueos.com`); replace with the live address in
 `src/components/marketing/content.ts` when confirmed.
 
@@ -114,9 +119,9 @@ None added. A static page has no failure modes worth instrumenting beyond Next.j
 
 ## Copy skeleton
 
-- Eyebrow: `Revenue intelligence for client businesses`
+- Eyebrow: `The Revenue Intelligence`
 - H1: `The operating cockpit for measurable client revenue.`
-- Subhead: `AI Revenue OS builds a living twin of every business you serve, surfaces the safest
+- Subhead: `Lunes AI builds a living twin of every business you serve, surfaces the safest
   high-value action each day, and measures what actually moved gross profit — with a human
   approving every consequential step.`
 - Capabilities: `See every business clearly` / `Act on ranked opportunities` /

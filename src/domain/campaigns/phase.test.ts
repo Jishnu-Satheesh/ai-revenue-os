@@ -1,0 +1,267 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  campaignListPhase,
+  campaignPhase,
+  matchesFilter,
+  needsAttention,
+  phasePosition,
+  type CampaignPhaseInput,
+  type DeliverableTally,
+} from "@/domain/campaigns/phase";
+
+function tally(overrides: Partial<DeliverableTally> = {}): DeliverableTally {
+  return { planned: 3, produced: 3, approved: 3, rejected: 0, ...overrides };
+}
+
+function input(overrides: Partial<CampaignPhaseInput> = {}): CampaignPhaseInput {
+  return {
+    state: "approved",
+    hasVersion: true,
+    approvalStatus: "live",
+    deliverables: tally(),
+    launchAuthorized: false,
+    settledAt: null,
+    ...overrides,
+  };
+}
+
+describe("what the word 'approved' is hiding", () => {
+  it("separates creative not yet made from creative not yet reviewed", () => {
+    // The same database state, two situations an operator must act on
+    // differently.
+    const producing = campaignPhase(input({ deliverables: tally({ produced: 1, approved: 1 }) }));
+    const reviewing = campaignPhase(input({ deliverables: tally({ approved: 1 }) }));
+
+    expect(producing.nextAction).toBeNull();
+    expect(reviewing.nextAction).toMatchObject({ key: "review_outputs" });
+  });
+
+  it("separates reviewed-but-not-authorized from authorized to publish", () => {
+    expect(campaignPhase(input({ launchAuthorized: false })).phase).toBe("review");
+    expect(campaignPhase(input({ launchAuthorized: true })).phase).toBe("scheduled_live");
+  });
+
+  it("asks for the publication approval only once every output is reviewed", () => {
+    const outcome = campaignPhase(input({ deliverables: tally({ approved: 2 }) }));
+
+    expect(outcome.nextAction).toMatchObject({ key: "review_outputs" });
+  });
+});
+
+describe("an approval that authorizes nothing", () => {
+  it.each(["none", "expired", "superseded", "digest_mismatch", "revoked"] as const)(
+    "treats %s as awaiting review, because none of them authorize preparation",
+    (approvalStatus) => {
+      expect(campaignPhase(input({ approvalStatus })).phase).toBe("proposal");
+    },
+  );
+
+  it("says why the approval is gone rather than only that it is", () => {
+    const outcome = campaignPhase(input({ approvalStatus: "revoked" }));
+
+    expect(outcome.facts).toContainEqual({ label: "Approval", value: "Revoked" });
+  });
+
+  it("does not confuse never-approved with no-longer-approved", () => {
+    expect(campaignPhase(input({ approvalStatus: "none" })).summary).not.toEqual(
+      campaignPhase(input({ approvalStatus: "expired" })).summary,
+    );
+  });
+});
+
+describe("a signal that could not be read", () => {
+  it("reports unreadable deliverables as undetermined, never as zero", () => {
+    const outcome = campaignPhase(input({ deliverables: null }));
+
+    expect(outcome.undetermined).toContain("deliverables");
+    expect(outcome.facts).toContainEqual({
+      label: "Finished outputs",
+      value: null,
+      undetermined: true,
+    });
+  });
+
+  it("never offers a next action built on a count nobody could read", () => {
+    // Offering "review the outputs" when the outputs could not be counted would
+    // send somebody to a screen that may be empty for a different reason.
+    expect(campaignPhase(input({ deliverables: null })).nextAction).toBeNull();
+  });
+
+  it("withholds the publication action when launch authority is unknown", () => {
+    const outcome = campaignPhase(input({ launchAuthorized: null }));
+
+    expect(outcome.undetermined).toContain("launch");
+    expect(outcome.nextAction).toBeNull();
+  });
+
+  it("distinguishes 'not authorized' from 'could not tell'", () => {
+    const unknown = campaignPhase(input({ launchAuthorized: null }));
+    const refused = campaignPhase(input({ launchAuthorized: false }));
+
+    expect(unknown.facts).toContainEqual({
+      label: "Publication",
+      value: null,
+      undetermined: true,
+    });
+    expect(refused.facts).toContainEqual({ label: "Publication", value: "Not authorized" });
+  });
+});
+
+describe("history outliving authority", () => {
+  it("keeps a settled campaign settled after its approval lapses", () => {
+    // C09: rollback stops new admissions while leaving history readable. A
+    // campaign that ran and settled does not become un-run when its approval
+    // expires.
+    const outcome = campaignPhase(
+      input({ settledAt: "2026-09-01T00:00:00.000Z", approvalStatus: "expired" }),
+    );
+
+    expect(outcome.phase).toBe("results");
+  });
+
+  it("reports a settled campaign as having nothing left to do", () => {
+    expect(
+      campaignPhase(input({ settledAt: "2026-09-01T00:00:00.000Z" })).nextAction,
+    ).toBeNull();
+  });
+});
+
+describe("a campaign that is not going anywhere", () => {
+  it.each(["cancelled", "failed", "blocked"] as const)("reports %s as stopped", (state) => {
+    expect(campaignPhase(input({ state })).phase).toBe("stopped");
+  });
+
+  it("invents no recovery step, because the right one depends on why it stopped", () => {
+    expect(campaignPhase(input({ state: "failed" })).nextAction).toBeNull();
+  });
+
+  it("still reports a stopped campaign's settled result", () => {
+    const outcome = campaignPhase(
+      input({ state: "cancelled", settledAt: "2026-09-01T00:00:00.000Z" }),
+    );
+
+    expect(outcome.phase).toBe("results");
+  });
+});
+
+describe("a campaign with no proposal", () => {
+  it("asks for generation rather than for a review of nothing", () => {
+    const outcome = campaignPhase(input({ hasVersion: false, approvalStatus: "none" }));
+
+    expect(outcome.phase).toBe("proposal");
+    expect(outcome.nextAction).toMatchObject({ key: "generate" });
+  });
+});
+
+describe("who the next action belongs to", () => {
+  it("asks for publish rights to authorize publication, not merely approve rights", () => {
+    expect(campaignPhase(input({ launchAuthorized: false })).nextAction).toMatchObject({
+      permission: "campaign.publish",
+    });
+  });
+
+  it("asks only for approve rights to review an output", () => {
+    expect(campaignPhase(input({ deliverables: tally({ approved: 1 }) })).nextAction).toMatchObject(
+      { permission: "campaign.approve" },
+    );
+  });
+});
+
+describe("placing a phase on the strip", () => {
+  it("orders the working phases", () => {
+    expect(phasePosition("proposal")).toBe(0);
+    expect(phasePosition("results")).toBe(4);
+  });
+
+  it("gives a stopped campaign no position, rather than putting it back at the start", () => {
+    expect(phasePosition("stopped")).toBeNull();
+  });
+});
+
+describe("what a list may claim", () => {
+  function listInput(overrides: Record<string, unknown> = {}) {
+    return {
+      state: "approved" as const,
+      hasVersion: true,
+      approvalStatus: "live" as const,
+      settledAt: null,
+      ...overrides,
+    };
+  }
+
+  it("never marks a card incomplete for records the list did not ask for", () => {
+    // Deciding not to read is not the same as reading and failing. Marking
+    // every card "incomplete" would teach operators to ignore a warning that
+    // means something real on the detail page.
+    expect(campaignListPhase(listInput()).undetermined).toEqual([]);
+  });
+
+  it("stops at 'being prepared' rather than claiming how far along it is", () => {
+    const verdict = campaignListPhase(listInput());
+
+    expect(verdict.phase).toBe("creating");
+    expect(verdict.nextAction).toBeNull();
+  });
+
+  it("asks for review when nothing authorizes the version", () => {
+    expect(campaignListPhase(listInput({ approvalStatus: "none" })).nextAction).toMatchObject({
+      key: "approve_version",
+    });
+  });
+
+  it("says why authority is gone rather than only that review is needed", () => {
+    expect(campaignListPhase(listInput({ approvalStatus: "expired" })).summary).toMatch(/expired/i);
+  });
+
+  it("keeps a settled campaign settled regardless of its approval", () => {
+    expect(
+      campaignListPhase(listInput({ settledAt: "2026-09-01T00:00:00.000Z", approvalStatus: "expired" }))
+        .phase,
+    ).toBe("results");
+  });
+});
+
+describe("counting what is actually waiting on somebody", () => {
+  it("counts a campaign that needs a review", () => {
+    expect(needsAttention(campaignPhase(input({ deliverables: tally({ approved: 1 }) })))).toBe(
+      true,
+    );
+  });
+
+  it("does not count creative that is still being produced", () => {
+    // Nobody is being waited on; the renderer is still working.
+    expect(
+      needsAttention(campaignPhase(input({ deliverables: tally({ produced: 1, approved: 1 }) }))),
+    ).toBe(false);
+  });
+
+  it("does not count a settled campaign", () => {
+    expect(needsAttention(campaignPhase(input({ settledAt: "2026-09-01T00:00:00.000Z" })))).toBe(
+      false,
+    );
+  });
+});
+
+describe("the portfolio's status groupings", () => {
+  it("groups both gates under 'needs review', because both wait on a person", () => {
+    expect(matchesFilter("proposal", "needs_review")).toBe(true);
+    expect(matchesFilter("review", "needs_review")).toBe(true);
+  });
+
+  it("keeps creative-in-progress out of 'needs review'", () => {
+    expect(matchesFilter("creating", "needs_review")).toBe(false);
+    expect(matchesFilter("creating", "preparing")).toBe(true);
+  });
+
+  it("treats 'completed' as a settled outcome, not an archive somebody chose", () => {
+    // Introducing an archive lifecycle through a visual filter is exactly what
+    // the visual contract forbids.
+    expect(matchesFilter("results", "completed")).toBe(true);
+    expect(matchesFilter("stopped", "completed")).toBe(false);
+  });
+
+  it("shows everything under 'all', including stopped work", () => {
+    expect(matchesFilter("stopped", "all")).toBe(true);
+  });
+});

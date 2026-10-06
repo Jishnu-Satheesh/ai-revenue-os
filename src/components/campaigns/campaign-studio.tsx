@@ -14,18 +14,8 @@ import {
   Wand2,
 } from "lucide-react";
 
-import { attestAndApprove, decideLearningProposal } from "@/components/campaigns/campaign-actions";
-import {
-  AllocationLedger,
-  type AllocationLedgerEvent,
-} from "@/components/campaigns/allocation-ledger";
+import { attestAndApprove } from "@/components/campaigns/campaign-actions";
 import { VariantGrid, type VariantCard } from "@/components/campaigns/variant-grid";
-import { OutcomeProof, type OutcomeProofData } from "@/components/campaigns/outcome-proof";
-import {
-  LearningReview,
-  type LearningDecision,
-  type LearningProposalData,
-} from "@/components/campaigns/learning-review";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -369,6 +359,28 @@ function VersionChangeSummary({
   );
 }
 
+/**
+ * Why an approval was revoked, in the operator's terms.
+ *
+ * `superseded_by_new_version` is the ordinary path, not an exception: creating
+ * a version revokes the approval in the same statement, so anyone who edits a
+ * plate or revises copy arrives here. A bare "this approval was revoked" reads
+ * as something done to them by someone else, when the cause is usually their
+ * own last action.
+ */
+function revokedDetail(
+  reason: Extract<StudioApproval, { status: "revoked" }>["revokedReason"],
+): string {
+  switch (reason) {
+    case "superseded_by_new_version":
+      return "A newer version of this campaign replaced the one that was approved, so the approval retired with it. Review the current version and approve again.";
+    case "capability_lost":
+      return "A provider capability this campaign depends on was lost, so the approval was revoked.";
+    default:
+      return "This approval was revoked by an operator and no longer authorizes execution.";
+  }
+}
+
 function approvalCopy(approval: StudioApproval): { label: string; detail: string } {
   switch (approval.status) {
     case "live":
@@ -395,10 +407,7 @@ function approvalCopy(approval: StudioApproval): { label: string; detail: string
     case "revoked":
       return {
         label: "Approval revoked",
-        detail:
-          approval.revokedReason === "capability_lost"
-            ? "A provider capability this campaign depends on was lost, so the approval was revoked."
-            : "This approval was revoked and no longer authorizes execution.",
+        detail: revokedDetail(approval.revokedReason),
       };
   }
 }
@@ -645,11 +654,6 @@ export function CampaignStudio({
   timeZone,
   variants,
   variantsRemaining,
-  allocationEvents = [],
-  outcome = null,
-  learningProposal = null,
-  canDecideLearning = false,
-  currency = null,
 }: Readonly<{
   view: StudioView;
   organizationId: string;
@@ -658,26 +662,6 @@ export function CampaignStudio({
   /** Creative produced under this approval. Empty until any has been. */
   variants?: readonly VariantCard[];
   variantsRemaining?: Readonly<Record<string, number>>;
-  /**
-   * The fast loop's decisions for this campaign, newest first. Empty until the
-   * loop has run and recorded something worth an operator's attention.
-   */
-  allocationEvents?: readonly AllocationLedgerEvent[];
-  /**
-   * The settled result and its proof, once the evidence loop has settled the
-   * campaign. Null while the outcome window and settlement delay have not yet
-   * passed.
-   */
-  outcome?: OutcomeProofData | null;
-  /**
-   * The learning proposal the evidence loop drafted from the settled outcome,
-   * once one exists. Null until the loop has proposed and none has been decided.
-   */
-  learningProposal?: LearningProposalData | null;
-  /** Whether the viewer may record a decision; viewers may read but not decide. */
-  canDecideLearning?: boolean;
-  /** The organization's currency; money values in both panels render in it. */
-  currency?: string | null;
 }>) {
   const router = useRouter();
   const evidenceLed = view.directions.find((direction) => direction.kind === "evidence_led");
@@ -725,24 +709,6 @@ export function CampaignStudio({
 
     toast.success("Approved", { description: "This exact version is now authorized to execute." });
     router.refresh();
-  }
-
-  /**
-   * Records the operator's decision on a learning proposal and refreshes so the
-   * closed proposal renders as history. The decision route only records a
-   * human's choice; it promotes nothing.
-   */
-  async function decideLearning(decision: LearningDecision) {
-    if (!learningProposal) return { ok: false as const, message: "No proposal to decide." };
-    const result = await decideLearningProposal({
-      organizationId,
-      campaignId: view.campaignId,
-      proposalId: learningProposal.id,
-      decision,
-    });
-    if (!result.ok) return { ok: false as const, message: result.message };
-    router.refresh();
-    return { ok: true as const };
   }
 
   return (
@@ -899,6 +865,29 @@ export function CampaignStudio({
 
           <VersionChangeSummary summary={view.changeSummary} nextVersion={view.versionNumber + 1} />
 
+          <section className="flex flex-col gap-2 rounded-lg border p-3">
+            <RailHeading>Supplied context</RailHeading>
+            <p className="text-xs text-muted-foreground">
+              Built from the pinned source snapshot and the preregistered measurement plan. Shared
+              memory supplied text-only planning context where pinned; only its digest travels with
+              this version.
+            </p>
+            <div className="flex flex-col gap-1 text-xs">
+              <span>
+                <span className="text-muted-foreground">Metric: </span>
+                <span className="font-medium">{view.measurement.primaryMetricKey}</span>
+              </span>
+              <span>
+                <span className="text-muted-foreground">Baseline: </span>
+                <span className="font-medium">{view.measurement.baselineSource}</span>
+              </span>
+            </div>
+            <p className="text-[10px] leading-tight text-muted-foreground">
+              Restricted roots are withheld here. Cited context appears by digest and summary only;
+              assertions, spend, credentials, and asset bytes never leave their own stores.
+            </p>
+          </section>
+
           {view.versions.length < 2 ? null : (
             <section className="flex flex-col gap-2 rounded-lg border p-3">
               <RailHeading>Version history</RailHeading>
@@ -1007,49 +996,8 @@ export function CampaignStudio({
             changes the offer, the claims, the audience, the placement, the schedule or the spend.
           </p>
           <VariantGrid variants={variants ?? []} remaining={variantsRemaining ?? {}} />
-
-          {allocationEvents.length > 0 ? (
-            <div className="mt-4 flex flex-col gap-2">
-              <h3 className="text-base font-semibold">Allocation decisions</h3>
-              <p className="text-sm text-muted-foreground">
-                Every decision the loop made, and why — including the decisions not to act. Each one
-                names the rule, the values it compared, and when.
-              </p>
-              <AllocationLedger events={allocationEvents} timeZone={timeZone} currency={currency} />
-            </div>
-          ) : null}
         </section>
       ) : null}
-
-      {/* The settled result is not gated on a live approval: a campaign that ran
-          and settled keeps its proof after the approval has lapsed. */}
-      {outcome !== null ? (
-        <section className="flex flex-col gap-3">
-          <h2 className="text-lg font-semibold">Result</h2>
-          <p className="text-sm text-muted-foreground">
-            The settled verdict and the proof behind it: what was hypothesized, what actually
-            delivered, what it cost, and why the verdict carries its label.
-          </p>
-          <OutcomeProof outcome={outcome} timeZone={timeZone} />
-        </section>
-      ) : null}
-
-      {/* A learning proposal only exists after settlement, and only until an
-          operator decides it. It is the loop's last arrow, and the operator's
-          decision is the last word on whether a lesson leaves its campaign. */}
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-semibold">Learning</h2>
-        <p className="text-sm text-muted-foreground">
-          A lesson the evidence loop drafted from this campaign&apos;s own settled outcome. It stays
-          attached to this campaign until you decide otherwise.
-        </p>
-        <LearningReview
-          proposal={learningProposal}
-          canDecide={canDecideLearning}
-          timeZone={timeZone}
-          onDecide={decideLearning}
-        />
-      </section>
 
       <p className="sr-only">Reviewing campaign artwork for {organizationName}.</p>
     </div>

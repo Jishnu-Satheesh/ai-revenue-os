@@ -1,14 +1,51 @@
 import { describe, expect, it } from "vitest";
 
+import type { CampaignProposalDocument } from "@/domain/campaigns/proposal";
+import type { CampaignProposalCardView } from "@/modules/campaigns/application/proposal-read-model";
 import type { OpportunityFeedItem } from "@/modules/decisions/application/ports";
 import {
   buildGrowthIntelligenceView,
+  filterYourActionEvents,
+  parseYourActionFilter,
   type ChannelRecommendationRow,
   type GrowthIntelligenceViewInput,
   type SynthesizedItemRow,
 } from "@/modules/growth-intelligence/application/read-model";
 
 const organizationId = "10000000-0000-4000-8000-000000000001";
+
+const PROPOSAL_DOCUMENT: CampaignProposalDocument = {
+  schemaVersion: 1,
+  title: "Win back weekday lunch",
+  businessProblem: "Weekday lunch covers are down against last quarter.",
+  objective: "acquisition",
+  audience: "People working nearby who do not order lunch here.",
+  offer: { kind: "no_offer" },
+  channels: [{ channelKey: "instagram", delivery: "organic" }],
+  deliverables: [{ format: "feed", language: "en", count: 3 }],
+  timing: { startAt: "2026-09-20T00:00:00.000Z", endAt: null, timezone: "Asia/Dubai" },
+  proposedMediaBudget: null,
+  generationCostCeiling: { amountMinor: 8000, currency: "AED" },
+  successPlan: {
+    primaryMetricKey: "weekday_lunch_covers",
+    baselineSource: "point_of_sale",
+    baselineRevision: 4,
+    baselineFrom: "2026-06-01T00:00:00.000Z",
+    baselineTo: "2026-08-31T00:00:00.000Z",
+    observationWindowDays: 28,
+    reportingDelayDays: 2,
+    settlementDelayDays: 7,
+    measurementMethod: "pre_post_with_baseline",
+    target: null,
+    missingData: [],
+  },
+  pausePolicyRef: "default_pause_policy",
+  evidence: [],
+  memoryContextManifestId: null,
+  assumptions: ["Lunch capacity is not the constraint."],
+  limitations: [],
+  readiness: { canPrepare: true, canLaunch: false, blockers: [] },
+};
 const actorId = "20000000-0000-4000-8000-000000000002";
 
 function opportunity(overrides: Partial<OpportunityFeedItem> = {}): OpportunityFeedItem {
@@ -50,6 +87,7 @@ function recommendation(
     generatedAt: "2026-09-01T08:00:00.000Z",
     decision: null,
     pinned: false,
+    myFeedback: null,
     preferenceSnoozedUntil: null,
     ...overrides,
   };
@@ -60,8 +98,8 @@ function item(overrides: Partial<SynthesizedItemRow> = {}): SynthesizedItemRow {
     id: "70000000-0000-4000-8000-000000000007",
     kind: "insight",
     narrative: "Delivery orders spike on rainy Thursdays.",
-    fingerprint:
-      "aa00000000000000000000000000000000000000000000000000000000000001",
+    fingerprint: "aa00000000000000000000000000000000000000000000000000000000000001",
+    synthesisRunId: "71000000-0000-4000-8000-000000000071",
     supportGrade: "corroborated",
     freshness: "current",
     urgency: "medium",
@@ -77,6 +115,7 @@ function item(overrides: Partial<SynthesizedItemRow> = {}): SynthesizedItemRow {
     snoozedUntil: null,
     pinned: false,
     ...overrides,
+    myFeedback: overrides.myFeedback ?? null,
   };
 }
 
@@ -109,11 +148,49 @@ describe("buildGrowthIntelligenceView", () => {
     });
   });
 
+  it("names timeline rows so previous actions explain what the member acted on", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            decision: {
+              decision: "planned",
+              snoozedUntil: null,
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
+          }),
+        ],
+      }),
+    );
+    expect(view.timeline.find((event) => event.type === "planned")).toMatchObject({
+      title: "Extend Friday hours",
+    });
+  });
+
   it("returns the stored opportunity action key rather than a default", () => {
     const view = buildGrowthIntelligenceView(
       input({ opportunities: [opportunity({ actionKey: "campaign.meta_bundle_v1" })] }),
     );
     expect(view.priorityActions.opportunities[0]!.actionKey).toBe("campaign.meta_bundle_v1");
+  });
+
+  it("carries stored actions, limitations, and citations to the recommendation card", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            supportedActions: ["Check the cancellation reasons before changing availability."],
+            limitations: ["Twenty of fifty-nine days carried evidence."],
+            citationFindingIds: ["finding-1", "finding-2"],
+          }),
+        ],
+      }),
+    );
+    expect(view.priorityActions.recommendations[0]).toMatchObject({
+      supportedActions: ["Check the cancellation reasons before changing availability."],
+      limitations: ["Twenty of fifty-nine days carried evidence."],
+      citationFindingIds: ["finding-1", "finding-2"],
+    });
   });
 
   it("carries the draft request state and links the created draft", () => {
@@ -253,8 +330,7 @@ describe("buildGrowthIntelligenceView", () => {
             id: "70000000-0000-4000-8000-000000000008",
             kind: "data_gap",
             narrative: "No delivery data for August.",
-            fingerprint:
-              "bb00000000000000000000000000000000000000000000000000000000000002",
+            fingerprint: "bb00000000000000000000000000000000000000000000000000000000000002",
             missingInput: "delivery_orders",
           }),
         ],
@@ -286,9 +362,7 @@ describe("buildGrowthIntelligenceView", () => {
     expect(view.priorityActions.recommendations).toHaveLength(0);
     expect(view.timeline.map((event) => event.type)).toContain("planned");
     expect(
-      view.insights.some(
-        (card) => card.source.id === "60000000-0000-4000-8000-000000000006",
-      ),
+      view.insights.some((card) => card.source.id === "60000000-0000-4000-8000-000000000006"),
     ).toBe(false);
   });
 
@@ -331,5 +405,396 @@ describe("buildGrowthIntelligenceView", () => {
     expect(view.priorityActions.opportunities).toHaveLength(0);
     expect(view.priorityActions.recommendations).toHaveLength(0);
     expect(view.dataGaps).toHaveLength(0);
+  });
+});
+
+describe("research provenance", () => {
+  const branchId = "20000000-0000-4000-8000-000000000002";
+  const pipelineId = "30000000-0000-4000-8000-000000000003";
+  const runId = "71000000-0000-4000-8000-000000000071";
+  const otherRunId = "71000000-0000-4000-8000-000000000072";
+  const claimId = "80000000-0000-4000-8000-000000000008";
+  const provenance = {
+    [runId]: {
+      pipelineId,
+      branchId,
+      stage: "ready" as const,
+      statusPath: `/api/organizations/${organizationId}/market-profile/research/${pipelineId}`,
+      supportingClaimIds: [claimId],
+    },
+  };
+
+  function recommendationItem(id: string, run: string) {
+    return item({
+      id,
+      kind: "recommendation",
+      synthesisRunId: run,
+      fingerprint: `bb${id.replace(/-/g, "").slice(0, 62)}`,
+      narrative: `Research advice ${id.slice(-4)}`,
+      generatedAt: "2026-09-02T08:00:00.000Z",
+    });
+  }
+
+  it("attaches pipeline provenance to market-research recommendations without moving them", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        items: [recommendationItem("70000000-0000-4000-8000-000000000007", runId)],
+        researchProvenance: provenance,
+      }),
+    );
+
+    const cards = view.priorityActions.recommendations;
+    // Deterministic order is preserved: the channel lane still leads, the
+    // research card follows exactly where an unattributed card would sit.
+    expect(cards.map((card) => card.id)).toEqual([
+      "60000000-0000-4000-8000-000000000006",
+      "70000000-0000-4000-8000-000000000007",
+    ]);
+    expect(cards[0]!.researchProvenance).toBeNull();
+    expect(cards[1]!.researchProvenance).toEqual(provenance[runId]);
+  });
+
+  it("leaves unattributed recommendations without provenance rather than guessing", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        items: [recommendationItem("70000000-0000-4000-8000-000000000007", otherRunId)],
+        researchProvenance: provenance,
+      }),
+    );
+
+    expect(view.priorityActions.recommendations[1]!.researchProvenance).toBeNull();
+  });
+
+  it("keeps the overview preview order identical with and without provenance", () => {
+    const items = [
+      recommendationItem("70000000-0000-4000-8000-000000000007", runId),
+      recommendationItem("70000000-0000-4000-8000-000000000009", otherRunId),
+    ];
+    const plain = buildGrowthIntelligenceView(input({ items }));
+    const attributed = buildGrowthIntelligenceView(
+      input({ items, researchProvenance: provenance }),
+    );
+
+    expect(attributed.priorityActions.recommendations.map((card) => card.id)).toEqual(
+      plain.priorityActions.recommendations.map((card) => card.id),
+    );
+    expect(attributed.priorityActions.recommendations.slice(0, 3)).toHaveLength(3);
+  });
+
+  it("merges named research start, terminal and retry events without duplicates", () => {
+    const activity = [
+      {
+        kind: "started" as const,
+        pipelineId,
+        branchId,
+        scopeLabel: "Marina",
+        title: "Market research started — Marina",
+        occurredAt: "2026-09-01T08:00:00.000Z",
+        stage: null,
+      },
+      {
+        kind: "finished" as const,
+        pipelineId,
+        branchId,
+        scopeLabel: "Marina",
+        title: "Market research Ready — Marina",
+        occurredAt: "2026-09-02T09:00:00.000Z",
+        stage: "ready" as const,
+      },
+      {
+        kind: "retried" as const,
+        pipelineId,
+        branchId,
+        scopeLabel: "Marina",
+        title: "Market analysis retried — Marina",
+        occurredAt: "2026-09-03T09:00:00.000Z",
+        stage: "preparing_insights" as const,
+      },
+      // A redelivered start for the same instant collapses to one event.
+      {
+        kind: "started" as const,
+        pipelineId,
+        branchId,
+        scopeLabel: "Marina",
+        title: "Market research started — Marina",
+        occurredAt: "2026-09-01T08:00:00.000Z",
+        stage: null,
+      },
+    ];
+    const view = buildGrowthIntelligenceView(input({ researchActivity: activity }));
+
+    const researchEvents = view.timeline.filter(
+      (event) => event.source.kind === "research_pipeline",
+    );
+    expect(researchEvents.map((event) => event.type)).toEqual([
+      "research-retried",
+      "research-finished",
+      "research-started",
+    ]);
+    expect(researchEvents[0]!.title).toMatch(/retr/i);
+  });
+
+  it("renders no research timeline rows when no activity arrives", () => {
+    const view = buildGrowthIntelligenceView(input({}));
+
+    expect(view.timeline.filter((event) => event.source.kind === "research_pipeline")).toHaveLength(
+      0,
+    );
+  });
+});
+
+describe("Your actions filters", () => {
+  it("falls back to All for unknown decision values", () => {
+    expect(parseYourActionFilter(null)).toBe("all");
+    expect(parseYourActionFilter("research-started")).toBe("all");
+    expect(parseYourActionFilter("planned")).toBe("planned");
+  });
+
+  it("keeps research and draft rows under All only", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            decision: {
+              decision: "planned",
+              snoozedUntil: null,
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
+          }),
+        ],
+        researchActivity: [
+          {
+            kind: "started" as const,
+            pipelineId: "30000000-0000-4000-8000-000000000003",
+            branchId: "20000000-0000-4000-8000-000000000002",
+            scopeLabel: "Marina",
+            title: "Market research started — Marina",
+            occurredAt: "2026-09-01T08:00:00.000Z",
+            stage: null,
+          },
+        ],
+      }),
+    );
+    const acted = view.timeline.filter((event) => event.type !== "generated");
+    expect(filterYourActionEvents(acted, "all").length).toBe(acted.length);
+    expect(
+      filterYourActionEvents(acted, "planned").every((event) => event.type === "planned"),
+    ).toBe(true);
+    expect(filterYourActionEvents(acted, "planned").length).toBeGreaterThan(0);
+    expect(filterYourActionEvents(acted, "snoozed")).toHaveLength(0);
+  });
+
+  it("isolates dismissed rows under their own filter", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            decision: {
+              decision: "dismissed",
+              snoozedUntil: null,
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
+          }),
+        ],
+      }),
+    );
+    const acted = view.timeline.filter((event) => event.type !== "generated");
+    expect(filterYourActionEvents(acted, "dismissed").map((event) => event.type)).toEqual([
+      "dismissed",
+    ]);
+    expect(filterYourActionEvents(acted, "planned")).toHaveLength(0);
+  });
+
+  it("keeps resolved rows under All only, with no dedicated pill", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        items: [
+          item({
+            decision: "resolved",
+            decidedAt: "2026-09-03T08:00:00.000Z",
+          }),
+        ],
+      }),
+    );
+    const acted = view.timeline.filter((event) => event.type !== "generated");
+    expect(acted.map((event) => event.type)).toContain("resolved");
+    expect(filterYourActionEvents(acted, "all").map((event) => event.type)).toContain("resolved");
+    for (const filter of ["planned", "acknowledged", "snoozed", "dismissed"] as const) {
+      expect(filterYourActionEvents(acted, filter).some((event) => event.type === "resolved")).toBe(
+        false,
+      );
+    }
+  });
+
+  it("carries channel scope and the snooze horizon on the timeline row", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        recommendations: [
+          recommendation({
+            channelId: "61000000-0000-4000-8000-000000000061",
+            branchId: "62000000-0000-4000-8000-000000000062",
+            decision: {
+              decision: "snoozed",
+              snoozedUntil: "2026-09-10T00:00:00.000Z",
+              createdAt: "2026-09-03T08:00:00.000Z",
+            },
+          }),
+        ],
+      }),
+    );
+    const snoozed = view.timeline.find((event) => event.type === "snoozed");
+    expect(snoozed).toMatchObject({
+      channelId: "61000000-0000-4000-8000-000000000061",
+      branchId: "62000000-0000-4000-8000-000000000062",
+      snoozedUntil: "2026-09-10T00:00:00.000Z",
+    });
+  });
+});
+
+describe("campaign proposals in the composed view", () => {
+  const PROPOSAL = "40000000-0000-4000-8000-000000000004";
+
+  function proposalCard(
+    overrides: Partial<CampaignProposalCardView> = {},
+  ): CampaignProposalCardView {
+    return {
+      proposalId: PROPOSAL,
+      state: "ready_for_review",
+      sourceKind: "business_signal",
+      createdAt: "2026-09-02T08:00:00.000Z",
+      updatedAt: "2026-09-04T08:00:00.000Z",
+      snoozedUntil: null,
+      linkedCampaignId: null,
+      content: { kind: "awaiting_research" },
+      decidable: false,
+      decisions: [],
+      lastDecision: null,
+      ...overrides,
+    };
+  }
+
+  function decisionView(
+    overrides: Partial<CampaignProposalCardView["decisions"][number]> = {},
+  ): CampaignProposalCardView["decisions"][number] {
+    return {
+      id: "50000000-0000-4000-8000-000000000005",
+      decision: "approved_for_preparation",
+      reason: null,
+      instructions: null,
+      snoozedUntil: null,
+      decidedAt: "2026-09-03T09:00:00.000Z",
+      appliesToCurrentContent: true,
+      ...overrides,
+    };
+  }
+
+  it("keeps proposals in their own lane, out of the recommendation counts", () => {
+    const view = buildGrowthIntelligenceView(input({ campaignProposals: [proposalCard()] }));
+
+    expect(view.campaignProposals).toHaveLength(1);
+    // One number must not mean two different kinds of act.
+    expect(view.counts.recommendations).toBe(1);
+    expect(view.counts).not.toHaveProperty("campaignProposals");
+  });
+
+  it("drops a settled proposal from the lane but keeps its decision in the history", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        campaignProposals: [
+          proposalCard({
+            state: "dismissed",
+            decisions: [decisionView({ decision: "dismissed", reason: "Not this quarter." })],
+          }),
+        ],
+      }),
+    );
+
+    // What a person turned down is one of the most useful things in a record
+    // of what they decided.
+    expect(view.campaignProposals).toEqual([]);
+    const dismissal = view.timeline.find(
+      (event) => event.source.kind === "campaign_proposal" && event.type === "dismissed",
+    );
+    expect(dismissal?.reason).toBe("Not this quarter.");
+  });
+
+  it("names an approval as preparation, never as a plan", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        campaignProposals: [
+          proposalCard({ state: "approved_for_preparation", decisions: [decisionView()] }),
+        ],
+      }),
+    );
+
+    const approval = view.timeline.find((event) => event.source.kind === "campaign_proposal");
+    expect(approval?.type).toBe("proposal-approved");
+    // "planned" already means an operator's intention to act on advice. An
+    // approval here authorized preparing creative; the two are not the same.
+    expect(view.timeline.some((event) => event.type === "planned" && event.source.kind === "campaign_proposal")).toBe(false);
+  });
+
+  it("carries a change request's instructions as the row's reason", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        campaignProposals: [
+          proposalCard({
+            state: "changes_requested",
+            decisions: [
+              decisionView({
+                decision: "changes_requested",
+                instructions: "Name the offer.",
+                reason: null,
+              }),
+            ],
+          }),
+        ],
+      }),
+    );
+
+    const changes = view.timeline.find((event) => event.type === "changes-requested");
+    expect(changes?.reason).toBe("Name the offer.");
+  });
+
+  it("records when a proposal became readable, separately from when it was opened", () => {
+    const view = buildGrowthIntelligenceView(
+      input({
+        campaignProposals: [
+          proposalCard({
+            content: {
+              kind: "document",
+              versionId: "60000000-0000-4000-8000-000000000006",
+              versionNumber: 1,
+              digest: "a".repeat(64),
+              writtenAt: "2026-09-03T07:00:00.000Z",
+              document: PROPOSAL_DOCUMENT,
+            },
+          }),
+        ],
+      }),
+    );
+
+    const events = view.timeline.filter((event) => event.source.kind === "campaign_proposal");
+    expect(events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["generated", "proposal-ready"]),
+    );
+    expect(events.find((event) => event.type === "proposal-ready")?.occurredAt).toBe(
+      "2026-09-03T07:00:00.000Z",
+    );
+  });
+
+  it("reads no proposals at all when the caller composed none", () => {
+    const view = buildGrowthIntelligenceView(input());
+
+    expect(view.campaignProposals).toEqual([]);
+    expect(view.timeline.some((event) => event.source.kind === "campaign_proposal")).toBe(false);
+  });
+
+  it("leaves proposals out of a view that did not ask for them", () => {
+    const view = buildGrowthIntelligenceView(
+      input({ campaignProposals: [proposalCard()], sections: ["recommendations"] }),
+    );
+
+    expect(view.campaignProposals).toEqual([]);
   });
 });

@@ -8,7 +8,9 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 import { RecommendationControls } from "@/components/analysis/recommendation-controls";
 import type { WorkspaceRecommendationView } from "@/modules/analysis/application/read-model";
 
-const fetchMock = vi.fn(async () => new Response(JSON.stringify({ recommendationId: "rec-1" }), { status: 200 }));
+const fetchMock = vi.fn(
+  async () => new Response(JSON.stringify({ recommendationId: "rec-1" }), { status: 200 }),
+);
 
 function recommendation(
   overrides: Partial<WorkspaceRecommendationView> = {},
@@ -62,7 +64,9 @@ describe("RecommendationControls", () => {
     render(<RecommendationControls organizationId="org-1" recommendation={recommendation()} />);
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
     const reason = screen.getByLabelText("Dismissal reason") as HTMLTextAreaElement;
-    const submit = screen.getByRole("dialog", {}).querySelector("button[type='button']:last-child")!;
+    const submit = screen
+      .getByRole("dialog", {})
+      .querySelector("button[type='button']:last-child")!;
     fireEvent.change(reason, { target: { value: "no" } });
     expect((submit as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(reason, { target: { value: "not our situation" } });
@@ -116,9 +120,9 @@ describe("RecommendationControls", () => {
     expect(screen.getByRole("button", { name: /Helpful/ }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(
-      screen.getByRole("button", { name: /Not helpful/ }).getAttribute("aria-pressed"),
-    ).toBe("false");
+    expect(screen.getByRole("button", { name: /Not helpful/ }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
   });
 
   it("posts the vote to the feedback route", async () => {
@@ -131,9 +135,7 @@ describe("RecommendationControls", () => {
   });
 
   it("keeps the dialog open and the words intact when the server refuses the dismissal", async () => {
-    fetchMock.mockResolvedValueOnce(
-      new Response(JSON.stringify({ error: "no" }), { status: 403 }),
-    );
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ error: "no" }), { status: 403 }));
     render(<RecommendationControls organizationId="org-1" recommendation={recommendation()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
@@ -143,10 +145,9 @@ describe("RecommendationControls", () => {
     const submit = within(dialog).getByRole("button", { name: "Dismiss" });
     fireEvent.click(submit);
 
-    await waitFor(
-      () => expect(screen.getByRole("alert").textContent).toContain("cannot record"),
-      { timeout: 4_000 },
-    );
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("cannot record"), {
+      timeout: 4_000,
+    });
     // The refusal keeps both the words and their window.
     expect((screen.getByLabelText("Dismissal reason") as HTMLTextAreaElement).value).toBe(
       "not our situation",

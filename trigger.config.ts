@@ -34,7 +34,19 @@ export default defineConfig({
     // parses binary tables, and opens the vendored font files from disk by path
     // at runtime. Bundling it risks the same shape of failure as the two above:
     // a build that succeeds and a worker that dies on the first render.
-    external: ["sharp", "@napi-rs/canvas", "fontkit"],
+    //
+    // `pdfjs-dist` is the same trap wearing a third face, and it caught us: the
+    // first PDF ever uploaded to a deployed worker failed with
+    // `UNREADABLE_WORKBOOK`, while the same file read perfectly in the test
+    // suite. In Node, pdf.js disables the real worker and defaults
+    // `GlobalWorkerOptions.workerSrc` to the *relative* specifier
+    // `"./pdf.worker.mjs"`, which it then loads with a fully dynamic
+    // `await import(this.workerSrc)`. Relative to what, is the whole problem:
+    // from `node_modules` that resolves to the sibling file and works, and from
+    // inside a bundle it resolves to a file that is not there. The rejection is
+    // swallowed by the reader's own catch and reported as an unreadable file,
+    // which is true and useless.
+    external: ["sharp", "@napi-rs/canvas", "fontkit", "pdfjs-dist"],
     // The fonts are inputs to a render, not assets of a website, so they have
     // to be in the image the worker runs from. Marking the renderer external
     // ships the code that draws and none of the files it draws with: the first

@@ -126,10 +126,7 @@ describe("POST channel recommendation decisions", () => {
   });
 
   it("refuses a field the contract does not know rather than ignoring it", async () => {
-    const response = await POST(
-      request({ decision: "acknowledged", helpful: true }),
-      { params },
-    );
+    const response = await POST(request({ decision: "acknowledged", helpful: true }), { params });
 
     expect(response.status).toBe(400);
     expect(mocks.triageRecommendation).not.toHaveBeenCalled();

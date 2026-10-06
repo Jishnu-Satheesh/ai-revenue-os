@@ -10,10 +10,7 @@ import {
   type PeriodKeyContext,
   type PeriodKeyEncoding,
 } from "@/domain/reports/period-key";
-import {
-  ungroupNumber,
-  type ReportNumberFormat,
-} from "@/domain/reports/number-format";
+import { ungroupNumber, type ReportNumberFormat } from "@/domain/reports/number-format";
 import { reconstructPdfGrid } from "@/domain/reports/pdf-grid";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
 import { transposePeriodColumns } from "@/domain/reports/transpose";
@@ -205,7 +202,6 @@ function sourceHeaderMap(row: unknown[]): Map<string, number> {
   return map;
 }
 
-
 function isFormulaCell(value: unknown): boolean {
   return (
     value !== null &&
@@ -220,8 +216,13 @@ function formulaCachedValue(value: unknown): unknown {
   return (value as { result?: unknown }).result;
 }
 
-function parserCode(parser: ReportContractDocument["sheets"][number]["fields"][number]["parser"]): ReportValidationCode {
-  const codes: Record<ReportContractDocument["sheets"][number]["fields"][number]["parser"], ReportValidationCode> = {
+function parserCode(
+  parser: ReportContractDocument["sheets"][number]["fields"][number]["parser"],
+): ReportValidationCode {
+  const codes: Record<
+    ReportContractDocument["sheets"][number]["fields"][number]["parser"],
+    ReportValidationCode
+  > = {
     integer: "INVALID_INTEGER",
     decimal: "INVALID_DECIMAL",
     money: "INVALID_MONEY",
@@ -279,9 +280,7 @@ function isValidParserValue(
         : integerPattern.test(text);
     case "decimal":
     case "money":
-      return typeof ungrouped === "number"
-        ? Number.isFinite(ungrouped)
-        : numericPattern.test(text);
+      return typeof ungrouped === "number" ? Number.isFinite(ungrouped) : numericPattern.test(text);
     case "local_date":
       return isValidDate(value, field.dateEncoding, declaredPeriod);
     case "timestamp":
@@ -496,7 +495,8 @@ function validateSheets(
       control.kind === "row_count" ? (profile?.rowCount ?? 0) : (profile?.populatedCellCount ?? 0);
     const actualCount =
       control.kind === "row_count" ? (sheet?.rowCount ?? 0) : (sheet?.populatedCellCount ?? 0);
-    const passed = Boolean(profile && sheet) && Math.abs(actualCount - expectedCount) <= control.tolerance;
+    const passed =
+      Boolean(profile && sheet) && Math.abs(actualCount - expectedCount) <= control.tolerance;
     if (!passed) errors.push("CONTROL_MISMATCH");
     return {
       key: control.key,
@@ -519,9 +519,14 @@ function validateSheets(
         : "validated";
   return {
     status,
-    qualityState: status === "validated" ? "complete" : status === "partially_validated" ? "partial" : "failed",
+    qualityState:
+      status === "validated" ? "complete" : status === "partially_validated" ? "partial" : "failed",
     completenessState:
-      status === "validated" ? "complete" : status === "partially_validated" ? "partial" : "unavailable",
+      status === "validated"
+        ? "complete"
+        : status === "partially_validated"
+          ? "partial"
+          : "unavailable",
     sheetResults,
     controlResults,
     errorCodes,
@@ -538,7 +543,12 @@ export async function validateCsvBuffer(
   const rows: unknown[][] = [];
   let populatedCellCount = 0;
   const parser = Readable.from([buffer]).pipe(
-    parse({ bom: true, relax_column_count: false, skip_empty_lines: true, max_record_size: 1024 * 1024 }),
+    parse({
+      bom: true,
+      relax_column_count: false,
+      skip_empty_lines: true,
+      max_record_size: 1024 * 1024,
+    }),
   );
   for await (const row of parser as AsyncIterable<unknown>) {
     if (!Array.isArray(row)) throw new Error("CSV validation could not read a row.");
@@ -684,7 +694,9 @@ export async function runReportPackageValidation(
   try {
     const object = await dependencies.objectStore.stat({ path: claim.reportPackage.storage_path });
     assertValidationObjectIdentity(claim.reportPackage, object);
-    const buffer = await dependencies.objectStore.download({ path: claim.reportPackage.storage_path });
+    const buffer = await dependencies.objectStore.download({
+      path: claim.reportPackage.storage_path,
+    });
     if (buffer.byteLength !== claim.reportPackage.declared_content_length) {
       throw new ReportValidationFailure("OBJECT_IDENTITY_CHANGED");
     }
@@ -693,7 +705,10 @@ export async function runReportPackageValidation(
       throw new ReportValidationFailure("OBJECT_IDENTITY_CHANGED");
     }
     const contract = reportContractDocumentSchema.parse(claim.contractVersion.mapping_document);
-    if (contract.currency !== claim.reportPackage.declared_currency || contract.outletGrain !== "branch") {
+    if (
+      contract.currency !== claim.reportPackage.declared_currency ||
+      contract.outletGrain !== "branch"
+    ) {
       throw new ReportValidationFailure("VALIDATION_PROCESSING_FAILED");
     }
     // The package already states the period it covers, which is the only thing
@@ -718,7 +733,8 @@ export async function runReportPackageValidation(
     });
     return { outcome: result.status };
   } catch (error) {
-    const code = error instanceof ReportValidationFailure ? error.code : "VALIDATION_PROCESSING_FAILED";
+    const code =
+      error instanceof ReportValidationFailure ? error.code : "VALIDATION_PROCESSING_FAILED";
     await dependencies.fail({
       organizationId: payload.organizationId,
       packageId: payload.packageId,

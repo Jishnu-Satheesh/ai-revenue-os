@@ -1196,8 +1196,11 @@ remains an operation concern; it is not the cache identity.
 
 Generation is a second fenced worker, not a phase of the detector run (ADR 0037). It claims a
 completed analysis run through a security-definer RPC, reads that run's findings alone with no tools
-and no retrieval, and files at most six schema-validated recommendations whose citations the
-completion RPC re-checks against the findings of the same run. Each recommendation records the
+and no retrieval, and files at most eight schema-validated recommendations whose citations the
+completion RPC re-checks against the findings of the same run. Every chapter holding observation
+findings receives at least one citing item; missing inputs still never become recommendations.
+A run whose first narration left chapters uncovered admits exactly one gap-fill narration,
+restricted to findings no existing item cites. Each recommendation records the
 prompt version that produced it. A failed or refused narration leaves the run's findings visible
 untouched, which section 11.4 requires as the fallback.
 
@@ -1227,6 +1230,36 @@ claims fail validation and no narrative is published; the deterministic finding 
 This section narrowly extends `specs/012` and `specs/015`: models still never compute or alter a
 financial/metric value. Narration is permitted only after a deterministic detector has created a
 cited finding.
+
+Global rollout (2026-09-09, channel recommendations, Amendment B): the Amendment A
+treatment — stored channel context plus Google Search grounding (user-consented; the
+channel's own docs, forums, and merchant discussions first), no URLs emitted, findings
+the only cited evidence, portal how-to steps allowed as grounded advice phrased as
+actions the operator performs (never menu-path claims), every action human-supervised —
+now applies to every audit section, not just the three pilot detectors
+(`orders.cancellation_loss`, `orders.cancellation_attribution`,
+`operations.closed_share`, kept as documentation of where the rollout started). The
+channel block and grounding rules render whenever stored context survives the loader,
+for any detector key. Narration prompt version 7 adds a global plain-English rule: short
+common words a busy shop owner with basic English reads fast, one idea per sentence,
+most sentences under about 15 words, no idioms or figures of speech, numbers as figures
+never spelled out. The plain-English rule renders on every run, including the
+loader-failure fallback, which is otherwise the pre-pilot v4 shape (no channel block, no
+grounding rules). A grounding failure still falls back the same way and the run still
+completes. The judge (version 3) still flags invented values and now also names heavy
+jargon, unexplained technical terms, or longwinded prose. The version-5 playbook design
+stands as history in ADR 0050, the Amendment A grounding decision in ADR 0051; the
+binding rule is section 14 — see ADR 0052.
+
+Coverage and gap-fill (2026-09-10, channel recommendations, Amendment C): narration
+prompt version 8 requires at least one citing item for every chapter holding
+observation findings (cancellations, availability, funnel, retention, money,
+trust), and the per-run cap rises from 6 to 8 so coverage never competes with
+honest needs-data notes. A run whose narration left chapters uncovered admits
+exactly one gap-fill narration citing only previously-uncited findings; the
+workspace shows a per-section generate button only on uncovered chapters, only
+to members with retry permission. Runs narrated under prompt v7 keep whatever
+they filed — no backfill. See ADR 0053.
 
 ## 12. Public API contracts
 
@@ -1354,8 +1387,22 @@ provider payloads, credentials, or customer PII.
 - Treat file names, sheet names, headers, descriptions, formulas, URLs, reviews, and cell text as
   attacker-controlled. They never determine tool calls or prompt instructions.
 - The contract-proposal model has no tools and no retrieval outside the bounded package context.
-  The recommendation-narration model and the scheduled judge have the same constraint, bounded to
-  one run's findings and their citations.
+  The scheduled judge has the same constraint, bounded to one run's findings and their citations.
+  The recommendation-narration model grounds with Google Search on every run with findings
+  (2026-09-09, user-consented, global rollout under Amendment B; the Amendment A
+  pilot-detector gate is retired and its three keys are kept as documentation of where the
+  rollout started) — preferring the channel's own
+  docs, forums, and merchant discussions first. The model still emits no URLs (the output shape has
+  no URL field), findings remain the only cited evidence, every action stays human-supervised, and
+  output still passes the same schema-validation and citation re-check fence. Narration prompt
+  version 8 states the global plain-English rule (short common words, one idea per sentence,
+  no idioms, numbers as figures) plus the coverage rule (every chapter holding observation
+  findings gets at least one citing item, within a per-run cap of 8); the judge (version 3) checks the wording while coverage is enforced deterministically (see ADR 0053). This superseded the
+  original section 11.4 pilot paragraph's playbook and empty-web-slot sentences, and then the
+  Amendment A pilot-only wording — that paragraph now
+  describes the global rollout; see ADR 0052. The Amendment C coverage and
+  gap-fill rules above stand under ADR 0053. ADRs 0050 and 0051
+  stand as history.
 - Redact or remove customer names, phone numbers, email addresses, delivery addresses, free-text
   order notes, and unrestricted review text unless a declared detector needs minimized content and
   policy permits it.
@@ -1371,7 +1418,8 @@ provider payloads, credentials, or customer PII.
 
 OWASP documents indirect prompt injection through attacker-controlled files, and NIST reports agent
 hijacking from external data as a practical security risk. This architecture reduces impact through
-least privilege, a no-tool model worker, typed output, deterministic projection, and exact human
+least privilege, a no-tool model worker (apart from the user-consented narration grounding
+exception above), typed output, deterministic projection, and exact human
 approval rather than claiming prompt injection can be eliminated.
 
 ## 15. Observability and operations
@@ -1437,6 +1485,30 @@ Add `/organizations/[organizationId]/channels` with:
 - explicit copy that creating a channel does not connect a provider or grant execution authority;
 - archived channels retained in historical filters and evidence.
 
+**Shipped 2026-09-11 (channels redesign, implementation Tasks 1–8).** The landing
+is now comparison-led: a title row with manager-only Add (create dialog with the
+required stable key and the optional provider hint under Advanced identity
+settings); one reporting-period Select over every declared window with a
+`Reported scope · {currency}` caption and a reporting-window dialog; a
+four-metric summary strip (reported revenue, earned, provider-reported loss,
+channel coverage, each with an accessible exact figure); a shared-scale
+horizontal revenue comparison with Amount/Share modes, per-channel exact-figure
+detail, and a coverage rail plus revenue-only explanation strip opening the
+data-coverage dialog; a filterable, searchable, sortable directory
+(Active/Measured/Needs attention/Archived with pre-search counts; desktop table
+plus mobile cards) with tenant-scoped Channel Audit / Open channel / View
+history links and a Manage / View-details entry opening the identity,
+location-mapping, report-label, and archive/restore flows; and an
+about-channel-setup dialog linking the real Integration Hub. Archived channels
+stay out of every active sum, share, and count while remaining in history and
+evidence. Creating a channel still connects no provider and grants no execution
+authority. Evidence: `docs/verification/channels-redesign/`; plan
+`docs/superpowers/plans/2026-09-10-channels-redesign-implementation.md` with
+its visual-contract companion. Residuals recorded in the Task 8 report: dialogs
+return keyboard focus to the page body instead of their opener, and two
+reference text shades were darkened to meet 4.5:1 (`--channel-denominator` to
+`#69746a`, directory filter counts to `#626c65`).
+
 ### 17.2 Channel Economics portfolio
 
 The landing route remains `/organizations/[organizationId]/economics` and becomes a comparison-led
@@ -1453,6 +1525,12 @@ portfolio workspace with:
 
 Exact-range evidence never fabricates a trend. Currency filters never imply conversion unless an
 approved rate exists.
+
+**Unchanged 2026-09-11.** The channels redesign (implementation Tasks 1–8)
+rebuilt only the `/organizations/[organizationId]/channels` landing described
+in 17.1. This portfolio surface and its shared read model are untouched; the
+`channels-overview`, business-performance-card, and channel-detail regression
+suites pass unmodified.
 
 ### 17.3 Channel detail
 
@@ -1795,3 +1873,32 @@ These inputs are required before their corresponding production slices can be ac
 - [Gemini API terms](https://ai.google.dev/gemini-api/terms)
 - [Gemini zero-data-retention guidance](https://ai.google.dev/gemini-api/docs/zdr)
 - [Talabat Partner API](https://developer.talabat.com/api-specifications)
+
+## 26. Agent-mediated report intake and channel assessment (approved 2026-10-01)
+
+The Universal Agent may act as a new entry surface for existing governed report and analysis services. It does not become a second owner of package admission, metric projection, corrections, findings, recommendations, or channel identity. The agent turn contract is in `docs/superpowers/specs/2026-09-24-universal-ai-agent-design.md` §21 and ADR 0075.
+
+### 26.1 Report supplied in chat
+
+- One CSV/XLSX attachment per turn uses resumable upload into organization-private, expiring staging storage. The agent records a digest-verified staging identity before calling the report package service. The package service continues to own upload intent, package completion, profiling, validation, projection, correction, and analysis dispatch.
+- Exact package reuse compares verified file SHA-256 **and** declared organization channel, branch/outlet, report type, date bounds, and currency. A matching digest in a different scope is not an exact duplicate; different bytes in the same scope require a correction decision. Missing or ambiguous scope produces one persisted, server-defined Questionnaire challenge. The answer names that challenge ID; the client cannot define or silently alter its choices.
+- The promotion from staging to package-private Storage must recover from an interrupted copy. Retries inspect the verified digest and package/object state before creating or completing a package. No duplicate package may project twice through a retry. Raw rows remain in private Storage; no workbook values, signed URLs, or secrets enter agent events, research prompts, or logs.
+- A recognized active standing admission can advance under ADR 0046. A new structure's money mapping, admission, and a changed-content correction require the existing owner/admin decision. An attachment gives intake authorization only; it never grants these decisions. The turn reports `awaiting_approval` with a link to the exact governed report package when that is the honest next state.
+
+### 26.2 Channel assessment in chat
+
+- Resolve channel names against the organization's stable channel IDs and reported coverage. Select an eligible exact scope, then compute current evidence identity and inspect analysis for that scope. The analysis module's claim and content-addressed cache remain authoritative; the agent cannot deem a prior run current by date or label alone.
+- Reuse a current completed run, including a genuinely empty result with zero findings, observations, and data checks. Zero problem findings alone does not make an observations-only audit ready: it still needs narration. If no current run exists, dispatch through the existing `report.retry` authorization, rate limit, and analysis worker. A completed detector run lacking narration wakes the existing recommendations path; it does not rerun detection merely to populate narration. Until a new dispatched run claims, an older failed run is not that new run's failure receipt. A worker or read failure is a failure, never an empty period.
+- Final agent advice reads the source-owned findings and citations and links to the exact analysis run ID. The audit page must load that run by ID even when it falls outside the default latest-ten list. A viewer can read authorized analysis and receive advice but cannot start or retry analysis.
+- Explicit date ranges in a channel question are selected before the recent-period default. An attached report binds assessment to its declared dates, branch, and currency without period fallback. Recommendations scoped to a different channel/branch or outside that attached report's dates are excluded.
+- Decimal quantity sums preserve source components using decimal integer arithmetic, including finer components that cancel to an exact total. Only numeric representation noise within relative floating-point precision may be normalized. The resulting finding must still satisfy the existing twelve-decimal output contract; genuinely finer totals are refused. Money and integer counts retain their existing integer path. This fixes source findings rejected due to binary addition tails without changing detector meaning, financial rounding, or admission policy (ADR 0036).
+
+### 26.3 Period selection and acceptance
+
+- When a requested period has no usable governed report, the agent may use the latest earlier comparable period from declared history for advice. Comparison includes channel, branch, grain, currency, and required measures. It records the switch as a dated `period_switched` agent event; the drawer renders a separator marker and the answer qualifies the historical basis. An explicitly requested missing month's performance remains unknown.
+- Tests cover exact duplicate, changed same-scope bytes, ambiguous identity, recognized admission, first-time approval, interrupted upload and resume; cached/current/stale/zero-result/missing-narration analysis; tenant and role changes; and an audit link beyond the first page. Existing package and analysis pgTAP checks remain required against shared staging after migration review. No generated database types or local Supabase stack are assumed.
+
+### 26.4 Existing research confirmation reads
+
+- The agent worker reads the exact tenant-bound Market Profile version only when its canonical document matches the requested branch, its digest matches the document, its pointer is current and enabled, and the latest decision for that exact version confirms the same digest. An enabled pointer alone is insufficient.
+- The worker's existing source-read contract includes only the decision identifiers, status, digest and ordering fields needed for that check. Private decision reason, actor, correlation and replacement fields remain unavailable, and no direct decision write is granted. Source-owned confirmation, provider qualification, budget reservation and enqueue fences retain their authority.

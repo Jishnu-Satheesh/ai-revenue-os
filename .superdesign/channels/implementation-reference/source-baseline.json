@@ -1,0 +1,28 @@
+{
+  "head": "3940ab0ff9c9fd986da1c37bc590eb345b505582",
+  "date": "2026-09-10",
+  "files": {
+    "src/app/(platform)/organizations/[organizationId]/channels/page.tsx": "b6b1b916b058ebc7d619f7b1dd775c1cefb6bbc25601d95f08ae9674fd3e0e7e",
+    "src/components/channels/channels-management.tsx": "18eb213a80370ab004dad77a7dd35462cf2d0d4d89611421ad16deb52fe69938",
+    "src/components/channels/channels-rollup.tsx": "49d9297d35e417497a3775985b20ae273e6d21e8a6d0f3977e8a107d497e1b5e",
+    "src/components/channels/channel-portfolio-chart.tsx": "a95ab24dc9fb4342f1d7758bac9ecebbfadae4d39ee04e35b87a2e57f0a96bd2",
+    "src/modules/analysis/application/channels-overview.ts": "a663f31bdac69ab24d6ff5da7bc46cb8ed8e7a39a1aab61af1a5aaff11e6f1f3",
+    "src/domain/analysis/money-split.ts": "f97c9fe298d9aea49dbcca6e26f944e729d619e8dc34ca31b6081f56f40a4d19",
+    "src/components/layout/app-shell.tsx": "7d47bdf40c4dc484fbc5c8ae51c0f333fb356c28a55ce3bcb47f965e9ff61bf9",
+    "src/components/layout/sidebar.tsx": "79e6b159c149d941f7d9472430c0cb3606cb4247a62d0e91c4187d7250dbcdc1",
+    "src/components/ui/sidebar.tsx": "0fedefcbefab30499e62944a6ab15ed9641ee81ec602974cf3fc00905bd505b6",
+    "src/app/globals.css": "9d84771e9dd3ffba9016d03395f9f7ee8c0a18104ef6f8ccff1f2063a21257cb",
+    "src/app/(platform)/organizations/[organizationId]/channels/[channelId]/page.tsx": "4bd3498d35270af5a324d54015c4bdf402831c8874b0c26969f492a09e42b98c",
+    "src/components/channels/channel-detail.tsx": "1d31f970009c25f5610c18261c47e2347c9b06efde599578824674483c7f818a",
+    "src/components/analysis/month-year-picker.tsx": "82df70da1352315fbf531e44eb5bf73de1d04c7fb65486205bb0cd9a55a53ad3",
+    "src/domain/channels/types.ts": "be1692dcf81aa414999e7c46a7c80de59ec10603819526716db8558552fd5f3c",
+    "specs/018-governed-channel-intelligence.md": "35caa7e3618772d1058f3f72b817568d1d7db15ac6d18929bd30fc4242f447fd",
+    ".superdesign/channels/prototype.html": "90d5a07784a8c15fbfd1c5fb7b1ecd106d3593713ad74baf393d02d14148128f"
+  },
+  "baselineTests": {
+    "passed": 33,
+    "suites": 6,
+    "command": "pnpm exec vitest run src/components/channels/channels-management.test.tsx src/components/channels/channels-rollup.test.tsx src/components/channels/channel-portfolio-chart.test.tsx src/components/channels/channel-detail.test.tsx src/modules/channels/application/service.test.ts src/modules/channels/application/authorization.test.ts"
+  },
+  "liveStagingInspected": false
+}

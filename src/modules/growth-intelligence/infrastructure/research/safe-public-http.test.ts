@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   fetchPublicHttp,
+  normalizePublicCitationUrl,
   type PinnedPeerTransport,
   type PublicAddressResolver,
 } from "@/modules/growth-intelligence/infrastructure/research/safe-public-http";
@@ -168,5 +169,27 @@ describe("fetchPublicHttp", () => {
         transport: stalledTransport,
       }),
     ).rejects.toMatchObject({ code: "REQUEST_TIMEOUT" });
+  });
+});
+
+describe("normalizePublicCitationUrl", () => {
+  it("canonicalizes a safe citation without fetching it", () => {
+    expect(normalizePublicCitationUrl("HTTPS://Guide.Example:443/News#today")).toBe(
+      "https://guide.example/News",
+    );
+    expect(normalizePublicCitationUrl("http://guide.example:80/plain")).toBe(
+      "http://guide.example/plain",
+    );
+  });
+
+  it.each([
+    ["https://user:pass@example.com/private", "UNSAFE_URL"],
+    ["ftp://example.com/file", "UNSAFE_URL"],
+    ["https://example.com:8443/admin", "UNSAFE_PORT"],
+    ["http://203.0.113.7/news", "UNSAFE_HOST"],
+    ["http://[::1]/news", "UNSAFE_HOST"],
+    ["not a url", "UNSAFE_URL"],
+  ])("rejects %s with the safe code %s", (url, code) => {
+    expect(() => normalizePublicCitationUrl(url)).toThrow(expect.objectContaining({ code }));
   });
 });

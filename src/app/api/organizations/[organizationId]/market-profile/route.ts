@@ -42,11 +42,26 @@ export async function GET(
     }
     correlationId = correlation.parseAfterAuthorization();
 
+    // Explicit scope only: a branchId query selects that branch's profile,
+    // otherwise the legacy organization profile. Never a silent singleton.
+    const branchIdParam = new URL(request.url).searchParams.get("branchId");
+    const branchId =
+      branchIdParam === null
+        ? null
+        : /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
+              branchIdParam,
+            )
+          ? branchIdParam
+          : null;
+    if (branchIdParam !== null && branchId === null) {
+      throw new DomainError("VALIDATION_ERROR", "The selected branch is not valid.");
+    }
+
     const service = createMarketProfileService({
       repository: createAuthenticatedMarketProfileRepository(context.supabase),
       events: createEventPublisher(),
     });
-    const marketProfile = await service.read(organizationId);
+    const marketProfile = await service.read({ organizationId, branchId });
     const response = NextResponse.json({ marketProfile });
     response.headers.set("x-correlation-id", correlationId);
     response.headers.set("Cache-Control", "no-store");

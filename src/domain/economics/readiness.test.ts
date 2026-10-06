@@ -172,9 +172,7 @@ describe("evidence readiness", () => {
     });
 
     it("cannot become ready when the source package awaits reconciliation", () => {
-      const model = classify(
-        completePeriod({ packageState: "reconciliation_required" }),
-      );
+      const model = classify(completePeriod({ packageState: "reconciliation_required" }));
 
       expect(model.tuples[0]?.state).toBe("blocked");
     });
@@ -246,12 +244,15 @@ describe("evidence readiness", () => {
     });
 
     it("ignores a metric bound to no economics input", () => {
-      const model = classify([...completePeriod(), observation({
-        observationId: "obs-ratings",
-        metricDefinitionId: "55555555-5555-4555-8555-555555555555",
-        economicsRole: null,
-        currency: null,
-      })]);
+      const model = classify([
+        ...completePeriod(),
+        observation({
+          observationId: "obs-ratings",
+          metricDefinitionId: "55555555-5555-4555-8555-555555555555",
+          economicsRole: null,
+          currency: null,
+        }),
+      ]);
 
       expect(model.tuples[0]?.state).toBe("ready_for_economics");
       expect(model.tuples[0]?.rolesPresent).toEqual(["gross_revenue", "transaction_count"]);

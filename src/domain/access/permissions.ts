@@ -59,17 +59,26 @@ export const organizationPermissions = [
   "memory.verify",
   "memory.supersede",
   "memory.promote_fact",
+  "memory.manage_integrations",
+  "memory.retry_capture",
   "opportunity.read",
   "opportunity.approve",
   "campaign.read",
   "campaign.create",
   "campaign.edit",
   "campaign.approve",
+  "campaign.proposal_approve",
   "campaign.publish",
+  "campaign.research_request",
   "poster.render",
+  "studio.read",
+  "studio.edit",
+  "studio.generate",
+  "studio.policy_manage",
   "asset.read",
   "asset.manage",
   "asset.review",
+  "brand.manage",
   "subject.manage",
   "economics.read",
   "economics.write",
@@ -77,6 +86,9 @@ export const organizationPermissions = [
   "policy.update",
   "budget.modify",
   "audit.read",
+  "organization.member.invite",
+  "organization.member.manage_role",
+  "organization.member.remove",
 ] as const;
 
 export type OrganizationPermission = (typeof organizationPermissions)[number];
@@ -124,17 +136,27 @@ export const permissionDescriptions: Readonly<Record<Permission, string>> = {
   "memory.verify": "Confirm or reject a proposed memory item.",
   "memory.supersede": "Replace a memory item with a corrected version.",
   "memory.promote_fact": "Promote a memory item into a business fact.",
+  "memory.manage_integrations": "Change Business Memory capture and context settings.",
+  "memory.retry_capture": "Retry a failed or quarantined Business Memory capture.",
   "opportunity.read": "Read the revenue opportunity feed.",
   "opportunity.approve": "Approve or reject a proposed opportunity.",
   "campaign.read": "Read campaigns and their versions.",
   "campaign.create": "Create a campaign from a brief or an opportunity.",
   "campaign.edit": "Revise a campaign that has not been approved.",
   "campaign.approve": "Approve an exact campaign version for execution.",
+  "campaign.proposal_approve": "Approve a campaign proposal for creative preparation only.",
   "campaign.publish": "Publish an approved campaign to a provider.",
+  "campaign.research_request":
+    "Request campaign research against the research allowance.",
   "poster.render": "Render an approved campaign version as a poster.",
+  "studio.read": "Open Creative Studio and read its history.",
+  "studio.edit": "Change Studio setup, documents, and versions that are not finalized.",
+  "studio.generate": "Run Studio generations, edits, and exports against the generation policy.",
+  "studio.policy_manage": "Change the Studio generation policy and budgets.",
   "asset.read": "Read the organization asset library and subject profiles.",
   "asset.manage": "Upload, classify, tag, and archive organization reference assets.",
   "asset.review": "Approve or reject reference and generated creative assets.",
+  "brand.manage": "Set the organization logo and its brand guidelines.",
   "subject.manage": "Create, edit, confirm, and archive organization subject profiles.",
   "economics.read": "Read channel economics and contribution margin.",
   "economics.write": "Record cost components and economic inputs.",
@@ -142,6 +164,9 @@ export const permissionDescriptions: Readonly<Record<Permission, string>> = {
   "policy.update": "Change governance policies and approval thresholds.",
   "budget.modify": "Change spend limits and budgets.",
   "audit.read": "Read the audit and decision timeline.",
+  "organization.member.invite": "Invite a new member to this client.",
+  "organization.member.manage_role": "Change what an existing member of this client is allowed to do.",
+  "organization.member.remove": "Remove a member from this client.",
 };
 
 /**
@@ -194,6 +219,7 @@ const viewerPermissions = [
   "policy.read",
   "audit.read",
   "growth_intelligence.read",
+  "studio.read",
 ] as const satisfies readonly OrganizationPermission[];
 
 const operatorPermissions = [
@@ -222,6 +248,8 @@ const operatorPermissions = [
    */
   "campaign.approve",
   "poster.render",
+  "studio.edit",
+  "studio.generate",
   "asset.manage",
   "asset.review",
   "subject.manage",
@@ -239,11 +267,46 @@ const adminPermissions = [
   "integration.connect",
   "integration.disconnect",
   "memory.read_sensitive",
+  "memory.manage_integrations",
+  "memory.retry_capture",
   "opportunity.approve",
   // `campaign.approve` is inherited from the operator bundle above.
+  /**
+   * Agreeing to a proposal, which authorizes creative preparation only. Kept
+   * ABOVE the operator line on purpose, unlike `campaign.approve`: contract C02
+   * separates the person who drafts a proposal from the person who agrees to
+   * it, so an operator may write one and ask for changes but not approve it.
+   * Mirrors `20260913120000_campaign_proposal_preparation_approval.sql`.
+   */
+  "campaign.proposal_approve",
   "campaign.publish",
+  /**
+   * Setting the organization's mark and the rules generation must respect.
+   *
+   * Above the operator line: brand rules constrain what may be published in a
+   * client's name, and an operator who could rewrite a hard constraint could
+   * lift the refusal that constraint exists to cause. Mirrors
+   * `20260915120000_brand_identity.sql`, which grants it to owner and admin.
+   */
+  "brand.manage",
+  /**
+   * Spending the research allowance. Seeded to owner and admin by
+   * `20260913150000_campaign_research_proposals.sql`, and undeclared here
+   * until now — the drift test has failed on it since that migration landed,
+   * which is how a permanently red check hides the next real drift.
+   */
+  "campaign.research_request",
+  "studio.policy_manage",
   "policy.update",
   "budget.modify",
+  /**
+   * Team management sits above the operator line: inviting, reassigning roles,
+   * and removing members decides who may act in the client's name. Seeded by
+   * the organization-invitations migration for owner and admin.
+   */
+  "organization.member.invite",
+  "organization.member.manage_role",
+  "organization.member.remove",
 ] as const satisfies readonly OrganizationPermission[];
 
 const ownerPermissions = [

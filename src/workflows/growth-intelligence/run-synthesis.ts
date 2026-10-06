@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
 import { DomainError } from "@/lib/errors";
 import type {
   SynthesisProfileContext,
@@ -46,12 +49,14 @@ export type SynthesisRequestView = {
   researchRuleVersion: string;
   localTimeBucket: string;
   correlationId: string;
+  pipelineId?: string | null;
+  phase?: string | null;
 };
 
 export type ApprovedSynthesisProfileView = {
   versionId: string;
   digest: string;
-  document: MarketProfileDocumentV1;
+  document: MarketProfileDocumentV1 | MarketProfileDocumentV2;
   sourcePolicyDigest: string;
   enabled: boolean;
 };
@@ -78,15 +83,42 @@ export type SynthesisRequestOperations = {
 };
 
 export type SynthesisProfileReader = {
-  readCurrent(input: { organizationId: string }): Promise<ApprovedSynthesisProfileView | null>;
+  readCurrent(input: {
+    organizationId: string;
+    branchId?: string | null;
+  }): Promise<ApprovedSynthesisProfileView | null>;
 };
 
 export type SynthesisRunner = (input: SynthesizeInput) => Promise<SynthesisServiceResult>;
+
+export type SynthesisContextPack = {
+  manifestId: string;
+  contextDigest: string;
+  status: "ready" | "empty" | "partial" | "unavailable" | "disabled";
+  contextRefs: readonly string[];
+  parentBriefManifestId: string | null;
+};
+
+export type SynthesisContextBuilder = (input: {
+  organizationId: string;
+  requestId: string;
+  branchId: string | null;
+  channelId: string | null;
+  parentBriefManifestId: string | null;
+  correlationId: string;
+}) => Promise<SynthesisContextPack>;
 
 export type SynthesisDependencies = {
   requests: SynthesisRequestOperations;
   profiles: SynthesisProfileReader;
   synthesize: SynthesisRunner;
+  /**
+   * Optional current pack builder (Swarm 3). Synthesis builds its own
+   * current pack, retains the parent brief ref, and revalidates: an expired
+   * parent is never blindly reused — the builder revalidates before return
+   * and the service records both ids in the run fingerprint.
+   */
+  synthesisContext?: SynthesisContextBuilder;
   newClaimToken?: () => string;
   signal?: AbortSignal;
 };
@@ -101,13 +133,23 @@ export type SynthesisResult =
 
 export const SYNTHESIS_LEASE_SECONDS = 600;
 
-// business_evidence_changed carries new monthly business evidence;
-// weekly_synthesis carries the weekly consolidation. Research and
-// reassessment kinds belong to the market research worker, and profile
-// discovery belongs to the Market Profile proposal flow.
-const SYNTHESIS_KINDS = new Set(["business_evidence_changed", "weekly_synthesis"]);
+// market_evidence_changed children arrive from the atomic research handoff
+// with market_research_completed trigger reasons. Research and reassessment
+// kinds belong to the market research worker, and profile discovery belongs
+// to the Market Profile proposal flow.
+const SYNTHESIS_KINDS = new Set([
+  "market_evidence_changed",
+  "business_evidence_changed",
+  "weekly_synthesis",
+]);
 
-function profileContext(document: MarketProfileDocumentV1): SynthesisProfileContext {
+function profileContext(
+  document: MarketProfileDocumentV1 | MarketProfileDocumentV2,
+): SynthesisProfileContext {
+  // Shared blocks only (identity, geographies, topics): v1 and v2 documents
+  // both synthesize through here. Exact branch/profile/version/research
+  // lineage travels beside the document — request.branchId, the profile
+  // version id, and the loader/persistence checks — never inside it.
   const city = document.geographies.find((geography) => geography.layer === "city");
   const country = document.geographies.find((geography) => geography.layer === "country");
   const location = city ?? country;
@@ -156,15 +198,19 @@ export async function runSynthesis(
     return { outcome: "failed", code, runId: null };
   };
 
-  const [request, profile] = await Promise.all([
-    dependencies.requests.load({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-    }),
-    dependencies.profiles.readCurrent({ organizationId: payload.organizationId }),
-  ]);
-
+  // The request loads first so the profile read pins its exact branch
+  // scope: a set branch reads its own profile, null reads the legacy
+  // organization profile. Never read by organization alone.
+  const request = await dependencies.requests.load({
+    organizationId: payload.organizationId,
+    requestId: payload.requestId,
+  });
   if (!request) return failRequest("REQUEST_CONTEXT_UNAVAILABLE");
+  const profile = await dependencies.profiles.readCurrent({
+    organizationId: payload.organizationId,
+    branchId: request.branchId,
+  });
+
   if (!profile || !profile.enabled) {
     return failRequest(!profile ? "PROFILE_UNAVAILABLE" : "PROFILE_DISABLED");
   }
@@ -183,16 +229,52 @@ export async function runSynthesis(
     return failRequest("PROFILE_CONTEXT_INVALID");
   }
 
+  // Synthesis builds its own current pack and retains the parent brief
+  // ref. The builder revalidates before return; an expired parent is never
+  // blindly reused. Research→synthesis handoff stays atomic through the
+  // pipeline finalize path below (the request completes only after the
+  // service persists through its fenced RPC).
+  let synthesisContext: SynthesisContextPack | null = null;
+  if (dependencies.synthesisContext) {
+    try {
+      synthesisContext = await dependencies.synthesisContext({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        branchId: request.branchId,
+        channelId: request.channelId,
+        parentBriefManifestId: null,
+        correlationId: payload.correlationId,
+      });
+    } catch {
+      return failRequest("SYNTHESIS_CONTEXT_UNAVAILABLE");
+    }
+  }
+
   let serviceResult: SynthesisServiceResult;
   try {
     serviceResult = await dependencies.synthesize({
       organizationId: payload.organizationId,
       requestId: payload.requestId,
       claimToken,
+      // Exact request scope, including null for legacy organization rows:
+      // the service, loaders, provider input, and persisted items all carry
+      // this same branch, and the fenced RPCs check it again.
+      branchId: request.branchId,
       channelId: request.channelId,
       profileVersionId: profile.versionId,
       profile: context,
       preferences: { pinnedRefs: [] },
+      ...(synthesisContext
+        ? {
+            context: {
+              manifestId: synthesisContext.manifestId,
+              contextDigest: synthesisContext.contextDigest,
+              status: synthesisContext.status,
+              contextRefs: [...synthesisContext.contextRefs],
+              parentBriefManifestId: synthesisContext.parentBriefManifestId,
+            },
+          }
+        : {}),
       correlationId: payload.correlationId,
     });
   } catch (error) {
@@ -212,12 +294,18 @@ export async function runSynthesis(
     return { outcome: "failed", code: serviceResult.code, runId: serviceResult.runId };
   }
 
+  // For pipeline-bound children the Trigger composition routes persistence
+  // through the atomic finalize RPC (items, request and pipeline in one
+  // transaction), which already completes the request: an already_finished
+  // answer is the same success, never a lost lease.
   const completion = await dependencies.requests.complete({
     organizationId: payload.organizationId,
     requestId: payload.requestId,
     claimToken,
   });
-  if (completion.outcome !== "completed") return { outcome: "claim_lost" };
+  if (completion.outcome !== "completed" && completion.outcome !== "already_finished") {
+    return { outcome: "claim_lost" };
+  }
 
   if (serviceResult.outcome === "replayed") {
     return { outcome: "replayed", runId: serviceResult.runId };

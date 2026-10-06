@@ -49,6 +49,12 @@ const baseVersionSchema = z
 const contextSchema = z.strictObject({
   campaign_id: z.string().uuid(),
   source_snapshot_id: z.string().uuid(),
+  context_manifest_id: z.string().uuid().nullable().optional(),
+  context_digest: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .nullable()
+    .optional(),
   kind: z.enum(["generate", "revise", "variants"]),
   facts: z.unknown(),
   assertions: z.unknown(),
@@ -119,6 +125,13 @@ export function createGenerationContextLoader(
 
       return {
         snapshot: toSnapshotRecord(context),
+        // The pinned shared-memory manifest for this run, if any. Pinned at
+        // claim time so a later memory write cannot change what this run saw.
+        // Text-only planning context; never assertions, spend, or pixels.
+        memoryContext:
+          context.context_manifest_id && context.context_digest
+            ? { manifestId: context.context_manifest_id, digest: context.context_digest }
+            : null,
         // Generation profile lives on the manifest of the version being
         // revised, or defaults for a first generation. Held here rather than
         // guessed downstream.
@@ -156,6 +169,13 @@ export function createGenerationContextLoader(
         // would make a stale revision look current.
         latestVersionId: context.latest_version_id ?? "",
         assetStoragePaths: base.asset_storage_paths,
+        // The pinned shared-memory manifest for this run, if any. A changed
+        // pack is a new bounded attempt, never a silent swap: the revision
+        // revalidates this binding before patching.
+        memoryContext:
+          context.context_manifest_id && context.context_digest
+            ? { manifestId: context.context_manifest_id, digest: context.context_digest }
+            : null,
       };
     },
   };

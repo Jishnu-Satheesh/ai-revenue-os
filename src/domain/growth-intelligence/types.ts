@@ -74,9 +74,39 @@ export type MarketProfileDocumentV1 = {
   cadence: MarketProfileCadence;
 };
 
+export type MarketProfileCompetitorProvenance = "operator_lead" | "cited";
+export type MarketProfileCompetitorSuggestion = "operator" | "ai";
+
+export type MarketProfileCompetitorV2 = {
+  key: string;
+  name: string;
+  publicUrl?: string;
+  locationHint?: string;
+  geographyRefs: string[];
+  provenance: MarketProfileCompetitorProvenance;
+  suggestedBy: MarketProfileCompetitorSuggestion;
+  relevanceEvidenceUrls: string[];
+  relevanceReason?: string;
+};
+
+export type MarketProfileDocumentV2 = {
+  schemaVersion: 2;
+  branchId: string;
+  publicIdentity: MarketProfilePublicIdentity;
+  nicheDescriptors: string[];
+  geographies: MarketProfileGeography[];
+  competitors: MarketProfileCompetitorV2[];
+  topics: MarketProfileTopic[];
+  sourcePolicy: MarketProfileSourcePolicy;
+  cadence: MarketProfileCadence;
+};
+
+export type MarketProfileDocument = MarketProfileDocumentV1 | MarketProfileDocumentV2;
+
 export type GrowthIntelligenceRequestKind =
   | "profile_discovery"
   | "market_research"
+  | "market_evidence_changed"
   | "weekly_synthesis"
   | "business_evidence_changed"
   | "evidence_reassessment";
@@ -87,6 +117,7 @@ export type GrowthIntelligenceTriggerReason =
   | "daily_due"
   | "weekly_due"
   | "business_evidence_current"
+  | "market_research_completed"
   | "source_policy_changed"
   | "evidence_expired"
   | "source_changed"

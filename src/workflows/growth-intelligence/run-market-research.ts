@@ -3,12 +3,41 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { EventPublisher } from "@/domain/events/types";
-import type { MarketProfileDocumentV1 } from "@/domain/growth-intelligence/types";
+import type {
+  MarketProfileDocumentV1,
+  MarketProfileDocumentV2,
+} from "@/domain/growth-intelligence/types";
+import { GrowthIntelligenceError } from "@/domain/growth-intelligence/errors";
 import { createGrowthIntelligenceRequestFingerprint } from "@/domain/growth-intelligence/request-fingerprint";
 import { DomainError } from "@/lib/errors";
 import type { MarketEvidenceRepository } from "@/modules/growth-intelligence/infrastructure/evidence-repository";
+import type {
+  ClaimExtractionResult,
+  ExtractableSource,
+  ExtractedClaimCandidate,
+  ResearchModelSpender,
+  ResearchModelTransport,
+  ResearchModelUsage,
+} from "@/modules/growth-intelligence/infrastructure/research/claim-extraction";
+import type {
+  ClaimSupportReviewResult,
+  ReviewedClaimSupport,
+} from "@/modules/growth-intelligence/infrastructure/research/claim-support-review";
+import type {
+  ResearchAttemptUsage,
+  ResearchCoverageEntry,
+  ResearchCoverageOutcome,
+} from "@/domain/growth-intelligence/research-pipeline";
+import {
+  researchModelBudgetSchema,
+  type ResearchModelBudget,
+} from "@/domain/growth-intelligence/research-budget";
 import type { ResearchQuery } from "@/modules/growth-intelligence/infrastructure/research/query-plan";
-import type { ResearchRequest } from "@/modules/growth-intelligence/infrastructure/research/ports";
+import type {
+  ResearchRequest,
+  ResearchRetrievedSource,
+  ResearchRetrievalResult,
+} from "@/modules/growth-intelligence/infrastructure/research/ports";
 
 /**
  * The market research worker.
@@ -18,12 +47,13 @@ import type { ResearchRequest } from "@/modules/growth-intelligence/infrastructu
  * the result to fenced database functions that check every rule again. The
  * worker is not the authority on what may be recorded as evidence.
  *
- * The adapter always runs outside the claim transaction: the claim RPC returns
- * before the first query is planned, so a slow provider can never hold a
- * database lock. Claim-level support grades (primary, corroborated, and kin)
- * are assigned when claims are extracted; this layer grades source attempts
- * (availability, safe codes, corroborating digests) and records compact
- * citation metadata only. Claim extraction belongs to synthesis (Increment 2).
+ * Retrieval returns bounded permitted excerpts (never crawled pages);
+ * extraction proposes strict claim candidates from those excerpts; a separate
+ * bounded support review labels each candidate supported, unsupported or
+ * uncertain; deterministic admission persists eligible supported candidates
+ * only through the fenced evidence boundary. Neither model assigns money,
+ * ranking or execution eligibility. No raw model or provider bodies and no
+ * hidden reasoning ever reach logs or events — only identifiers and counts.
  */
 
 export const marketResearchPayloadSchema = z
@@ -49,62 +79,114 @@ export type GrowthIntelligenceRequestView = {
   researchRuleVersion: string;
   localTimeBucket: string;
   correlationId: string;
+  pipelineId?: string | null;
+  phase?: string | null;
 };
 
 export type ApprovedMarketProfileView = {
   versionId: string;
   digest: string;
-  document: MarketProfileDocumentV1;
+  document: MarketProfileDocumentV1 | MarketProfileDocumentV2;
   sourcePolicyDigest: string;
   enabled: boolean;
 };
 
-const safeCodeSchema = z.string().regex(/^[A-Z][A-Z0-9_]{2,80}$/);
-const digestSchema = z.string().regex(/^[a-f0-9]{64}$/);
-
-const adapterSourceAttemptSchema = z
-  .object({
-    queryKind: z.enum(["official_identity", "market_context", "topic_monitoring"]),
-    sourceUrl: z
-      .string()
-      .min(8)
-      .max(2_048)
-      .regex(/^https?:\/\/[^/?#:@]+(?:\/[^?#]*)?$/),
-    sourceDomain: z
-      .string()
-      .min(3)
-      .max(253)
-      .regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/),
-    publisher: z.string().min(1).max(200).nullable(),
-    sourceClass: z.enum(["official", "first_party", "industry_research", "public_signal"]),
-    availability: z.enum(["available", "unavailable", "excluded"]),
-    contentDigest: digestSchema.nullable(),
-    safeFailureCode: safeCodeSchema.nullable(),
-    retrievedAt: z.string().datetime({ offset: true }),
-    publishedAt: z.string().datetime({ offset: true }).nullable(),
-    observedAt: z.string().datetime({ offset: true }).nullable(),
-    adapterCostMicrosUsd: z.number().int().min(0).max(50_000_000),
-    adapterLatencyMs: z.number().int().min(0).max(600_000),
-  })
-  .strict()
-  .superRefine((attempt, context) => {
-    if (
-      (attempt.availability === "available" &&
-        (!attempt.contentDigest || attempt.safeFailureCode)) ||
-      (attempt.availability !== "available" && !attempt.safeFailureCode)
-    ) {
-      context.addIssue({
-        code: "custom",
-        message: "Attempt availability must match its digest and safe failure code.",
-      });
-    }
-  });
-
-export type AdapterSourceAttempt = z.infer<typeof adapterSourceAttemptSchema>;
-
 export type MarketResearchAdapter = {
   readonly availability: { available: boolean; provider: string };
-  searchAndFetch(input: ResearchRequest): Promise<readonly AdapterSourceAttempt[]>;
+  searchAndFetch(input: ResearchRequest): Promise<ResearchRetrievalResult>;
+};
+
+export type MarketResearchModelPhase = {
+  transport: ResearchModelTransport;
+  spender: ResearchModelSpender;
+  budget: ResearchModelBudget;
+  modelId: string;
+};
+
+export type MarketResearchExcerptProvenance = {
+  qualificationVersion: string;
+  retainUntilFor: (retrievedAt: string) => string;
+};
+
+/**
+ * TinyFish lane diagnostics for failure observability.
+ *
+ * The workflow runner never imports the trigger layer that reads the lane
+ * environment (architecture boundary: only Trigger constructs infrastructure
+ * implementations), so the lane inputs arrive as this injected supplier.
+ * Booleans and the short provider id only — the key itself never travels.
+ */
+export type MarketResearchLaneDiagnostics = {
+  /** TinyFish search key non-empty. */
+  keyPresent: boolean;
+  /** TinyFish lane kill-switch open. */
+  gateOpen: boolean;
+};
+
+/**
+ * Claim engines the worker receives instead of importing.
+ *
+ * The architecture boundary forbids workflow runners from importing
+ * infrastructure at runtime; only Trigger task registration may construct
+ * adapters. These are the pure claim functions (retrieval validation,
+ * extraction, support review, admission, links, digests, freshness) that the
+ * worker calls with its already-injected transports and budgets. Trigger
+ * wires the real implementations; tests inject the same or scripted ones.
+ */
+export type MarketResearchEngines = {
+  parseRetrievalResult: (value: unknown) => ResearchRetrievalResult;
+  extractClaims: (input: {
+    scope: unknown;
+    sources: unknown;
+    budget: unknown;
+    transport: ResearchModelTransport;
+    spender: ResearchModelSpender;
+    modelId: string;
+    /** Optional brief relevance refs (identifiers only, never bodies). */
+    briefRefs?: unknown;
+    now: () => Date;
+    signal?: AbortSignal;
+  }) => Promise<ClaimExtractionResult>;
+  reviewClaimSupport: (input: {
+    candidates: unknown;
+    sources: unknown;
+    scope: unknown;
+    eligibleSourceKeys: unknown;
+    budget: unknown;
+    transport: ResearchModelTransport;
+    spender: ResearchModelSpender;
+    modelId: string;
+    now: () => Date;
+    signal?: AbortSignal;
+  }) => Promise<ClaimSupportReviewResult>;
+  selectAdmissible: (input: {
+    candidates: readonly ExtractedClaimCandidate[];
+    reviews: readonly ReviewedClaimSupport[];
+    eligibleSourceKeys: readonly string[];
+  }) => { admitted: ExtractedClaimCandidate[]; rejectedCount: number; uncertainCount: number };
+  buildLinks: (input: {
+    admitted: readonly ExtractedClaimCandidate[];
+    keyOf: (candidate: ExtractedClaimCandidate) => string;
+    publishersOf: (candidate: ExtractedClaimCandidate) => readonly string[];
+  }) => Array<{ fromClaimKey: string; toClaimKey: string; relation: "corroborates" }>;
+  digestCandidate: (input: {
+    subjectKind: string;
+    subjectRef: string;
+    claimKind: string;
+    paraphrase: string;
+    quotation: string | null;
+    claimCategory: string;
+    geographicLayer: string;
+    geographyRef: string;
+    sourceKeys: readonly string[];
+  }) => string;
+  freshnessWindow: (input: {
+    claimCategory: ExtractedClaimCandidate["claimCategory"];
+    basisAt: string;
+  }) => { staleAt: string; expiresAt: string };
+  freshnessClass: (
+    claimCategory: ExtractedClaimCandidate["claimCategory"],
+  ) => "fast" | "standard" | "structural";
 };
 
 export type MarketResearchClaim = {
@@ -136,12 +218,34 @@ export type MarketResearchClaim = {
 };
 
 export type MarketResearchProfiles = {
-  readCurrent(input: { organizationId: string }): Promise<ApprovedMarketProfileView | null>;
+  readCurrent(input: {
+    organizationId: string;
+    branchId?: string | null;
+  }): Promise<ApprovedMarketProfileView | null>;
 };
 
 export type MarketResearchCurrentSources = {
   load(input: { organizationId: string; profileVersionId: string }): Promise<readonly string[]>;
 };
+
+export type MarketResearchBrief = {
+  manifestId: string | null;
+  contextDigest: string | null;
+  status: "ready" | "empty" | "partial" | "unavailable" | "disabled";
+  contextRefs: readonly string[];
+  evidenceOnly: boolean;
+  briefFingerprint: string | null;
+};
+
+export type MarketResearchBriefBuilder = (input: {
+  organizationId: string;
+  requestId: string;
+  branchId: string | null;
+  profileVersionId: string;
+  sourcePolicyDigest: string;
+  attemptKey: string;
+  correlationId: string;
+}) => Promise<MarketResearchBrief>;
 
 export type MarketResearchDependencies = {
   requests: MarketResearchClaim;
@@ -149,12 +253,79 @@ export type MarketResearchDependencies = {
   evidence: MarketEvidenceRepository;
   currentSources: MarketResearchCurrentSources;
   adapter: MarketResearchAdapter;
+  extraction: MarketResearchModelPhase;
+  supportReview: MarketResearchModelPhase;
+  excerptProvenance: MarketResearchExcerptProvenance;
+  engines: MarketResearchEngines;
   planQueries: (request: ResearchRequest) => ResearchQuery[];
-  buildScope: (document: MarketProfileDocumentV1) => ResearchRequest;
+  buildScope: (document: MarketProfileDocumentV1 | MarketProfileDocumentV2) => ResearchRequest;
   events: EventPublisher;
+  /**
+   * Optional internal brief (Swarm 3). When present it is built and pinned
+   * under the request's exact approved branch/profile BEFORE retrieval, and
+   * its manifest identity threads into run metadata and events. When absent
+   * the worker keeps its legacy behavior. The brief never reaches
+   * `adapter.searchAndFetch`: external query text stays a deterministic
+   * function of approved public fields only.
+   */
+  researchBrief?: MarketResearchBriefBuilder;
+  /**
+   * Optional TinyFish lane diagnostics supplier (Trigger wires the real env
+   * readers). When absent the failure event reports the lane as closed, the
+   * fail-closed default — the same direction the lane itself fails.
+   */
+  laneDiagnostics?: () => MarketResearchLaneDiagnostics;
+  /**
+   * Optional TinyFish lane summary holder (Trigger wires the adapter's
+   * outcome observer into it). Read at completion time, after retrieval
+   * has run: a populated holder rides the completion event payload and
+   * result as `retrievalLaneSummary`. Absent or null keeps the legacy
+   * shape byte-identical.
+   */
+  laneSummaryRef?: { current: MarketResearchRetrievalLaneSummary | null };
   now?: () => Date;
   newClaimToken?: () => string;
   signal?: AbortSignal;
+};
+
+/**
+ * TinyFish lane snapshot carried on the failed run output.
+ *
+ * The failure event payload already carries these fields, but the event
+ * publisher only logs identifiers and drops payloads with no log-fetch
+ * channel — so the same snapshot rides the failed result, which the Trigger
+ * run output preserves where the controller can read it. Booleans and the
+ * short provider id only; the key itself never travels.
+ */
+export type MarketResearchLane = {
+  keyPresent: boolean;
+  gateOpen: boolean;
+  available: boolean;
+  provider: string;
+};
+
+/**
+ * Rich TinyFish lane summary for the durable record.
+ *
+ * The adapter computes a per-run summary (reason code, slot outcome
+ * counts, drop stats, stop reason); Trigger captures it through the
+ * adapter's outcome observer into `laneSummaryRef`, and the worker carries
+ * it on the completion event payload and result as the additive
+ * `retrievalLaneSummary` detail field. Structural — not the adapter's own
+ * type — so the workflow never imports infrastructure at runtime. Plain
+ * counts and codes only, never key material. Absent when the lane never
+ * ran (blocked lanes, other adapters, unwired callers).
+ */
+export type MarketResearchRetrievalLaneSummary = {
+  reasonCode: string;
+  sourceCount: number;
+  slotOutcomeCounts: Record<ResearchCoverageOutcome, number>;
+  callsIssued: number;
+  resultsSeen: number;
+  droppedDuplicates: number;
+  droppedUnsafe: number;
+  droppedEmptyExcerpts: number;
+  stopReason: string;
 };
 
 export type MarketResearchResult =
@@ -164,26 +335,43 @@ export type MarketResearchResult =
       claimCount: number;
       sourceAttemptCount: number;
       sourceSuccessCount: number;
+      supportedCount: number;
+      unsupportedCount: number;
+      uncertainCount: number;
+      unknownUsageCount: number;
       reassessmentEnqueued: boolean;
+      /**
+       * Truthful retrieval reason, always present on success outcomes.
+       * Zero-source runs no longer complete silently: the code names WHY
+       * nothing was recorded (provider returned nothing usable, every call
+       * failed, policy/budget stopped the run, or every source was
+       * policy-excluded), and retrievalSlotOutcomes carries the per-outcome
+       * slot counts behind it. Adapter-agnostic: derived from the retrieval
+       * coverage manifest both adapters already return.
+       */
+      retrievalReasonCode: string;
+      retrievalSlotOutcomes: Record<ResearchCoverageOutcome, number>;
+      /**
+       * Rich lane summary when the TinyFish lane ran and the caller wired
+       * its observer (see laneSummaryRef). Additive and optional: absent
+       * for blocked lanes, other adapters, and unwired callers.
+       */
+      retrievalLaneSummary?: MarketResearchRetrievalLaneSummary | null;
     }
-  | { outcome: "failed"; code: string; runId: string | null }
+  | { outcome: "failed"; code: string; runId: string | null; lane?: MarketResearchLane }
   | { outcome: "not_acquired"; claimOutcome: string }
   | { outcome: "claim_lost" }
   | { outcome: "cancelled" };
 
 const RESEARCH_LEASE_SECONDS = 600;
 const RESEARCH_RULE_VERSION = "market-research@1";
-const RESEARCH_RUN_BUDGET_MICROS_USD = 5_000_000;
-const MAX_ADAPTER_ATTEMPTS = 200;
+const RESEARCH_MODEL_PROVIDER = "gemini";
 const MAX_RECORDED_SOURCES = 50;
 
-// business_evidence_changed has no synthesis consumer until Increment 2, so a
-// fresh market read is the honest handling; Task 14 may narrow this set.
-const RESEARCH_KINDS = new Set([
-  "market_research",
-  "evidence_reassessment",
-  "business_evidence_changed",
-]);
+// business_evidence_changed belongs to the synthesis worker: fresh business
+// evidence is analysis input, not a reason to refetch public research.
+// market_evidence_changed children likewise never re-enter research.
+const RESEARCH_KINDS = new Set(["market_research", "evidence_reassessment"]);
 
 function sha256(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
@@ -202,21 +390,133 @@ function canonicalize(value: unknown): string {
 }
 
 /**
- * Deterministic evidence grading at the research layer: keep only available
- * attempts whose content digest is not already current. Unchanged evidence
- * updates run lineage without creating a materially duplicate record.
+ * Honest spend ledger for one worker attempt. Known usage (reported or
+ * estimated) accumulates at face value and is never clamped; unknown usage
+ * stays counted, never converts to zero. Malformed model usage is treated
+ * as unknown — the reserved-liability direction — rather than trusted.
  */
-export function selectMaterialAttempts(
-  attempts: readonly AdapterSourceAttempt[],
+export type MarketResearchSpendLedger = {
+  knownMicrosUsd: number;
+  unknownCount: number;
+  latencyMs: number;
+};
+
+export function createMarketResearchSpendLedger(): MarketResearchSpendLedger {
+  return { knownMicrosUsd: 0, unknownCount: 0, latencyMs: 0 };
+}
+
+export function recordMarketResearchUsage(
+  ledger: MarketResearchSpendLedger,
+  usage: ResearchAttemptUsage | ResearchModelUsage,
+): void {
+  if (usage.kind === "unknown") {
+    ledger.unknownCount += 1;
+    return;
+  }
+  if (
+    typeof usage.microsUsd !== "number" ||
+    !Number.isInteger(usage.microsUsd) ||
+    usage.microsUsd < 0
+  ) {
+    ledger.unknownCount += 1;
+    return;
+  }
+  ledger.knownMicrosUsd += usage.microsUsd;
+}
+
+export function recordMarketResearchLatency(
+  ledger: MarketResearchSpendLedger,
+  latencyMs: number,
+): void {
+  if (typeof latencyMs === "number" && Number.isInteger(latencyMs) && latencyMs >= 0) {
+    ledger.latencyMs += latencyMs;
+  }
+}
+
+/**
+ * Stable machine-readable reason for one finished retrieval phase.
+ *
+ * Pure and deterministic: the recorded sources, the retrieval coverage
+ * manifest, and the policy-exclusion count always yield the same code, so
+ * unit tests pin it without any provider call. A zero-source run maps to
+ * exactly one cause — clean-but-empty provider answers
+ * (RETRIEVAL_NO_USABLE_EVIDENCE) are distinct from failed calls
+ * (RETRIEVAL_FAILED), policy/budget stops, and full policy exclusion —
+ * instead of completing as an undifferentiated partial 0/0. Sources banked
+ * alongside incomplete coverage mean the run was truncated mid-flight, so
+ * the compound RETRIEVAL_SOURCES_PARTIAL names the truncation instead of
+ * the clean SOURCES_RETURNED.
+ */
+export function describeRetrievalOutcome(input: {
+  sources: readonly unknown[];
+  coverage: readonly ResearchCoverageEntry[];
+  excludedSourceCount: number;
+}): {
+  reasonCode: string;
+  slotOutcomeCounts: Record<ResearchCoverageOutcome, number>;
+} {
+  const slotOutcomeCounts: Record<ResearchCoverageOutcome, number> = {
+    not_started: 0,
+    searched_no_usable_evidence: 0,
+    supported: 0,
+    failed: 0,
+    skipped_budget: 0,
+    skipped_policy: 0,
+  };
+  for (const entry of input.coverage) {
+    slotOutcomeCounts[entry.outcome] += 1;
+  }
+  if (input.sources.length > 0) {
+    // Sources banked but coverage incomplete means retrieval stopped early
+    // (cancelled, lost lease, deadline, budget/policy stop, ceilings): a
+    // clean SOURCES_RETURNED would hide the interruption, so the compound
+    // SOURCES_PARTIAL names it instead. Empty coverage keeps the legacy
+    // code: there is no truncation signal to name.
+    const complete =
+      input.coverage.length === 0 ||
+      input.coverage.every((entry) => entry.outcome === "supported");
+    return {
+      reasonCode: complete ? "RETRIEVAL_SOURCES_RETURNED" : "RETRIEVAL_SOURCES_PARTIAL",
+      slotOutcomeCounts,
+    };
+  }
+  const outcomes = input.coverage.map((entry) => entry.outcome);
+  const all = (outcome: ResearchCoverageOutcome) =>
+    outcomes.length > 0 && outcomes.every((entry) => entry === outcome);
+  if (all("searched_no_usable_evidence")) {
+    return { reasonCode: "RETRIEVAL_NO_USABLE_EVIDENCE", slotOutcomeCounts };
+  }
+  if (all("failed")) {
+    return { reasonCode: "RETRIEVAL_FAILED", slotOutcomeCounts };
+  }
+  if (all("skipped_policy")) {
+    return { reasonCode: "RETRIEVAL_POLICY_REVOKED", slotOutcomeCounts };
+  }
+  if (all("skipped_budget")) {
+    return { reasonCode: "RETRIEVAL_BUDGET_EXHAUSTED", slotOutcomeCounts };
+  }
+  if (all("not_started")) {
+    return { reasonCode: "RETRIEVAL_NOT_STARTED", slotOutcomeCounts };
+  }
+  if (all("supported") && input.excludedSourceCount > 0) {
+    return { reasonCode: "RETRIEVAL_ALL_SOURCES_EXCLUDED", slotOutcomeCounts };
+  }
+  return { reasonCode: "RETRIEVAL_NO_SOURCES_MIXED", slotOutcomeCounts };
+}
+
+/**
+ * Deterministic retrieval grading at the research layer: keep only sources
+ * whose excerpt digest is not already current. Snippet-only retrieval has no
+ * page content digest, so the retained excerpt digest is the content
+ * identity — and the same value is stored as the source content digest, so
+ * the current-source loader keeps deduplicating across runs.
+ */
+export function selectMaterialSources(
+  sources: readonly ResearchRetrievedSource[],
   currentDigests: readonly string[],
-): AdapterSourceAttempt[] {
+): ResearchRetrievedSource[] {
   const current = new Set(currentDigests);
-  return attempts.filter(
-    (attempt) =>
-      attempt.availability === "available" &&
-      attempt.contentDigest !== null &&
-      !current.has(attempt.contentDigest),
-  );
+  return sources.filter((source) => !current.has(source.excerptDigest));
 }
 
 function publishEvent(
@@ -244,6 +544,17 @@ function publishEvent(
   });
 }
 
+function toMillisIso(value: string): string {
+  const ms = new Date(value).getTime();
+  if (Number.isNaN(ms))
+    throw new DomainError("DOMAIN_ERROR", "Research evidence carries an invalid timestamp.");
+  return new Date(ms).toISOString();
+}
+
+function isClaimLost(error: unknown): boolean {
+  return error instanceof GrowthIntelligenceError && error.code === "RESEARCH_CLAIM_LOST";
+}
+
 export async function runMarketResearch(
   input: unknown,
   dependencies: MarketResearchDependencies,
@@ -252,6 +563,7 @@ export async function runMarketResearch(
   const now = dependencies.now ?? (() => new Date());
   const newClaimToken = dependencies.newClaimToken ?? (() => crypto.randomUUID());
   const adapter = dependencies.adapter;
+  const ledger = createMarketResearchSpendLedger();
 
   if (dependencies.signal?.aborted) return { outcome: "cancelled" };
 
@@ -267,31 +579,66 @@ export async function runMarketResearch(
   }
 
   const failRequest = async (code: string): Promise<MarketResearchResult> => {
-    await dependencies.requests.fail({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-      claimToken,
-      safeFailureCode: code,
-    });
+    // A bound pipeline must leave queued with its request: without this the
+    // workspace reports "research is still running" forever with no safe
+    // code. Legacy requests without pipeline lineage keep the old shape.
+    // Bound pre-begin failures settle request + pipeline atomically through
+    // the pipeline RPC alone: the legacy request-level fail would only
+    // duplicate what the handoff already fences, and the pipeline RPC owns
+    // the replay. No run row exists yet, so zero spend travels with it.
+    const pipelineId = request?.pipelineId ?? null;
+    if (pipelineId !== null) {
+      try {
+        await dependencies.evidence.failPipeline({
+          organizationId: payload.organizationId,
+          pipelineId,
+          requestId: payload.requestId,
+          claimToken,
+          runId: null,
+          failureCode: code,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        });
+      } catch (error) {
+        if (isClaimLost(error)) return { outcome: "claim_lost" };
+        throw error;
+      }
+    } else {
+      await dependencies.requests.fail({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        claimToken,
+        safeFailureCode: code,
+      });
+    }
     await publishEvent(dependencies.events, {
       organizationId: payload.organizationId,
       eventName: "market_research.failed",
       correlationId: payload.correlationId,
       occurredAt: now().toISOString(),
-      payload: { requestId: payload.requestId, runId: null, code },
+      payload: {
+        requestId: payload.requestId,
+        runId: null,
+        code,
+        unknownUsageCount: ledger.unknownCount,
+      },
     });
     return { outcome: "failed", code, runId: null };
   };
 
-  const [request, profile] = await Promise.all([
-    dependencies.requests.load({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-    }),
-    dependencies.profiles.readCurrent({ organizationId: payload.organizationId }),
-  ]);
-
+  // The request loads first so the profile read pins its exact branch
+  // scope: a set branch reads its own profile, null reads the legacy
+  // organization profile. Never read by organization alone.
+  const request = await dependencies.requests.load({
+    organizationId: payload.organizationId,
+    requestId: payload.requestId,
+  });
   if (!request) return failRequest("REQUEST_CONTEXT_UNAVAILABLE");
+  const profile = await dependencies.profiles.readCurrent({
+    organizationId: payload.organizationId,
+    branchId: request.branchId,
+  });
+
   if (!profile || !profile.enabled) {
     return failRequest(!profile ? "PROFILE_UNAVAILABLE" : "PROFILE_DISABLED");
   }
@@ -303,6 +650,30 @@ export async function runMarketResearch(
   }
   if (!RESEARCH_KINDS.has(request.kind)) return failRequest("REQUEST_KIND_UNSUPPORTED");
 
+  // The model phases must be wired before any run begins: without bounded
+  // extraction and support review there are no cited claims to persist, and
+  // starting a runrow first would only record a more confusing failure.
+  // (The Trigger composition wires these in Task 8; until then a run that
+  // reaches this point fails closed here instead of inventing claims.)
+  const extractionBudget = researchModelBudgetSchema.safeParse(dependencies.extraction?.budget);
+  const reviewBudget = researchModelBudgetSchema.safeParse(dependencies.supportReview?.budget);
+  if (
+    !dependencies.extraction ||
+    !dependencies.supportReview ||
+    !dependencies.excerptProvenance ||
+    typeof dependencies.excerptProvenance.retainUntilFor !== "function" ||
+    typeof dependencies.excerptProvenance.qualificationVersion !== "string" ||
+    dependencies.excerptProvenance.qualificationVersion.trim().length === 0 ||
+    !extractionBudget.success ||
+    extractionBudget.data.phase !== "extraction" ||
+    !reviewBudget.success ||
+    reviewBudget.data.phase !== "support_review" ||
+    typeof dependencies.extraction.modelId !== "string" ||
+    typeof dependencies.supportReview.modelId !== "string"
+  ) {
+    return failRequest("EXTRACTION_UNAVAILABLE");
+  }
+
   let research: ResearchRequest;
   let queries: ResearchQuery[];
   try {
@@ -312,22 +683,55 @@ export async function runMarketResearch(
     return failRequest("PROFILE_CONTEXT_INVALID");
   }
 
+  // Internal brief pins under the request's exact approved branch/profile
+  // BEFORE retrieval. The brief records the memory manifest by reference;
+  // external query text below stays a deterministic function of approved
+  // public fields — the brief object never reaches adapter.searchAndFetch,
+  // and byte-absence of private bytes holds for URLs, metadata, and logs.
+  let brief: MarketResearchBrief | null = null;
+  if (dependencies.researchBrief) {
+    try {
+      brief = await dependencies.researchBrief({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        branchId: request.branchId,
+        profileVersionId: profile.versionId,
+        sourcePolicyDigest: profile.sourcePolicyDigest,
+        attemptKey: claimToken,
+        correlationId: payload.correlationId,
+      });
+    } catch {
+      return failRequest("BRIEF_UNAVAILABLE");
+    }
+  }
+
   const queryPlanDigest = sha256(canonicalize(queries));
+  // The review model authors the support verdicts the links persist, so the
+  // run carries its identity; the extraction model travels in events.
   const runMetadata = {
     adapterProvider: adapter.availability.provider,
     adapterVersion: RESEARCH_RULE_VERSION,
-    modelProvider: null,
-    modelVersion: null,
+    modelProvider: RESEARCH_MODEL_PROVIDER,
+    modelVersion: dependencies.supportReview.modelId,
     runFingerprint: sha256(
       canonicalize({
         requestId: payload.requestId,
         claimToken,
         profileVersionId: profile.versionId,
         queryPlanDigest,
+        briefFingerprint: brief?.briefFingerprint ?? null,
+        briefManifestId: brief?.manifestId ?? null,
       }),
     ),
     queryPlanDigest,
     correlationId: payload.correlationId,
+    ...(brief
+      ? {
+          briefManifestId: brief.manifestId,
+          briefDigest: brief.contextDigest,
+          briefStatus: brief.status,
+        }
+      : {}),
   };
 
   const begun = await dependencies.evidence.begin({
@@ -338,13 +742,82 @@ export async function runMarketResearch(
   });
 
   const failRun = async (code: string): Promise<MarketResearchResult> => {
-    await dependencies.evidence.fail({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-      claimToken,
-      runId: begun.runId,
-      failure: { safeFailureCode: code, adapterCostMicrosUsd: 0, adapterLatencyMs: 0 },
-    });
+    // Pipeline-bound runs settle only through the atomic pipeline handoff:
+    // the legacy run-level RPC refuses bound requests with
+    // market_research_pipeline_bypass_forbidden, so calling it first would
+    // throw inside failRun before the request or pipeline ever settle. The
+    // pipeline RPC now fails run + request + pipeline in one transaction.
+    //
+    // Lane diagnostics ride the failure event so the next canary carries its
+    // own lane inputs: the blocked-adapter mystery cost hours because the
+    // worker-side key/gate state was invisible from outside. The event
+    // publisher drops payloads, so the same snapshot also rides the failed
+    // result, which the Trigger run output preserves where it can be read.
+    const lane = dependencies.laneDiagnostics?.() ?? { keyPresent: false, gateOpen: false };
+    const laneDiagnostics = {
+      laneKeyPresent: lane.keyPresent,
+      laneGateOpen: lane.gateOpen,
+      laneAvailable: adapter.availability.available,
+      laneProvider: adapter.availability.provider,
+    };
+    const laneResult: MarketResearchLane = {
+      keyPresent: lane.keyPresent,
+      gateOpen: lane.gateOpen,
+      available: adapter.availability.available,
+      provider: adapter.availability.provider,
+    };
+    const boundPipelineId = request.pipelineId ?? null;
+    if (boundPipelineId !== null) {
+      try {
+        await dependencies.evidence.failPipeline({
+          organizationId: payload.organizationId,
+          pipelineId: boundPipelineId,
+          requestId: payload.requestId,
+          claimToken,
+          runId: begun.runId,
+          failureCode: code,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        });
+      } catch (error) {
+        // Lease loss ends the run without further mutations: no request
+        // write, no reassessment, no failure event under a dead claim.
+        if (isClaimLost(error)) return { outcome: "claim_lost" };
+        throw error;
+      }
+      await publishEvent(dependencies.events, {
+        organizationId: payload.organizationId,
+        eventName: "market_research.failed",
+        correlationId: payload.correlationId,
+        occurredAt: now().toISOString(),
+        payload: {
+          requestId: payload.requestId,
+          runId: begun.runId,
+          code,
+          unknownUsageCount: ledger.unknownCount,
+          ...laneDiagnostics,
+        },
+      });
+      return { outcome: "failed", code, runId: begun.runId, lane: laneResult };
+    }
+    try {
+      await dependencies.evidence.fail({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        claimToken,
+        runId: begun.runId,
+        failure: {
+          safeFailureCode: code,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        },
+      });
+    } catch (error) {
+      // Lease loss ends the run without further mutations: no request
+      // write, no reassessment, no failure event under a dead claim.
+      if (isClaimLost(error)) return { outcome: "claim_lost" };
+      throw error;
+    }
     // The run failure already fences the request through the same claim token,
     // so this second call replays that outcome rather than duplicating it.
     await dependencies.requests.fail({
@@ -358,108 +831,399 @@ export async function runMarketResearch(
       eventName: "market_research.failed",
       correlationId: payload.correlationId,
       occurredAt: now().toISOString(),
-      payload: { requestId: payload.requestId, runId: begun.runId, code },
+      payload: {
+        requestId: payload.requestId,
+        runId: begun.runId,
+        code,
+        unknownUsageCount: ledger.unknownCount,
+        ...laneDiagnostics,
+      },
     });
-    return { outcome: "failed", code, runId: begun.runId };
+    return { outcome: "failed", code, runId: begun.runId, lane: laneResult };
   };
 
   if (!adapter.availability.available) return failRun("ADAPTER_UNAVAILABLE");
   if (dependencies.signal?.aborted) return failRun("WORKER_CANCELLED");
 
-  // The adapter runs outside the claim transaction: the claim RPC returned
+  // The retrieval runs outside the claim transaction: the claim RPC returned
   // long before this await, so a slow provider holds no database lock.
-  let attempts: readonly AdapterSourceAttempt[];
+  let retrieval: ResearchRetrievalResult;
   try {
-    attempts = await adapter.searchAndFetch(research);
+    retrieval = dependencies.engines.parseRetrievalResult(await adapter.searchAndFetch(research));
   } catch (error) {
     if (error instanceof DomainError && error.code === "FEATURE_NOT_AVAILABLE") {
       return failRun("ADAPTER_UNAVAILABLE");
     }
+    if (error instanceof z.ZodError) return failRun("EVIDENCE_RECORD_INVALID");
     throw error;
   }
   if (dependencies.signal?.aborted) return failRun("WORKER_CANCELLED");
-
-  const parsed: AdapterSourceAttempt[] = [];
-  for (const attempt of attempts) {
-    const result = adapterSourceAttemptSchema.safeParse(attempt);
-    if (!result.success) return failRun("EVIDENCE_RECORD_INVALID");
-    parsed.push(result.data);
-  }
-  if (parsed.length > MAX_ADAPTER_ATTEMPTS) return failRun("ADAPTER_RESULT_UNBOUNDED");
+  for (const attempt of retrieval.attempts) recordMarketResearchUsage(ledger, attempt.usage);
 
   const currentDigests = await dependencies.currentSources.load({
     organizationId: payload.organizationId,
     profileVersionId: profile.versionId,
   });
-  const material = selectMaterialAttempts(parsed, currentDigests);
+  const material = selectMaterialSources(retrieval.sources, currentDigests);
 
-  const sourceAttemptCount = parsed.length;
-  const sourceSuccessCount = parsed.filter(
-    (attempt) => attempt.availability === "available",
-  ).length;
+  // Sources the confirmed policy excludes can never be recorded — the
+  // persistence RPC refuses the whole payload — so they stop here, counted
+  // as partial coverage rather than failing the run.
+  const excludedDomains = new Set(
+    profile.document.sourcePolicy.excludedDomains.map((domain) => domain.toLowerCase()),
+  );
+  const excludedPublishers = new Set(
+    profile.document.sourcePolicy.excludedPublishers.map((publisher) => publisher.toLowerCase()),
+  );
+  // The SQL fence compares exclusions against the citation hostname, so the
+  // worker pre-filter uses the same identity: an excluded host stops here,
+  // counted as partial coverage, instead of refusing the whole payload.
+  const recordable = material.filter((item) => {
+    const hostname = new URL(item.sourceUrl).hostname.toLowerCase();
+    if (excludedDomains.has(hostname)) return false;
+    const publisher = item.publisher?.trim().toLowerCase();
+    if (publisher && excludedPublishers.has(publisher)) return false;
+    return true;
+  });
+  const excludedSourceCount = material.length - recordable.length;
 
-  if (material.length > 0) {
-    const sources = material.slice(0, MAX_RECORDED_SOURCES).map((attempt, index) => ({
-      key: `src-${index}-${(attempt.contentDigest ?? "unavailable").slice(0, 12)}`,
-      url: attempt.sourceUrl,
-      domain: attempt.sourceDomain,
-      publisher: attempt.publisher,
-      sourceClass: attempt.sourceClass,
-      availability: attempt.availability,
-      contentDigest: attempt.contentDigest,
-      safeFailureCode: attempt.safeFailureCode,
-      retrievedAt: attempt.retrievedAt,
-      publishedAt: attempt.publishedAt,
-      observedAt: attempt.observedAt,
+  const provenance = dependencies.excerptProvenance;
+  const extractable: ExtractableSource[] = recordable
+    .slice(0, MAX_RECORDED_SOURCES)
+    .map((item, index) => ({
+      sourceKey: `src-${index}-${item.excerptDigest.slice(0, 12)}`,
+      sourceUrl: item.sourceUrl,
+      excerptText: item.excerptText,
+      excerptDigest: item.excerptDigest,
+      retrievedAt: item.retrievedAt,
     }));
-    // Claims stay empty: claim extraction from source content is synthesis
-    // work (Increment 2). Recording sources alone preserves the retrieval
-    // lineage the weekly consolidation reads without inventing claim content.
-    await dependencies.evidence.record({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-      claimToken,
-      runId: begun.runId,
-      payload: { sources, claims: [], links: [] },
+
+  // Extraction may use the brief for relevance (refs by identifier only);
+  // support review below receives source/candidate context only — no brief,
+  // memory, or contextRefs field is passed there by construction.
+  const extraction = await dependencies.engines.extractClaims({
+    scope: research.scope,
+    sources: extractable,
+    budget: extractionBudget.data,
+    transport: dependencies.extraction.transport,
+    spender: dependencies.extraction.spender,
+    modelId: dependencies.extraction.modelId,
+    ...(brief && !brief.evidenceOnly && brief.contextRefs.length > 0
+      ? { briefRefs: [...brief.contextRefs] }
+      : {}),
+    now,
+    signal: dependencies.signal,
+  });
+  for (const usage of extraction.usages) recordMarketResearchUsage(ledger, usage);
+  recordMarketResearchLatency(ledger, extraction.totalLatencyMs);
+
+  const eligibleSourceKeys = extractable.map((item) => item.sourceKey);
+  const review = await dependencies.engines.reviewClaimSupport({
+    candidates: extraction.candidates,
+    sources: extractable,
+    scope: research.scope,
+    eligibleSourceKeys,
+    budget: reviewBudget.data,
+    transport: dependencies.supportReview.transport,
+    spender: dependencies.supportReview.spender,
+    modelId: dependencies.supportReview.modelId,
+    now,
+    signal: dependencies.signal,
+  });
+  for (const usage of review.usages) recordMarketResearchUsage(ledger, usage);
+  recordMarketResearchLatency(ledger, review.totalLatencyMs);
+
+  const admission = dependencies.engines.selectAdmissible({
+    candidates: extraction.candidates,
+    reviews: review.reviews,
+    eligibleSourceKeys,
+  });
+
+  const allowQuotes = profile.document.sourcePolicy.allowBoundedQuotes === true;
+  const quoteLimit = allowQuotes ? profile.document.sourcePolicy.maxQuotationCharacters : 0;
+  const sourceByKey = new Map(extractable.map((item) => [item.sourceKey, item] as const));
+  const publisherBySourceKey = new Map(
+    extractable.map((item) => {
+      const retrieved = recordable.find((entry) => entry.excerptDigest === item.excerptDigest);
+      return [
+        item.sourceKey,
+        retrieved?.publisher?.trim() || new URL(item.sourceUrl).hostname.toLowerCase(),
+      ] as const;
+    }),
+  );
+
+  type FinalizedClaim = {
+    candidate: ExtractedClaimCandidate;
+    quotation: string | null;
+    staleAt: string;
+    expiresAt: string;
+  };
+  const finalized: FinalizedClaim[] = admission.admitted.map((candidate) => {
+    const observedAt = candidate.observedAt === null ? null : toMillisIso(candidate.observedAt);
+    const publishedAt = candidate.publishedAt === null ? null : toMillisIso(candidate.publishedAt);
+    const basisAt =
+      observedAt ??
+      candidate.citations
+        .map((citation) => sourceByKey.get(citation.sourceKey)!.retrievedAt)
+        .sort()[0]!;
+    const window = dependencies.engines.freshnessWindow({
+      claimCategory: candidate.claimCategory,
+      basisAt,
     });
+    const limitations = [...candidate.limitations, "SNIPPET_EVIDENCE_ONLY"];
+    if (candidate.sourceKeys.length === 1) limitations.push("ONE_SOURCE");
+    return {
+      candidate: {
+        ...candidate,
+        observedAt,
+        publishedAt,
+        limitations: [...new Set(limitations)].slice(0, 20),
+      },
+      quotation: candidate.quotation,
+      staleAt: window.staleAt,
+      expiresAt: window.expiresAt,
+    };
+  });
+
+  // Quotation policy is enforced deterministically after review: claims keep
+  // their quotations while the per-source aggregate fits, in paraphrase
+  // order; the rest persist without quotations rather than failing admission.
+  const sortedFinalized = [...finalized].sort((left, right) =>
+    left.candidate.paraphrase < right.candidate.paraphrase ? -1 : 1,
+  );
+  const quoteTotals = new Map<string, number>();
+  const keptQuotations: Array<string | null> = sortedFinalized.map((item) => {
+    const quotation = item.quotation;
+    if (quotation === null || quoteLimit <= 0) return null;
+    for (const sourceKey of item.candidate.sourceKeys) {
+      if ((quoteTotals.get(sourceKey) ?? 0) + quotation.length > quoteLimit) return null;
+    }
+    for (const sourceKey of item.candidate.sourceKeys) {
+      quoteTotals.set(sourceKey, (quoteTotals.get(sourceKey) ?? 0) + quotation.length);
+    }
+    return quotation;
+  });
+
+  const claims = sortedFinalized.map((item, index) => {
+    const quotation = keptQuotations[index] ?? null;
+    const digest = dependencies.engines.digestCandidate({
+      subjectKind: item.candidate.subjectKind,
+      subjectRef: item.candidate.subjectRef,
+      claimKind: item.candidate.claimKind,
+      paraphrase: item.candidate.paraphrase,
+      quotation,
+      claimCategory: item.candidate.claimCategory,
+      geographicLayer: item.candidate.geographicLayer,
+      geographyRef: item.candidate.geographyRef,
+      sourceKeys: item.candidate.sourceKeys,
+    });
+    return {
+      key: `clm-${digest.slice(0, 12)}`,
+      claimDigest: digest,
+      subjectKind: item.candidate.subjectKind,
+      subjectRef: item.candidate.subjectRef,
+      claimKind: item.candidate.claimKind,
+      paraphrase: item.candidate.paraphrase,
+      quotation,
+      geographicLayer: item.candidate.geographicLayer,
+      geographyRef: item.candidate.geographyRef,
+      sourceKeys: item.candidate.sourceKeys,
+      freshnessClass: dependencies.engines.freshnessClass(item.candidate.claimCategory),
+      claimCategory: item.candidate.claimCategory,
+      freshnessRegistryVersion: 1 as const,
+      publishedAt: item.candidate.publishedAt,
+      observedAt:
+        item.candidate.observedAt ??
+        item.candidate.citations
+          .map((citation) => sourceByKey.get(citation.sourceKey)!.retrievedAt)
+          .sort()[0]!,
+      staleAt: item.staleAt,
+      expiresAt: item.expiresAt,
+      limitations: item.candidate.limitations,
+    };
+  });
+  const claimKeyByCandidate = new Map(
+    sortedFinalized.map(
+      (item, index) => [item.candidate.candidateKey, claims[index]!.key] as const,
+    ),
+  );
+
+  const links = dependencies.engines.buildLinks({
+    admitted: admission.admitted,
+    keyOf: (candidate) => claimKeyByCandidate.get(candidate.candidateKey)!,
+    publishersOf: (candidate) =>
+      candidate.sourceKeys.map((sourceKey) => publisherBySourceKey.get(sourceKey)!),
+  });
+
+  const retainedPublisherByDigest = new Map(
+    recordable.map((item) => [item.excerptDigest, item.publisher ?? null] as const),
+  );
+  const retainedClassByDigest = new Map(
+    recordable.map((item) => [item.excerptDigest, item.sourceClass ?? null] as const),
+  );
+  const sources = extractable.map((item) => ({
+    key: item.sourceKey,
+    url: item.sourceUrl,
+    domain: new URL(item.sourceUrl).hostname.toLowerCase(),
+    publisher: retainedPublisherByDigest.get(item.excerptDigest) ?? null,
+    sourceClass: (retainedClassByDigest.get(item.excerptDigest) ?? "public_signal") as
+      | "official"
+      | "first_party"
+      | "industry_research"
+      | "public_signal",
+    availability: "available" as const,
+    contentDigest: item.excerptDigest,
+    safeFailureCode: null,
+    retrievedAt: item.retrievedAt,
+    publishedAt: null,
+    observedAt: null,
+    excerptText: item.excerptText,
+    excerptDigest: item.excerptDigest,
+    qualificationVersion: provenance.qualificationVersion,
+    retainUntil: provenance.retainUntilFor(item.retrievedAt),
+  }));
+
+  // Coverage the completion transaction will read: retrieval outcomes plus
+  // the extraction verdict counts that decide eligibility downstream.
+  const coverage: ResearchCoverageEntry[] = retrieval.coverage;
+  const retrievalIncomplete = coverage.some((entry) => entry.outcome !== "supported");
+  const runOutcome =
+    retrievalIncomplete || extraction.unprocessedSourceCount > 0 || excludedSourceCount > 0
+      ? "partial"
+      : "completed";
+  // Truthful zero-source reason, recorded on the event payload and the run
+  // result below: a partial 0/0 run names its cause instead of completing
+  // silently. `sources` here is the recordable set, so full policy
+  // exclusion also resolves to its own code.
+  const retrievalOutcome = describeRetrievalOutcome({
+    sources,
+    coverage,
+    excludedSourceCount,
+  });
+  // Rich lane summary when the TinyFish lane ran and the caller wired its
+  // observer: the holder is populated during adapter.searchAndFetch above,
+  // so reading it here carries the TINYFISH_* detail (drop stats, stop
+  // reason) into the durable record. Null keeps the legacy shape.
+  const retrievalLaneSummary = dependencies.laneSummaryRef?.current ?? null;
+
+  if (sources.length > 0) {
+    try {
+      await dependencies.evidence.record({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        claimToken,
+        runId: begun.runId,
+        payload: { sources, claims, links },
+      });
+    } catch (error) {
+      // Lease loss (expiry or same-branch supersession, which cancels the
+      // claimed request) ends the run without further mutations: no
+      // completion, no request write, no reassessment.
+      if (isClaimLost(error)) return { outcome: "claim_lost" };
+      throw error;
+    }
   }
 
-  const runOutcome = sourceSuccessCount < sourceAttemptCount ? "partial" : "completed";
+  const sourceAttemptCount = sources.length;
+  const sourceSuccessCount = sources.filter((item) => item.availability === "available").length;
   const resultDigest = sha256(
     canonicalize({
       runFingerprint: runMetadata.runFingerprint,
       sourceAttemptCount,
       sourceSuccessCount,
-      claimCount: 0,
-      materialDigestCount: material.length,
+      claimCount: claims.length,
+      supportedCount: review.supportedCount,
+      unsupportedCount: review.unsupportedCount,
+      uncertainCount: review.uncertainCount,
+      unprocessedSourceCount: extraction.unprocessedSourceCount,
+      excludedSourceCount,
     }),
   );
-  const adapterCostMicrosUsd = Math.min(
-    parsed.reduce((total, attempt) => total + attempt.adapterCostMicrosUsd, 0),
-    RESEARCH_RUN_BUDGET_MICROS_USD,
-  );
-  const adapterLatencyMs = Math.min(
-    parsed.reduce((total, attempt) => total + attempt.adapterLatencyMs, 0),
-    600_000,
-  );
+
+  const eventName =
+    runOutcome === "partial" ? "market_research.partially_completed" : "market_research.completed";
+  const completedPayload = {
+    requestId: payload.requestId,
+    runId: begun.runId,
+    claimCount: claims.length,
+    sourceAttemptCount,
+    sourceSuccessCount,
+    supportedCount: review.supportedCount,
+    unsupportedCount: review.unsupportedCount,
+    uncertainCount: review.uncertainCount,
+    unprocessedSourceCount: extraction.unprocessedSourceCount,
+    excludedSourceCount,
+    unknownUsageCount: ledger.unknownCount,
+    retrievalReasonCode: retrievalOutcome.reasonCode,
+    retrievalSlotOutcomes: retrievalOutcome.slotOutcomeCounts,
+    ...(retrievalLaneSummary ? { retrievalLaneSummary } : {}),
+    extractionModel: dependencies.extraction.modelId,
+    reviewModel: dependencies.supportReview.modelId,
+    ...(brief
+      ? {
+          briefManifestId: brief.manifestId,
+          briefStatus: brief.status,
+        }
+      : {}),
+  };
+
+  // Legacy requests carry no pipeline lineage (null, or absent on older
+  // readers); only a bound pipeline takes the fenced handoff path.
+  const pipelineId = request.pipelineId ?? null;
 
   try {
-    await dependencies.evidence.complete({
-      organizationId: payload.organizationId,
-      requestId: payload.requestId,
-      claimToken,
-      runId: begun.runId,
-      result: {
-        outcome: runOutcome,
-        resultDigest,
-        sourceAttemptCount,
-        sourceSuccessCount,
-        adapterCostMicrosUsd,
-        adapterLatencyMs,
-      },
-    });
+    if (pipelineId !== null) {
+      // Pipeline-bound runs hand off through one fenced transaction: run
+      // completion, request success, the unique synthesis child and the
+      // pipeline transition commit together, so no crash can strand saved
+      // research without analysis scheduling.
+      const handoff = await dependencies.evidence.completePipeline({
+        organizationId: payload.organizationId,
+        pipelineId,
+        requestId: payload.requestId,
+        claimToken,
+        runId: begun.runId,
+        result: {
+          outcome: runOutcome,
+          resultDigest,
+          sourceAttemptCount,
+          sourceSuccessCount,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        },
+        coverage,
+      });
+      await publishEvent(dependencies.events, {
+        organizationId: payload.organizationId,
+        eventName,
+        correlationId: payload.correlationId,
+        occurredAt: now().toISOString(),
+        payload: {
+          ...completedPayload,
+          pipelineId,
+          pipelineStage: handoff.pipelineStage,
+          synthesisRequestId: handoff.synthesisRequestId,
+        },
+      });
+    } else {
+      await dependencies.evidence.complete({
+        organizationId: payload.organizationId,
+        requestId: payload.requestId,
+        claimToken,
+        runId: begun.runId,
+        result: {
+          outcome: runOutcome,
+          resultDigest,
+          sourceAttemptCount,
+          sourceSuccessCount,
+          adapterCostMicrosUsd: ledger.knownMicrosUsd,
+          adapterLatencyMs: ledger.latencyMs,
+        },
+      });
+    }
   } catch (error) {
-    if (error instanceof DomainError) {
+    if (isClaimLost(error)) return { outcome: "claim_lost" };
+    if (error instanceof DomainError || error instanceof GrowthIntelligenceError) {
       const fallback = await dependencies.requests.fail({
         organizationId: payload.organizationId,
         requestId: payload.requestId,
@@ -472,28 +1236,26 @@ export async function runMarketResearch(
     throw error;
   }
 
-  const completion = await dependencies.requests.complete({
-    organizationId: payload.organizationId,
-    requestId: payload.requestId,
-    claimToken,
-  });
-  if (completion.outcome !== "completed") return { outcome: "claim_lost" };
-
-  const eventName =
-    runOutcome === "partial" ? "market_research.partially_completed" : "market_research.completed";
-  await publishEvent(dependencies.events, {
-    organizationId: payload.organizationId,
-    eventName,
-    correlationId: payload.correlationId,
-    occurredAt: now().toISOString(),
-    payload: {
+  if (pipelineId === null) {
+    const completion = await dependencies.requests.complete({
+      organizationId: payload.organizationId,
       requestId: payload.requestId,
-      runId: begun.runId,
-      claimCount: 0,
-      sourceAttemptCount,
-      sourceSuccessCount,
-    },
-  });
+      claimToken,
+    });
+    // The run completion above already succeeded this request, so a replayed
+    // delivery reports already_finished: still success, never claim_lost.
+    if (completion.outcome !== "completed" && completion.outcome !== "already_finished") {
+      return { outcome: "claim_lost" };
+    }
+
+    await publishEvent(dependencies.events, {
+      organizationId: payload.organizationId,
+      eventName,
+      correlationId: payload.correlationId,
+      occurredAt: now().toISOString(),
+      payload: completedPayload,
+    });
+  }
 
   // Newly inferred source-rule changes become a reassessment request only.
   // The worker never alters active research; an operator-confirmed profile
@@ -504,10 +1266,8 @@ export async function runMarketResearch(
   const approved = new Set(
     profile.document.publicIdentity.domains.map((domain) => domain.toLowerCase()),
   );
-  const novelDomain = parsed.some(
-    (attempt) =>
-      !excluded.has(attempt.sourceDomain.toLowerCase()) &&
-      !approved.has(attempt.sourceDomain.toLowerCase()),
+  const novelDomain = sources.some(
+    (item) => !excluded.has(item.domain.toLowerCase()) && !approved.has(item.domain.toLowerCase()),
   );
   let reassessmentEnqueued = false;
   if (novelDomain) {
@@ -556,9 +1316,16 @@ export async function runMarketResearch(
   return {
     outcome: runOutcome,
     runId: begun.runId,
-    claimCount: 0,
+    claimCount: claims.length,
     sourceAttemptCount,
     sourceSuccessCount,
+    supportedCount: review.supportedCount,
+    unsupportedCount: review.unsupportedCount,
+    uncertainCount: review.uncertainCount,
+    unknownUsageCount: ledger.unknownCount,
     reassessmentEnqueued,
+    retrievalReasonCode: retrievalOutcome.reasonCode,
+    retrievalSlotOutcomes: retrievalOutcome.slotOutcomeCounts,
+    ...(retrievalLaneSummary ? { retrievalLaneSummary } : {}),
   };
 }

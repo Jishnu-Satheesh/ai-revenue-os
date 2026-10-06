@@ -8,8 +8,12 @@ import { cn } from "@/lib/utils";
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-sans" });
 
 export const metadata: Metadata = {
-  title: "AI Revenue OS",
+  title: "Lunes AI",
   description: "A trustworthy operating cockpit for measurable revenue growth.",
+  icons: {
+    icon: "/assets/logo/logo.png",
+    apple: "/assets/logo/logo.png",
+  },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

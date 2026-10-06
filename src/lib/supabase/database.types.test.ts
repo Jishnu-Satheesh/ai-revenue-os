@@ -43,6 +43,54 @@ const UNTYPED_TABLES = new Set([
   // service role, and read through the narrow contract in webhook-receipts.ts.
   // No session reaches them: a quarantined row has no tenant to scope it to.
   "provider_webhook_receipts",
+  // Publication authority and the exact outputs it covers are written only
+  // through `approve_campaign_launch`, which rechecks every selected output's
+  // review, hash and currency inside one transaction. No role holds an INSERT
+  // grant. A generated row type would invite a direct insert that skips the
+  // last gate before something reaches a public account.
+  "campaign_launch_approvals",
+  "campaign_launch_selections",
+  // Finished deliverables, their immutable versions and their reviews are
+  // written only through `record_campaign_deliverable_version` (worker) and
+  // `review_campaign_deliverable_version` (a person). No role holds an INSERT
+  // grant. A generated row type would invite a direct insert that skips the
+  // review gate — and that gate is the only thing standing between a render
+  // and publication. Read through `deliverable-repository.ts`.
+  "campaign_deliverables",
+  "campaign_deliverable_versions",
+  "campaign_deliverable_reviews",
+  // Proposals, their revisions and their decisions are written only through
+  // `request_campaign_proposal`, `complete_campaign_proposal_version` and
+  // `decide_campaign_proposal`. No role holds an INSERT grant on any of them.
+  // A generated row type would invite a direct insert that skips the approval
+  // transaction — and that transaction is the only place the capability, the
+  // exact revision and the digest are checked together. Read through the
+  // narrow contract in `proposal-repository.ts`.
+  "campaign_proposals",
+  "campaign_proposal_versions",
+  "campaign_proposal_decisions",
+  // Research policies, runs, fingerprints and events are written and read
+  // only through the governed research RPCs (`request_`, `claim_`,
+  // `complete_`, `fail_`, `cancel_`, `load_`, `read_ledger`,
+  // `set_policy_current`). No role holds any grant on any of them, so a
+  // generated row type would invite a direct read or insert that skips
+  // admission, the lease, or the event capture. Read through the narrow
+  // contracts in `research-policy-repository.ts` and
+  // `research-run-repository.ts`.
+  "campaign_research_policies",
+  "campaign_research_policy_current",
+  "campaign_research_runs",
+  "campaign_research_source_fingerprints",
+  "campaign_research_events",
+  // The research cadence and its receipts are written and read only through
+  // the governed schedule RPCs (`read_`/`save_` on a session,
+  // `list_due_organizations`/`evaluate_` on the worker). No role holds any
+  // grant on either table, so a generated row type would invite a direct
+  // read or insert that skips the due check, the qualifying judgement, or
+  // the receipt. Read through the narrow contracts in
+  // `research-schedule-repository.ts` and `research-due-reader.ts`.
+  "campaign_research_schedules",
+  "campaign_research_schedule_receipts",
   // Creative variants are written only through `append_campaign_creative_variant`,
   // which assigns the slot numbers under a lock, and read through the narrow
   // contract in `variant-repository.ts`. A generated row type would invite a
@@ -101,6 +149,29 @@ const UNTYPED_TABLES = new Set([
   "memory_proposal_rejection_operations",
   "memory_retrieval_log",
   "memory_write_operations",
+  // Spec 024 consent-gated grounded share: consent and provider qualification
+  // are written and read only through fenced RPCs (grant/revoke/record plus
+  // the safe status read). No session role holds a table grant, so a
+  // generated row type would imply direct access that does not exist.
+  "grounded_share_consents",
+  "grounded_share_qualifications",
+  // Spec 023 shared capture: settings, source revisions, the capture queue,
+  // event ancestry, and the adapter registry are RPC-only surfaces reached
+  // through fenced RPCs (settings mutation, revision allocator, leased
+  // claim/load/fail/complete, operator retry, safe status reads). No session
+  // role holds a table grant.
+  "memory_integration_settings",
+  "memory_source_revisions",
+  "memory_capture_events",
+  "memory_capture_dependencies",
+  "memory_capture_adapters",
+  // Spec 023 governed context packs: manifests and entries are written only
+  // through fenced RPCs (worker/subject prepare, consume, audited erasure)
+  // and read through member RLS policies. No session role holds a write
+  // grant, so a generated row type would imply direct access that does not
+  // exist.
+  "memory_context_manifests",
+  "memory_context_entries",
   // Campaign persistence follows the same narrow-contract rule as decisions.
   // Members read safe projections through the repository; every write that
   // creates a version, records an attestation, or grants an approval goes
@@ -143,6 +214,37 @@ const UNTYPED_TABLES = new Set([
   // RPCs; public row types model the safe read projection only.
   "report_projection_reconciliations",
   "report_projection_reconciliation_resolutions",
+  // ADR 0049 Creative History. `authenticated` holds SELECT and nothing else on
+  // all five: every folder, item, version, verdict and piece of performance
+  // evidence is written by a security-definer RPC that checks asset.manage or
+  // asset.review first. A generated row type carries Insert and Update
+  // alongside Row, so typing these would state a direct write path that the
+  // grants deliberately refuse — the same reason the brand-asset tables these
+  // sit beside are listed here. `creative-history-repository.ts` reads them
+  // through a narrow persistence contract whose strict Zod row schemas fail
+  // loudly if a column is renamed, which is the protection a hand-maintained
+  // type file would otherwise be pretending to give.
+  "creative_folders",
+  "creative_items",
+  "creative_item_versions",
+  "creative_item_reviews",
+  "creative_item_performance_evidence",
+  // Per-recommendation context provenance (Spec 023 / Swarm 1). Written only by
+  // the narration worker through record_channel_recommendation_context and
+  // immutable afterwards; members hold SELECT through a report.read policy and
+  // no write grant. It sits beside memory_context_manifests and
+  // memory_context_entries, which are listed above for the same reason.
+  "channel_recommendation_contexts",
+  // Per-item context associations (Spec 023 / Swarm 3). The table revokes every
+  // privilege from anon, authenticated AND service_role: nothing reaches it
+  // except the fenced definer path. Typing it would imply access no role holds.
+  "growth_intelligence_item_contexts",
+  // Anonymous marketing leads are written only by the public route through
+  // record_public_lead under the service role, and no session role holds any
+  // grant: a lead has no tenant to scope a read policy to. A generated row
+  // type would imply direct access that deliberately does not exist, the same
+  // reason provider_webhook_receipts is listed above.
+  "marketing_leads",
 ]);
 
 /**
@@ -157,6 +259,13 @@ const PRIVATE_RPC_ONLY_TABLES = new Set([
   "channel_recommendation_operations",
   "decision_cycle_operations",
   "growth_intelligence_write_operations",
+  // Task 5 spend boundary: the organization-day allowance, the staged provider
+  // qualification, the pipeline-or-request reservations and the per-attempt
+  // debits. No session role holds a grant; every write passes a fenced RPC.
+  "growth_intelligence_research_day_allowances",
+  "growth_intelligence_provider_qualifications",
+  "growth_intelligence_research_budget_reservations",
+  "growth_intelligence_research_attempt_ledger",
   "integration_credentials",
   "integration_report_profile_operations",
   "integration_report_validation_operations",

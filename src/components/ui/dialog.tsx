@@ -73,8 +73,19 @@ function DialogContent({
 }
 
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
+  // Sticky by default: pins to the card top only when the content scrolls,
+  // resting dialogs render exactly as before (only an opaque bg is added,
+  // same color as the card behind it). No negative margins: sticky offsets
+  // apply to the margin box, so -mt-4 pinned scrolled headers 16px too low
+  // and row content bled through the gap. top-[-16px] lands the border box
+  // flush with the card edge; the value must equal the content padding, and
+  // every scrollable dialog uses the default p-4 (p-0 dialogs never scroll).
   return (
-    <div data-slot="dialog-header" className={cn("flex flex-col gap-2", className)} {...props} />
+    <div
+      data-slot="dialog-header"
+      className={cn("sticky top-[-16px] z-10 flex flex-col gap-2 bg-popover", className)}
+      {...props}
+    />
   );
 }
 
@@ -89,8 +100,11 @@ function DialogFooter({
   return (
     <div
       data-slot="dialog-footer"
+      // Sticky by default; bottom-0 is correct here (unlike the header) because
+      // the pre-existing -mb-4 already bridges the content padding, landing the
+      // border box flush with the card edge when stuck.
       className={cn(
-        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end",
+        "-mx-4 -mb-4 flex flex-col-reverse gap-2 rounded-b-xl border-t bg-muted/50 p-4 sm:flex-row sm:justify-end sticky bottom-0 z-10",
         className,
       )}
       {...props}

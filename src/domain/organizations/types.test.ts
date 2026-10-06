@@ -45,6 +45,50 @@ describe("createOrganizationInputSchema", () => {
     expect(organization.firstBranch).toBeNull();
   });
 
+  it("accepts a registered metric key alongside the display metric", () => {
+    const goal = goalInputSchema.parse({
+      name: "Grow direct revenue",
+      metric: "Direct revenue",
+      metricKey: "revenue.gross",
+      baselineStatus: "known",
+      baselineValue: 4200,
+      targetValue: 100,
+      unit: "count",
+    });
+    expect(goal.metricKey).toBe("revenue.gross");
+  });
+
+  it("leaves the metric key absent rather than inventing one", () => {
+    const goal = goalInputSchema.parse({
+      name: "Grow direct revenue",
+      metric: "Direct revenue",
+      baselineStatus: "unknown",
+      targetValue: 100,
+      unit: "count",
+    });
+    // A goal with no key is still a goal. It simply cannot supply campaign
+    // measurement evidence, which is a truthful gap rather than a default.
+    expect(goal.metricKey).toBeUndefined();
+  });
+
+  it("refuses a metric key the column would reject", () => {
+    // `goals.metric_key` requires a dotted key. Letting an undotted one through
+    // Zod moved the failure to Postgres, where the operator saw a constraint
+    // name instead of a sentence.
+    for (const metricKey of ["qualified_inquiries", "Revenue.Gross", "revenue.", ".gross"]) {
+      expect(() =>
+        goalInputSchema.parse({
+          name: "Grow direct revenue",
+          metric: "Direct revenue",
+          metricKey,
+          baselineStatus: "unknown",
+          targetValue: 100,
+          unit: "count",
+        }),
+      ).toThrow();
+    }
+  });
+
   it("requires a branch for branch-scoped goals", () => {
     expect(() =>
       goalInputSchema.parse({

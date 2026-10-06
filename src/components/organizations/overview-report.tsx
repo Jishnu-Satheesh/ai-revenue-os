@@ -22,13 +22,7 @@ import {
 } from "@/components/organizations/overview-visuals";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { DigitalTwinSnapshot } from "@/modules/organizations/infrastructure/repository";
 import type {
@@ -200,8 +194,7 @@ function VerdictBand({
               <ShieldCheck aria-hidden="true" className="size-4" />
             </span>
             <Kicker>
-              {organizationName} ·{" "}
-              {scale ? formatWindowLabel(window) : "nothing recorded yet"}
+              {organizationName} · {scale ? formatWindowLabel(window) : "nothing recorded yet"}
             </Kicker>
           </div>
 
@@ -212,14 +205,12 @@ function VerdictBand({
               "We cannot tell you anything about your money yet."
             ) : scale.hasUnprovenBand ? (
               <>
-                You took in{" "}
-                <Money value={scale.salesMinor} currency={scale.currency} /> and kept at least{" "}
-                <Money value={scale.keptFloorMinor} currency={scale.currency} /> of it.
+                You took in <Money value={scale.salesMinor} currency={scale.currency} /> and kept at
+                least <Money value={scale.keptFloorMinor} currency={scale.currency} /> of it.
               </>
             ) : (
               <>
-                You took in{" "}
-                <Money value={scale.salesMinor} currency={scale.currency} /> and kept{" "}
+                You took in <Money value={scale.salesMinor} currency={scale.currency} /> and kept{" "}
                 <Money value={scale.keptFloorMinor} currency={scale.currency} /> of it.
               </>
             )}
@@ -238,8 +229,7 @@ function VerdictBand({
           <div className="flex flex-wrap items-center gap-2.5">
             {gradeCounts && recordedDays > 0 ? (
               <Chip tone={gradeCounts.complete === recordedDays ? "success" : "warning"}>
-                {formatCount(gradeCounts.complete)} of {formatCount(recordedDays)} days fully
-                costed
+                {formatCount(gradeCounts.complete)} of {formatCount(recordedDays)} days fully costed
               </Chip>
             ) : null}
             {scale ? <Chip tone="success">Your own records — nothing estimated</Chip> : null}
@@ -298,7 +288,11 @@ function Chip({ tone, children }: { tone: "success" | "warning"; children: React
     <span className="flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-[11px] font-semibold">
       <span
         aria-hidden="true"
-        className={tone === "success" ? "size-1.5 rounded-full bg-success" : "size-1.5 rounded-full bg-warning"}
+        className={
+          tone === "success"
+            ? "size-1.5 rounded-full bg-success"
+            : "size-1.5 rounded-full bg-warning"
+        }
       />
       {children}
     </span>
@@ -415,8 +409,7 @@ function StatusStrip({
   snapshot: DigitalTwinSnapshot;
   timeZone: string;
 }) {
-  const stopped =
-    integration.status === "ready" ? integration.data.actionRequiredConnections : 0;
+  const stopped = integration.status === "ready" ? integration.data.actionRequiredConnections : 0;
   const lastEvent = snapshot.auditEvents[0];
 
   return (
@@ -443,8 +436,7 @@ function StatusStrip({
         <>
           <StatusBadge label="Showing" tone="success" />
           <span className="text-muted-foreground">
-            your own records for{" "}
-            <span className="font-mono">{isoDate(window.rangeStart)}</span> to{" "}
+            your own records for <span className="font-mono">{isoDate(window.rangeStart)}</span> to{" "}
             <span className="font-mono">{isoDate(window.rangeEndExclusive, -1)}</span> ·{" "}
             {window.timeZone} · day by day
           </span>
@@ -874,10 +866,7 @@ function ChannelMixChapter({ data }: { data: OverviewEconomics }) {
         <OverviewChannelMix channels={data.channels} currency={currency} />
         <ul className="flex min-w-0 flex-col gap-0.5" aria-label="Recorded revenue by place">
           {reported.map((channel, index) => (
-            <li
-              key={channel.channel}
-              className="flex items-center gap-2.5 rounded-md px-2 py-1.5"
-            >
+            <li key={channel.channel} className="flex items-center gap-2.5 rounded-md px-2 py-1.5">
               <span
                 aria-hidden="true"
                 className="size-2.5 shrink-0 rounded-sm"
@@ -1094,8 +1083,7 @@ function ChangedSection({
       <Kicker>What changed recently</Kicker>
       {recent.length === 0 ? (
         <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-[11px] leading-relaxed text-muted-foreground">
-          Nothing has changed yet. Governed changes to your records appear here, with who made
-          them.
+          Nothing has changed yet. Governed changes to your records appear here, with who made them.
         </p>
       ) : (
         <div className="flex flex-col divide-y divide-border overflow-hidden rounded-xl border border-border bg-card">
@@ -1157,8 +1145,7 @@ function AwaitingShelf({ data }: { data: OverviewEconomics | null }) {
     },
     {
       title: "How you compare to similar businesses",
-      reason:
-        "Waits on enough comparable organizations agreeing to share. Not yet reached.",
+      reason: "Waits on enough comparable organizations agreeing to share. Not yet reached.",
     },
   ];
 

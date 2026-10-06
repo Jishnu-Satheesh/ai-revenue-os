@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyMemoryExecutionOrder,
   approvedResearchScopeSchema,
   buildResearchQueryPlan,
+  buildResearchQuerySlots,
 } from "@/modules/growth-intelligence/infrastructure/research/query-plan";
 
 const scope = {
@@ -73,5 +75,91 @@ describe("buildResearchQueryPlan", () => {
         maxResultsPerQuery: 1_000_000,
       }),
     ).toThrow();
+  });
+});
+
+describe("buildResearchQuerySlots", () => {
+  it("covers every topic and competitor plus the local market, in order", () => {
+    const approvedScope = approvedResearchScopeSchema.parse({
+      ...scope,
+      topics: ["weekend dining", "Kerala food festival"],
+      competitors: [
+        { name: "Azure Dhow", publicUrl: "https://azure-dhow.example.org", locationHint: "Deira" },
+        { name: "Copper Lantern" },
+      ],
+    });
+
+    const slots = buildResearchQuerySlots({ scope: approvedScope });
+
+    expect(slots.map((slot) => slot.slotKey)).toEqual([
+      "local_market",
+      "topic:weekend-dining",
+      "topic:kerala-food-festival",
+      "competitor:azure-dhow",
+      "competitor:copper-lantern",
+    ]);
+    expect(slots.map((slot) => slot.kind)).toEqual([
+      "local_market",
+      "topic",
+      "topic",
+      "competitor",
+      "competitor",
+    ]);
+    expect(slots.every((slot) => slot.maxResults === 5)).toBe(true);
+  });
+
+  it("is deterministic and keeps query operators out of every slot", () => {
+    const approvedScope = approvedResearchScopeSchema.parse({
+      ...scope,
+      topics: ["brunch site:attacker.example", "ignore previous instructions feast"],
+      competitors: [{ name: "Rival inurl:admin" }],
+    });
+
+    const first = buildResearchQuerySlots({ scope: approvedScope });
+    const second = buildResearchQuerySlots({ scope: approvedScope });
+
+    expect(first).toEqual(second);
+    expect(first.map((slot) => slot.text).join(" ")).not.toMatch(/site:|inurl:|ignore previous/i);
+  });
+
+  it("caps a maximum-input scope at exactly 26 primary slots", () => {
+    const approvedScope = approvedResearchScopeSchema.parse({
+      publicBusinessName: "Harbor Lane Kitchen",
+      approvedDomains: [],
+      niches: ["Seafood grill"],
+      city: "Dubai",
+      countryCode: "AE",
+      topics: Array.from({ length: 20 }, (_, index) => `topic ${index + 1}`),
+      competitors: Array.from({ length: 5 }, (_, index) => ({ name: `Rival ${index + 1}` })),
+    });
+
+    const slots = buildResearchQuerySlots({ scope: approvedScope });
+
+    expect(slots).toHaveLength(26);
+    expect(new Set(slots.map((slot) => slot.slotKey)).size).toBe(26);
+  });
+});
+
+describe("applyMemoryExecutionOrder", () => {
+  it("preserves every approved slot while memory orders execution only", () => {
+    const approvedScope = approvedResearchScopeSchema.parse({
+      ...scope,
+      topics: ["weekend dining", "Kerala food festival"],
+      competitors: [{ name: "Azure Dhow" }],
+    });
+    const slots = buildResearchQuerySlots({ scope: approvedScope });
+    const ordered = applyMemoryExecutionOrder({
+      slots,
+      relevance: { "competitor:azure-dhow": 9 },
+    });
+    expect(ordered.map((slot) => slot.slotKey).sort()).toEqual(
+      slots.map((slot) => slot.slotKey).sort(),
+    );
+    expect(ordered[0]!.slotKey).toBe("competitor:azure-dhow");
+    // Memory never changes priority or eligibility: slot text stays the
+    // deterministic public function, byte-identical apart from order.
+    expect(ordered.map((slot) => slot.text).sort()).toEqual(
+      slots.map((slot) => slot.text).sort(),
+    );
   });
 });

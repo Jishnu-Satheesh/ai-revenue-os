@@ -81,7 +81,7 @@ export function createVariantPlanner(
           hardConstraints: imageGuidance.hardConstraints,
           blueprint: imageGuidance.blueprint,
         }),
-        references: imageGuidance.references,
+        references: imageGuidance.finalImageReferences,
         widthPx: size.widthPx,
         heightPx: size.heightPx,
       });

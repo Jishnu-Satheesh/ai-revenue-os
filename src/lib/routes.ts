@@ -26,3 +26,8 @@ export function overviewPath(organizationId: string): string {
 export function growthIntelligencePath(organizationId: string): string {
   return `/organizations/${organizationId}/growth-intelligence`;
 }
+
+/** Organization settings. Tab content is chosen client-side; this is the shell. */
+export function organizationSettingsPath(organizationId: string): string {
+  return `/organizations/${organizationId}/settings`;
+}

@@ -1,4 +1,4 @@
-# AI Revenue OS Progress Tracker
+# Lunes AI Progress Tracker
 
 > This file is the fast orientation point for future AI agents. Read it before starting work.
 

@@ -11,10 +11,7 @@
  * See `specs/012-channel-economics-ledger.md` section 7.5.
  */
 
-import type {
-  EvidenceReadinessReason,
-  EvidenceReadinessState,
-} from "@/domain/economics/readiness";
+import type { EvidenceReadinessReason, EvidenceReadinessState } from "@/domain/economics/readiness";
 
 export type ReadinessStateCopy = {
   label: string;
@@ -69,12 +66,15 @@ const reasonCopy: Readonly<Record<EvidenceReadinessReason, ReadinessReasonCopy>>
     nextStep: "An owner or admin needs to choose which report stands in the Integration Hub.",
   },
   evidence_superseded_without_replacement: {
-    explanation: "The report that covered this period was replaced, and nothing current took its place.",
+    explanation:
+      "The report that covered this period was replaced, and nothing current took its place.",
     nextStep: "Upload the corrected report for these exact dates.",
   },
   evidence_excluded: {
-    explanation: "The report for this period was set aside during reconciliation and is not in use.",
-    nextStep: "Upload a replacement report for these exact dates, or restore the original decision.",
+    explanation:
+      "The report for this period was set aside during reconciliation and is not in use.",
+    nextStep:
+      "Upload a replacement report for these exact dates, or restore the original decision.",
   },
   source_package_failed: {
     explanation: "The report this period came from did not finish processing.",
@@ -98,12 +98,14 @@ const reasonCopy: Readonly<Record<EvidenceReadinessReason, ReadinessReasonCopy>>
   role_supplied_by_different_timezone: {
     explanation:
       "A required input covers the same dates in a different timezone, which means a different set of hours.",
-    nextStep: "Re-upload the report against the outlet whose timezone these dates were recorded in.",
+    nextStep:
+      "Re-upload the report against the outlet whose timezone these dates were recorded in.",
   },
   role_supplied_by_different_branch_or_channel: {
     explanation:
       "A required input for these dates is recorded against a different outlet or channel.",
-    nextStep: "Check the outlet and channel on that report, and re-upload it against the right one.",
+    nextStep:
+      "Check the outlet and channel on that report, and re-upload it against the right one.",
   },
   revenue_role_absent: {
     explanation: "No sales total has arrived for this period.",
@@ -128,12 +130,15 @@ const reasonCopy: Readonly<Record<EvidenceReadinessReason, ReadinessReasonCopy>>
     nextStep: "Fill in the remaining costs.",
   },
   evidence_quality_partial: {
-    explanation: "The report behind this period came through with warnings that are still standing.",
+    explanation:
+      "The report behind this period came through with warnings that are still standing.",
     nextStep: "Review the warnings on that report in the Integration Hub.",
   },
   evidence_completeness_partial: {
-    explanation: "The report behind this period was only partly read, so some of it is not represented.",
-    nextStep: "Review that report in the Integration Hub and re-upload it if part of it is missing.",
+    explanation:
+      "The report behind this period was only partly read, so some of it is not represented.",
+    nextStep:
+      "Review that report in the Integration Hub and re-upload it if part of it is missing.",
   },
 };
 

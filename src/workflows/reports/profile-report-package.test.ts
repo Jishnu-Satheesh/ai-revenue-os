@@ -7,6 +7,8 @@ import {
   profileXlsxBuffer,
   runReportPackageProfiling,
 } from "@/workflows/reports/profile-report-package";
+import { REPORT_STRUCTURE_VERSION } from "@/domain/reports/contracts";
+import { createReportStructureFingerprint } from "@/domain/reports/document-digest";
 import type { ReportProfilingDependencies } from "@/workflows/reports/profile-report-package";
 import type { ReportPackageRow } from "@/modules/reports/application/ports";
 
@@ -238,5 +240,158 @@ describe("governed report package profiling", () => {
     ]);
     expect(sheets[0]?.headerCandidateDigests[0]?.normalizedHeaderDigests).toHaveLength(3);
     expect(JSON.stringify(sheets[0]?.headerCandidates)).not.toContain("89");
+  });
+
+  it("never mistakes a CSV data row for a header candidate", async () => {
+    const sheets = await profileCsvBuffer(Buffer.from("Order Date,Total Sales\n2026-08-01,89.00\n"));
+
+    expect(sheets[0]?.headerCandidateDigests).toEqual([
+      expect.objectContaining({ rowPosition: 1, fieldCount: 2, digest: expect.any(String) }),
+    ]);
+    expect(sheets[0]?.headerCandidates).toEqual([
+      { rowPosition: 1, normalizedHeaders: ["order_date", "total_sales"] },
+    ]);
+  });
+
+  it("profiles the Talabat CSV shape to the same fingerprint as its XLSX twin", async () => {
+    // The June 2026 CSV reached staging with five header candidates: the real
+    // 56-column header plus four numeric data rows the profiler mistook for
+    // headers, so it could never match the XLSX admission. These are its
+    // stored column names, verbatim -- schema, never values.
+    const talabatHeaders = [
+      "date",
+      "restaurant_id",
+      "outlet_name",
+      "successful_orders",
+      "gross_sales",
+      "online_sales",
+      "cash_sales",
+      "delivery_sales",
+      "pickup_sales",
+      "orders_count",
+      "cancelled_orders",
+      "online_orders",
+      "cash_orders",
+      "delivery_orders",
+      "pickup_orders",
+      "pro_orders",
+      "pro_revenue",
+      "items_count",
+      "unavailable_time_duration_minutes",
+      "unavailable_time_duration_rate",
+      "scheduled_open_time_minutes",
+      "unavailable_time_reason",
+      "unavailable_time_duration_count",
+      "orders_with_avoidable_cancellations",
+      "avoidable_cancellation_rate",
+      "revenue_loss_from_rejections",
+      "avoidable_cancellation_reason",
+      "avoidable_cancellation_count",
+      "sales_loss",
+      "average_preparation_time_minutes",
+      "orders_marked_as_ready",
+      "orders_marked_rate",
+      "total_awt_duration_minutes",
+      "orders_with_awt",
+      "order_with_awt_fee",
+      "total_fee_applied",
+      "orders_in_bucket1_5_minutes",
+      "orders_with_fees_in_bucket1_5_minutes",
+      "orders_in_bucket2_5_mins_and_10_mins",
+      "orders_with_fees_in_bucket2_5_mins_and_10_mins",
+      "orders_in_bucket3_10_mins",
+      "orders_with_fees_in_bucket3_10_mins",
+      "total_customer_complaints_received",
+      "customer_complaint_rate",
+      "customer_complaint_reason",
+      "customer_complaint_contacts",
+      "own_delivery_contacts_count",
+      "vendor_delivery_contacts_counts",
+      "orders_from_new_customers",
+      "orders_from_new_customers_rate",
+      "orders_from_returning_customers",
+      "orders_from_returning_customers_rate",
+      "impressions",
+      "viewed_your_menu",
+      "added_items_to_cart",
+      "placed_an_order",
+    ];
+    // Sparse numeric rows like the real export: a date plus a handful of
+    // figures, seven populated cells each.
+    const csvDataRow = (date: string, seed: number): string => {
+      const cells = new Array<string>(talabatHeaders.length).fill("");
+      cells[0] = date;
+      cells[1] = String(seed);
+      cells[4] = (seed * 10 + 0.5).toFixed(2);
+      cells[5] = (seed * 6 + 0.25).toFixed(2);
+      cells[9] = String(seed % 5);
+      cells[17] = String(seed % 3);
+      cells[52] = String(seed * 40);
+      return cells.join(",");
+    };
+    const csv = [
+      talabatHeaders.join(","),
+      csvDataRow("2026-06-01", 3),
+      csvDataRow("2026-06-02", 5),
+    ].join("\n");
+
+    const csvSheets = await profileCsvBuffer(Buffer.from(`${csv}\n`, "utf8"));
+
+    expect(csvSheets[0]?.headerCandidateDigests).toEqual([
+      expect.objectContaining({ rowPosition: 1, fieldCount: 56, digest: expect.any(String) }),
+    ]);
+    expect(csvSheets[0]?.headerCandidates).toEqual([
+      { rowPosition: 1, normalizedHeaders: talabatHeaders },
+    ]);
+    // The row-1 digest the June package stored on staging. The fixed CSV
+    // profile converges back to it.
+    expect(csvSheets[0]?.headerCandidateDigests[0]?.digest).toBe(
+      "d39a9b175ee6f4e7853c558a6b3cc7dc8b6b5d096fc8b3d55f6690828d8917b3",
+    );
+
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("June 2026");
+    sheet.addRow(talabatHeaders);
+    for (const [date, seed] of [
+      ["2026-06-01", 3],
+      ["2026-06-02", 5],
+    ] as const) {
+      const row: unknown[] = new Array<unknown>(talabatHeaders.length).fill(null);
+      row[0] = new Date(`${date}T00:00:00.000Z`);
+      row[1] = seed;
+      row[4] = seed * 10 + 0.5;
+      row[5] = seed * 6 + 0.25;
+      row[9] = seed % 5;
+      row[17] = seed % 3;
+      row[52] = seed * 40;
+      sheet.addRow(row);
+    }
+
+    const xlsxSheets = await profileXlsxBuffer(Buffer.from(await workbook.xlsx.writeBuffer()));
+
+    expect(xlsxSheets[0]?.headerCandidateDigests).toEqual([
+      expect.objectContaining({ rowPosition: 1, fieldCount: 56, digest: expect.any(String) }),
+    ]);
+    expect(csvSheets[0]?.headerCandidateDigests[0]?.digest).toBe(
+      xlsxSheets[0]?.headerCandidateDigests[0]?.digest,
+    );
+    const structureOf = (sheets: typeof csvSheets): string =>
+      createReportStructureFingerprint({
+        structureVersion: REPORT_STRUCTURE_VERSION,
+        outletGrain: "branch",
+        parserVersion: 1,
+        sheets: sheets.map((candidate, index) => ({
+          position: index + 1,
+          headerCandidateDigests: candidate.headerCandidateDigests.map((digest) => ({
+            rowPosition: digest.rowPosition,
+            fieldCount: digest.fieldCount,
+            digest: digest.digest,
+          })),
+          hasFormula: candidate.hasFormula,
+          hasMergedCells: candidate.hasMergedCells,
+          hasRepeatedHeader: candidate.hasRepeatedHeader,
+        })),
+      });
+    expect(structureOf(csvSheets)).toBe(structureOf(xlsxSheets));
   });
 });

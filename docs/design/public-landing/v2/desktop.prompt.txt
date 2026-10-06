@@ -1,0 +1,44 @@
+Mode: built-in image_gen; compositing three existing platform artwork references into a new full-page desktop preview.
+
+Use case: ui-mockup.
+Create a polished full-page DESKTOP website design screenshot for RIO, an AI business intelligence platform for business owners seeking profitable growth. This is a substantially redesigned landing-page visual for review. Output one flat, front-on full-page website screenshot, ideal canvas 1440 pixels wide x 3600 pixels tall (desktop layout, NOT a narrow mobile page). Highest available resolution and typography legibility.
+
+INPUT REFERENCES: image 1 hero-platform.png is the main hero artwork to integrate prominently; image 2 business-context.png is the glass-layer sculpture for the understanding section; image 3 decision-detail.png is the evidence/recommendation artwork for the decision section. Preserve their recognizable compositions and charcoal, smoked glass, satin silver, tiny mint material language. These are supporting compositing inputs, not entire webpage layouts. Blend their near-black edges seamlessly into page sections. Do not frame them in browser windows or put thick boxes around them.
+
+ART DIRECTION: exceptional editorial craft, restrained technical luxury, the precision and spaciousness of Linear's marketing website, with an original RIO identity. Near-black neutral background #08090A, white and cool gray typography, delicate separators #222527, extremely subtle mint used sparingly. Large confident geometric grotesk sans-serif type akin Inter/Geist, tight tracking in headlines, generous line height in body. Sharp alignment and ample negative space. Intentionally designed hierarchy, not a dense dashboard, not a grid of generic rounded cards. White primary CTA buttons with dark lettering and modest 6px corners. No purple gradients, neon orbs, stock photographs, testimonials, company logos, unsubstantiated revenue figures, financial tables, busy grids, or decorative giant glows.
+
+DESKTOP GRID: 1440px visual width, 1120-1200px centered content area, about 112px outer gutters. Maintain desktop two-column layouts. Fine horizontal section rules. Page entire nav through footer visible. Do not shrink content to fit extra sections. Around six spacious major bands with calm scrolling rhythm. Crisp readable words. One continuous page without annotations, mockup-device frames, design boards or floating modal dialogs.
+
+PAGE COMPOSITION AND EXACT COPY:
+1. NAV, height about 80px. Small simple white RIO wordmark left; center links "Platform", "How it works", "Your control"; right "Sign in" text and compact white "Book a walkthrough" button. No third-party marks. Fine bottom border.
+
+2. HERO, about 1050px total including art. At top give 105px breathing space. Small spaced uppercase eyebrow with a tiny mint dot: "BUSINESS INTELLIGENCE. DESIGNED FOR THE AI ERA."
+Huge left-aligned headline around 82px over two lines:
+"A clearer path to"
+"profitable growth."
+Right half of headline zone stays empty dark. Under headline, legible subdued gray copy max 600px:
+"Bring your business into focus. Understand what matters, explore your next move, and grow with confidence."
+Next line white "Book a walkthrough" button and understated secondary "Explore the example" with small right arrow.
+Below, a large cinematic reference image 1 occupies the full content width and can bleed beyond the right grid edge. The glass platform should look striking, dimensional and well-lit, with visible silver edges. Not too small or too faint. Smooth dark blend between headline area and art. Tiny quiet caption below artwork: "Illustrative platform view".
+Avoid enormous unproductive blank areas; combine intentional negative space with a substantial hero artwork.
+
+3. COMPACT POSITIONING BAND, about 340px. Left heading around 44px "Built around your business." Right short paragraph "Your goals. Your numbers. Your next decision. Connected in one place." Below use three elegant unboxed columns with small fine line icons and titles only: "Business context", "Evidence behind the advice", "Human control". Minimal fine dividers, no cards or small-print paragraphs.
+
+4. BUSINESS CONTEXT, about 590px. Two desktop columns, generous space. Left 42% text, right 58% large reference image 2 sculpture. Small mint/gray marker "01 / UNDERSTAND". Large heading around 52px split naturally:
+"The whole picture."
+"A clearer starting point."
+Short body: "Bring reports, goals, and constraints together so every recommendation starts with your business."
+Under it subtle selectable text tabs "Reports" / "Goals" / "Constraints"; "Reports" selected with a slim mint underline. Imagery should feel integrated and prominent, with clear sculptural detail. No example data tables.
+
+5. DECISION SECTION, about 590px. Reverse split: large reference image 3 at left, text at right. Marker "02 / DECIDE". Large heading:
+"Know what deserves"
+"your attention."
+Short body: "Explore recommendations with the reasoning and evidence behind them. See what is known, and what still needs a closer look."
+Subtle text link "Follow the reasoning" with right arrow. Preserve the illustration text "Suggested next step", "Evidence attached", "Awaiting your review" accurately if present. No impact claims.
+
+6. CONTROL BAND, about 320px. Strong large heading left "AI brings the analysis.\nYou make the call." Right short copy "Review the evidence. Set the boundaries. Stay in control of consequential changes." Below right two understated lines with small open-circle icons: "Evidence stays attached" and "Approvals stay with you". Not a card.
+
+7. CLOSING CTA AND FOOTER, remaining about 530px. Generous breathing room, centered large heading "Make your next move\na clearer one." A short line "See how RIO could support your business." White "Book a walkthrough" button. Very faint silver horizon line behind the lower CTA area as a quiet finish, no distracting artwork repetition.
+Minimal footer separated by thin rule: RIO at left with "Business intelligence for thoughtful growth." Small links "Platform", "Your control", "Questions", "Sign in" aligned right. Tiny "© 2026 RIO".
+
+IMPORTANT: This is the resting page; Book a walkthrough appears as a button, no modal covers the composition. Artwork is illustrative, not a real customer screenshot. Functional behavior is outside the still image. Preserve the three referenced assets' visual identity while making them belong to one exceptional designed page. Use page-scale art direction and strong readable hierarchy; do not recreate the rejected crowded financial dashboard aesthetic. No additional sections, fake logos, pricing, badges or excessive prose.

@@ -1,0 +1,76 @@
+{
+  "compiledApp": true,
+  "journeys": {
+    "channel": {
+      "turnId": "6d85bd1a-1c10-4784-a352-d3e1265f01bb",
+      "status": "completed",
+      "events": [
+        "turn_queued",
+        "analysis_started",
+        "analysis_completed",
+        "answer_completed"
+      ],
+      "replayedSameTurn": true,
+      "assistantCount": 1,
+      "separators": 0,
+      "questionnaires": 0,
+      "links": [
+        {
+          "label": "Open exact channel audit ",
+          "href": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/channels/b4f83dd2-3035-4676-9cf3-cedc9b9e7884?runId=6d85bd1a-1c10-4784-a352-d3e1265f01bb"
+        },
+        {
+          "label": "Open exact channel audit",
+          "href": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/channels/b4f83dd2-3035-4676-9cf3-cedc9b9e7884?runId=6d85bd1a-1c10-4784-a352-d3e1265f01bb"
+        }
+      ]
+    },
+    "report": {
+      "turnId": "65af1dfc-4879-4b16-99d5-a26c4e7a1cf3",
+      "status": "completed",
+      "events": [
+        "turn_queued",
+        "report_uploaded",
+        "report_processed",
+        "analysis_completed",
+        "answer_completed"
+      ],
+      "replayedSameTurn": true,
+      "assistantCount": 1,
+      "separators": 0,
+      "questionnaires": 0,
+      "links": [
+        {
+          "label": "Open governed report package ",
+          "href": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/integrations?tab=data-sources&package=25b9208c-d067-49c2-b61a-a977ee2f1350"
+        },
+        {
+          "label": "Open exact channel audit ",
+          "href": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/channels/b4f83dd2-3035-4676-9cf3-cedc9b9e7884?runId=07c0acb1-204c-449c-a55f-4d1b60ec0d18"
+        },
+        {
+          "label": "Open exact channel audit",
+          "href": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/channels/b4f83dd2-3035-4676-9cf3-cedc9b9e7884?runId=07c0acb1-204c-449c-a55f-4d1b60ec0d18"
+        },
+        {
+          "label": "Open governed report review",
+          "href": "/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/integrations?tab=data-sources&package=25b9208c-d067-49c2-b61a-a977ee2f1350"
+        }
+      ]
+    }
+  },
+  "auditDestination": {
+    "status": "loaded",
+    "sameRun": true,
+    "sourceStage": "ready",
+    "sourceRunMatches": true
+  },
+  "reportDestination": {
+    "status": "loaded",
+    "samePackage": true,
+    "dataSourcesSelected": true
+  },
+  "mobile": {
+    "overflow": false
+  }
+}

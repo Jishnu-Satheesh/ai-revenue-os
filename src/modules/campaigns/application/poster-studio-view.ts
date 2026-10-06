@@ -4,7 +4,7 @@ import type {
   ResolvedPosterSlot,
 } from "@/domain/campaigns/poster-slots";
 import { RENDERABLE_SCRIPTS, type RenderableScript } from "@/domain/campaigns/poster-template";
-import type { PosterTemplate } from "@/domain/campaigns/poster-template";
+import type { PosterLayout, PosterTemplate } from "@/domain/campaigns/poster-template";
 import type {
   CampaignBundleManifest,
   CampaignChannel,
@@ -95,6 +95,40 @@ export type PosterStudioOffer = {
   readonly availability: PosterStudioAvailability;
   /** Exactly what would be drawn, so the picker can show it before rendering. */
   readonly slots: readonly ResolvedPosterSlot[];
+  /**
+   * The template's own geometry — text boxes, safe area, plate crop.
+   *
+   * Carried to the client so the Studio preview can place text using the same
+   * boxes and the same fitting rule the compositor uses, rather than a second
+   * layout invented in the browser. It stays a preview: the browser measures
+   * text with its own rasterizer, so sizes land close but not identical, and
+   * the surface says so. Two layout implementations that drift silently would
+   * be worse than no preview at all.
+   */
+  readonly layout: PosterLayout;
+  /**
+   * Which record in this direction's `copy` array the slots were resolved from,
+   * and the words it holds.
+   *
+   * Carried because editing a poster's headline is not a poster operation — it
+   * is an edit to the approved copy the poster quotes, and `operatorEditSchema`
+   * takes the whole record rather than a patch. Without the index the Studio
+   * could show the words but not offer to change them, which would mean an
+   * operator reading a headline they must go somewhere else to fix.
+   *
+   * Null for a template whose placement this campaign wrote no copy for; there
+   * is no record to point at.
+   */
+  readonly copyIndex: number | null;
+  readonly copy: PosterStudioCopy | null;
+};
+
+/** The editable words behind a poster's slots, as `operatorEditSchema` wants them. */
+export type PosterStudioCopy = {
+  readonly hook: string;
+  readonly caption: string;
+  readonly callToAction: string;
+  readonly timingRationale: string;
 };
 
 export type PosterStudioDirection = {
@@ -103,6 +137,15 @@ export type PosterStudioDirection = {
   readonly kind: string;
   /** The manifest asset key of the plate this direction composes over. */
   readonly plateAssetKey: string;
+  /** Why this treatment could move the registered outcome. */
+  readonly rationale: string;
+  /**
+   * Soft brand conventions this direction knowingly departs from.
+   *
+   * The nearest thing the manifest holds to a written negative rule, and it is
+   * governed: a departure nobody wrote down is a departure nobody reviewed.
+   */
+  readonly softConventionDepartures: readonly string[];
 };
 
 export type PosterStudioView = {
@@ -110,6 +153,19 @@ export type PosterStudioView = {
   readonly bundleVersionId: string;
   readonly version: number;
   readonly digest: string;
+  /**
+   * The approved terms this poster is composed under, quoted from the manifest.
+   *
+   * The Studio shows them because composing creative without the objective and
+   * the measure in view is how a poster drifts away from the thing it was
+   * approved to do.
+   */
+  readonly objective: string;
+  readonly measurement: {
+    readonly primaryMetricKey: string;
+    readonly outcomeWindowDays: number;
+    readonly baselineSource: string;
+  };
   /**
    * The scripts this version's poster plan names, or every renderable script
    * when it names none. A version without a plan is not "no scripts" -- nobody
@@ -181,6 +237,9 @@ export function toPosterStudioView(input: PosterStudioViewInput): PosterStudioVi
             placement: template.placement,
           },
           slots: [],
+          layout: template.layout,
+          copyIndex: null,
+          copy: null,
         });
         continue;
       }
@@ -205,6 +264,16 @@ export function toPosterStudioView(input: PosterStudioViewInput): PosterStudioVi
           canvasHeightPx: template.canvasHeightPx,
           availability: toStudioAvailability(templateAvailability(template, slots)),
           slots,
+          layout: template.layout,
+          // The index into the direction's own array, not into the filtered
+          // subset -- an edit addresses the record the manifest holds.
+          copyIndex: direction.copy.indexOf(copy),
+          copy: {
+            hook: copy.hook,
+            caption: copy.caption,
+            callToAction: copy.callToAction,
+            timingRationale: copy.timingRationale,
+          },
         });
       }
     }
@@ -215,6 +284,12 @@ export function toPosterStudioView(input: PosterStudioViewInput): PosterStudioVi
     bundleVersionId: input.bundleVersionId,
     version: manifest.version,
     digest: input.digest,
+    objective: manifest.objective,
+    measurement: {
+      primaryMetricKey: manifest.measurementPlan.primaryMetricKey,
+      outcomeWindowDays: manifest.measurementPlan.outcomeWindowDays,
+      baselineSource: manifest.measurementPlan.baselineSource,
+    },
     scripts: manifest.posterPlan ? manifest.posterPlan.scripts : [...RENDERABLE_SCRIPTS],
     hasPosterPlan: manifest.posterPlan !== undefined,
     directions: manifest.directions.map((direction) => ({
@@ -222,6 +297,8 @@ export function toPosterStudioView(input: PosterStudioViewInput): PosterStudioVi
       name: direction.name,
       kind: direction.kind,
       plateAssetKey: direction.assetIds[0],
+      rationale: direction.rationale,
+      softConventionDepartures: direction.softConventionDepartures,
     })),
     offers,
     renders: input.renders,

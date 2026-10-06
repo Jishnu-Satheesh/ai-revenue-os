@@ -1,0 +1,2145 @@
+/* Organization home layout. The home root owns container queries over the
+   shell's available content width; it adds no page padding of its own. Band
+   edges (>=960 / 760-959 / 560-759 / 328-559 / <328) follow the visual
+   contract V01-V18 with its exact column, gap, cover and thumbnail numbers. */
+
+.home {
+  container-type: inline-size;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  color: var(--foreground);
+}
+
+/* ------------------------------------------------------------------ header */
+
+.header {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.titleRow {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  justify-content: space-between;
+}
+
+.identity {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.logoFrame {
+  display: flex;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+}
+
+.logoFrame img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* A failed logo keeps the name-only masthead readable: icon only. */
+.logoFrame .fallbackLabel {
+  display: none;
+}
+
+/* Null-logo avatar: initials fallback styled like the prototype's small bold
+   wordmark text (JUNIPER KITCHEN box). A dedicated class — .fallbackLabel
+   stays hidden inside .logoFrame for failed logo images. */
+.avatarInitials {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  line-height: 1.4;
+  text-transform: uppercase;
+  color: var(--foreground);
+}
+
+.title {
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-size: 32px;
+  line-height: 1.25;
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.description {
+  max-width: 60ch;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.actions {
+  display: flex;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.contextRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.contextItem {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 6px;
+}
+
+.divider {
+  margin-top: 12px;
+}
+
+/* -------------------------------------------------------------------- body */
+
+.body {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 30px;
+  align-items: start;
+  margin-top: 28px;
+}
+
+/* Narrow single column: campaigns, library, attention, goals, destinations,
+   activity stack in DOM order. */
+.campaigns,
+.library,
+.attention,
+.goals,
+.destinations,
+.activity {
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
+.sectionHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+
+.sectionTitle {
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.railTitle {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+/* --------------------------------------------------------------- campaigns */
+
+.campaignGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.campaignCard {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 16px;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.campaignCard:hover {
+  border-color: #b6c8b8;
+  box-shadow: 0 5px 16px #1c40240a;
+}
+
+.cover {
+  position: relative;
+  height: 220px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.coverFallback {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+/* Foot row: a 1px neutral divider, then the short date left and the inline
+   text CTA right. */
+.campaignFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.campaignBody {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cardTitle {
+  overflow-wrap: break-word;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.cardText {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.meta {
+  overflow-wrap: break-word;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.compactList {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.compactRow {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.compactName {
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ----------------------------------------------------------------- gallery */
+
+.galleryGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.thumb {
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  text-align: start;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.thumb:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.thumb:focus-visible {
+  outline: 3px solid var(--primary);
+  outline-offset: 3px;
+}
+
+.thumbImage {
+  display: block;
+  position: relative;
+  height: 140px;
+  overflow: hidden;
+  background: var(--muted);
+}
+
+.thumbImage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.thumbMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 10px;
+}
+
+.thumbLabel {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.thumbSub {
+  overflow-wrap: break-word;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.thumbTagRow {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 6px;
+}
+
+.warning {
+  margin-bottom: 12px;
+}
+
+/* --------------------------------------------------------------- attention */
+
+.attentionPanel {
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--muted);
+  padding: 20px;
+}
+
+.attentionList {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  gap: 12px;
+}
+
+.attentionRow {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.attentionTitle {
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.attentionReason {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.caption {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.emptyNote {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+/* ------------------------------------------------------------------- goals */
+
+.goalCard {
+  border-radius: 12px;
+}
+
+.goalTarget {
+  margin-top: 8px;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------ destinations */
+
+/* Around-your-business: borderless cells (icon on top, title + arrow, gray
+   description) under a 1px neutral section rule — prototype .workspace and
+   .workspace-item. No cards, counts, dots or claims. */
+.destinations {
+  border-top: 1px solid var(--border);
+  padding-top: 25px;
+}
+
+.destGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.destLink {
+  display: flex;
+  min-height: 44px;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 15px 0;
+  text-decoration: none;
+  color: inherit;
+}
+
+.destLink:hover {
+  text-decoration: none;
+}
+
+.destIcon {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  color: var(--primary);
+}
+
+.destText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.destLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.destArrow {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.destDescription {
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+/* ---------------------------------------------------------------- activity */
+
+/* Recent activity: the section sits under a 1px neutral rule (prototype
+   .activity); rows are borderless icon-left cells — small gray label, bold
+   title, gray date (prototype .activity-item). The .feed* classes serve only
+   this feed: the shared .activityList/.activityRow/.activityLabel/
+   .activityTitle rules below stay exactly as the locations/goals dialogs in
+   home-context.tsx use them. */
+.activity {
+  border-top: 1px solid var(--border);
+  padding-top: 24px;
+}
+
+.feedList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.feedRow {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.feedIcon {
+  display: flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+
+.feedText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.feedLabel {
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.feedTitle {
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+
+.activityList {
+  display: flex;
+  flex-direction: column;
+}
+
+.activityRow {
+  display: flex;
+  min-height: 44px;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid var(--border);
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+
+.activityRow:first-child {
+  border-top: 1px solid var(--border);
+}
+
+.activityLabel {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.activityTitle {
+  overflow-wrap: break-word;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.activityLink {
+  border-radius: 4px;
+}
+
+/* ------------------------------------------------------------------ footer */
+
+/* Composition footer: the prototype's first-half line only (its fixture
+   second half stays excluded per the parity ledger). Neutral muted caption
+   styling; sits after the .body grid, before the route's management surface.
+   The margin+padding stack on the body's 30px gap the same way the FIX D
+   section rules do — accepted, both values cited. */
+.footer {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+/* ----------------------------------------------------------------- buttons */
+
+.homeButton {
+  min-height: 38px;
+}
+
+.inlineLink {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 6px;
+}
+
+/* ------------------------------------------------------------------ dialog */
+
+.dialogContent {
+  max-width: 780px;
+}
+
+/* Asset dialog only: shadcn DialogContent ships p-4 (16px), which stacks with
+   .dialogGrid's own 24px to ~40px against the V09 24px inset. Zeroing the
+   outer padding here (plus the header/grid gap) lands the grid's 24px as the
+   true inset. Dedicated classes so the locations/goals dialogs — which render
+   header+list directly in DialogContent and depend on its padding — paint
+   exactly as before. */
+.assetDialogContent {
+  padding: 0;
+  gap: 0;
+}
+
+.assetDialogHeader {
+  padding: 20px 24px 0;
+}
+
+.dialogGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 26px;
+  padding: 24px;
+  max-height: calc(100dvh - 4rem);
+  overflow-y: auto;
+}
+
+.dialogImage {
+  position: relative;
+  height: 310px;
+  overflow: hidden;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--muted);
+}
+
+.dialogImage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.dialogDetails {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dialogBadge {
+  display: flex;
+  justify-content: flex-start;
+  margin-bottom: 4px;
+}
+
+.dialogSourceButton {
+  margin-top: 8px;
+  align-self: flex-start;
+}
+
+@media (max-width: 639px) {
+  .assetDialogHeader {
+    padding: 16px 18px 0;
+  }
+
+  .dialogGrid {
+    grid-template-columns: 1fr;
+    padding: 18px;
+  }
+
+  .dialogImage {
+    height: 245px;
+  }
+
+  .dialogSourceButton {
+    align-self: stretch;
+    width: 100%;
+  }
+}
+
+/* ------------------------------------------------------------------- bands */
+
+/* 328-559: tighter campaign gap and covers, taller thumbnails. */
+@container (min-width: 328px) {
+  .cover {
+    height: 147px;
+  }
+
+  .campaignGrid {
+    gap: 10px;
+  }
+
+  .thumbImage {
+    height: 170px;
+  }
+}
+
+/* 560-759: single main column; campaigns 2 columns with tall covers;
+   gallery 4 columns; attention and goals share a row after the gallery. */
+@container (min-width: 560px) {
+  .body {
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .campaigns,
+  .library,
+  .destinations,
+  .activity {
+    grid-column: 1 / -1;
+  }
+
+  .attention {
+    grid-column: 1;
+  }
+
+  .goals {
+    grid-column: 2;
+  }
+
+  .cover {
+    height: 215px;
+  }
+
+  .campaignGrid {
+    gap: 14px;
+  }
+
+  .galleryGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .thumbImage {
+    height: 140px;
+  }
+
+  .cardTitle {
+    font-size: 14px;
+  }
+}
+
+/* 760-959: 80/20 primary + rail; revenue full width on row 1, attention
+   top-aligns with campaigns on row 2, goals sits directly below attention
+   on row 3. Explicit shared row starts keep the rail aligned no matter
+   which section settles first; the rail never shares revenue's row. */
+@container (min-width: 760px) {
+  .body {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 1fr);
+    column-gap: 22px;
+    row-gap: 30px;
+  }
+
+  .revenue {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .campaigns {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .attention {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .library {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .goals {
+    grid-column: 2;
+    grid-row: 3;
+  }
+
+  .destinations {
+    grid-column: 1 / -1;
+    grid-row: 4;
+  }
+
+  .activity {
+    grid-column: 1 / -1;
+    grid-row: 5;
+  }
+
+  .cover {
+    height: 170px;
+  }
+
+  .galleryGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .thumbImage {
+    height: 165px;
+  }
+
+  .destGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .activityList {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0 24px;
+  }
+
+  .feedList {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+
+  .cardTitle {
+    font-size: 15px;
+  }
+}
+
+/* >=960: same 80/20 primary + rail with the widest gap. */
+@container (min-width: 960px) {
+  .body {
+    grid-template-columns: minmax(0, 4fr) minmax(0, 1fr);
+    column-gap: 28px;
+  }
+
+  .cover {
+    height: 204px;
+  }
+
+  .galleryGrid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .thumbImage {
+    height: 143px;
+  }
+}
+
+/* <328: campaigns collapse to one column with tall covers. */
+@container (max-width: 327px) {
+  .campaignGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .cover {
+    height: 220px;
+  }
+}
+
+/* Narrow two-column cards stack the foot row (date over CTA) and shrink the
+   art chip; single-column cards (<328) are full width, so the row returns. */
+@container (max-width: 559px) {
+  .campaignFoot {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+}
+
+@container (max-width: 327px) {
+  .campaignFoot {
+    flex-direction: row;
+    align-items: center;
+  }
+}
+
+/* Narrow content: smaller h1 and stacked header actions. */
+@container (max-width: 559px) {
+  .title {
+    font-size: 25px;
+  }
+
+  .actions {
+    width: 100%;
+  }
+}
+
+@container (max-width: 327px) {
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions > * {
+    width: 100%;
+  }
+}
+
+/* Touch targets grow on coarse pointers; transitions rest without motion. */
+@media (pointer: coarse) {
+  .homeButton,
+  .inlineLink,
+  .thumb,
+  .destLink,
+  .compactRow a {
+    min-height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home .campaignCard,
+  .home .thumb,
+  .home .destLink {
+    transition: none;
+  }
+}
+
+/* Current vs projected growth: metrics and chart lead, actions follow on narrow.
+   Mirrors the Business Performance card: a tinted header, a 70/30 chart-plus-
+   rail row with a divider, and a muted foot for notes. The section stays full
+   width above campaigns. */
+.revenue {
+  min-width: 0;
+  grid-column: 1 / -1;
+}
+
+.revenueHead {
+  background-color: color-mix(in srgb, var(--primary) 5%, transparent);
+  padding: 20px 20px 24px;
+}
+
+.revenueHead .sectionHead {
+  margin-bottom: 0;
+}
+
+.revenueGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 7fr) auto minmax(0, 3fr);
+  gap: 0;
+  margin-top: 0;
+}
+
+.revenueMain {
+  min-width: 0;
+  padding: 20px;
+}
+
+.revenueSide {
+  min-width: 0;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.revenueFoot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  padding: 12px 20px;
+}
+
+.revenueFoot .revenueNotes {
+  margin: 0;
+}
+
+.revenueViewMoreRow {
+  margin-top: auto;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 16px;
+}
+
+.revenueViewMore {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.revenueChart {
+  height: 260px;
+  width: 100%;
+  margin-top: 12px;
+}
+
+.revenueFigures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.revenueFigures dt {
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.revenueFigures dd {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.revenueFigureSub {
+  font-size: 12px !important;
+  font-weight: 400 !important;
+  color: var(--muted-foreground);
+}
+
+.revenueLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+.revenueLegend li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.revenueSwatchSolid,
+.revenueSwatchDashed,
+.revenueSwatchRange {
+  display: inline-block;
+  width: 24px;
+  height: 0;
+  border-top: 3px solid var(--primary);
+}
+
+.revenueSwatchDashed {
+  border-top: 2px dashed var(--muted-foreground);
+}
+
+.revenueSwatchRange {
+  border-top: 2px dashed var(--success);
+}
+
+.revenueGap,
+.revenueLine {
+  font-size: 13px;
+  color: var(--muted-foreground);
+  margin: 12px 0 0;
+}
+
+.revenueSideTitle {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.revenueSide .revenueSideTitle:not(:first-child) {
+  margin-top: 20px;
+}
+
+.revenueActionList {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.revenueActionFigure {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+
+.revenueActionName {
+  font-weight: 600;
+}
+
+.revenueActionMeta {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Not-yet-quantified rail rows: card-like as the campaign cards, but honest
+   about having no number. Hover mirrors .campaignCard:hover (primary-tinted
+   border + light shadow). The header is a plain row; only the small chevron
+   toggle is a button, so the title link and toggle stay siblings (never
+   nested interactives). Expand/collapse is an instant show/hide with no
+   transition or animation, so still under prefers-reduced-motion by
+   construction. All classes stay scoped to the revenue rail. */
+.revenueUnquantifiedRow {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+
+.revenueUnquantifiedRow:hover {
+  border-color: #b6c8b8;
+  box-shadow: 0 5px 16px #1c40240a;
+}
+
+.revenueUnquantifiedHeader {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+
+.revenueUnquantifiedToggle {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 8px;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  font: inherit;
+}
+
+.revenueUnquantifiedToggle:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.revenueUnquantifiedChevron {
+  width: 16px;
+  height: 16px;
+}
+
+.revenueUnquantifiedToggle[aria-expanded="true"] .revenueUnquantifiedChevron {
+  transform: rotate(180deg);
+}
+
+.revenueUnquantifiedIcon {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--muted-foreground);
+}
+
+.revenueUnquantifiedBody {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.revenueUnquantifiedMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.revenueUnquantifiedPending {
+  display: inline-block;
+  width: fit-content;
+  border: 1px dashed var(--muted-foreground);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+.revenueUnquantifiedReason {
+  margin: 0;
+  padding: 0 12px 10px 38px;
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.revenueNotes {
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+
+@container (min-width: 640px) {
+  .revenueHead {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .revenueMain,
+  .revenueSide {
+    padding: 28px;
+  }
+
+  .revenueFoot {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
+
+@container (max-width: 900px) {
+  .revenueGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .revenueFigures {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.revenueHorizonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0 0 4px;
+}
+
+/* The racing tip on the current-course line: a soft ring that breathes
+   outward while the static dot holds the exact value. Opacity and scale
+   only — never position — and fully still under reduced motion. */
+.revenuePulse {
+  fill: none;
+  stroke: var(--muted-foreground);
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: revenue-ping 2.2s ease-out infinite;
+}
+
+@keyframes revenue-ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+
+  70% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .revenuePulse {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+/* ------------------------------------------------- fixed-projection growth */
+
+/* Current vs projected growth (visual contract V01–V04/V06). The section is
+   its own inline-size container: the V02 canonical/normal type switch keys
+   off the card width (≥1440), not the viewport. Legacy .revenue* rules above
+   stay exactly as the rollback path renders them. */
+.growth {
+  min-width: 0;
+  grid-column: 1 / -1;
+  container-type: inline-size;
+}
+
+.growthHead {
+  background-color: color-mix(in srgb, var(--primary) 5%, transparent);
+  padding: 22px 20px;
+}
+
+.growthHeadRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px 16px;
+}
+
+.growthHeadings {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.growthTitle {
+  overflow-wrap: break-word;
+  font-size: 20px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.growthSubtitle {
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.54;
+  color: var(--muted-foreground);
+}
+
+/* Segmented horizon control: the approved header frames the four ghost
+   buttons in one muted pill and floats the selected month on a card pill.
+   Scoped to this section; the legacy revenue row below is untouched. */
+.growthHorizonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-self: center;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background-color: color-mix(in srgb, var(--muted) 60%, transparent);
+  padding: 4px;
+}
+
+.growthHorizonRow [aria-pressed="true"] {
+  background-color: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  color: var(--foreground);
+}
+
+.growthGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+}
+
+.growthMain {
+  min-width: 0;
+  padding: 20px;
+}
+
+.growthSide {
+  min-width: 0;
+  padding: 20px;
+}
+
+/* Divider between chart and advice: horizontal when stacked, a 1px vertical
+   rule at the 68.25/68/65% split when side by side. */
+.growthDividerVertical {
+  display: none;
+}
+
+.growthDividerHorizontal {
+  display: block;
+  margin: 0 20px;
+}
+
+.growthChartBlock {
+  min-width: 0;
+}
+
+.growthSummaries {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin: 0;
+}
+
+.growthSummary {
+  min-width: 0;
+}
+
+.growthSummary + .growthSummary {
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+}
+
+.growthSummaryLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-wrap: break-word;
+  font-size: 13px;
+  line-height: 1.54;
+  color: var(--muted-foreground);
+}
+
+.growthLegendDotFilled {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background-color: #2563eb;
+}
+
+.growthLegendDotHollow {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  border: 2px solid #08785a;
+  background-color: #ffffff;
+}
+
+.growthSummaryCurrent {
+  margin: 6px 0 0;
+  overflow-wrap: break-word;
+  font-size: 28px;
+  line-height: 1.21;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #173f83;
+}
+
+.growthSummaryProjected {
+  margin: 6px 0 0;
+  overflow-wrap: break-word;
+  font-size: 28px;
+  line-height: 1.21;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: #08785a;
+}
+
+.growthSummaryEstimate {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthAxisMeasure {
+  margin: 20px 0 0;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthChart {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.growthChart text {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Chart-internal type (V02): 12px on normal desktop; the ≥1440 container
+   query raises ticks, point labels and endpoint words to 16px. Recharts sets
+   these as SVG attributes, so plain CSS wins without touching the chart. */
+.growthChart .recharts-cartesian-axis-tick-value {
+  font-size: 12px;
+}
+
+.growthCurrentLabel,
+.growthProjectedLabel,
+.growthCurrentWord,
+.growthProjectedWord {
+  font-size: 12px;
+}
+
+.growthGuideLabel,
+.growthBracketLabel {
+  font-size: 12px;
+}
+
+.growthHint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthFoot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  border-top: 1px solid var(--border);
+  background-color: color-mix(in srgb, var(--muted) 40%, transparent);
+  padding: 12px 20px;
+}
+
+.growthFootLines {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.growthFootLine {
+  margin: 0;
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthMethodNote {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthMethodIcon {
+  width: 16px;
+  height: 16px;
+}
+
+.growthStateNote {
+  padding: 8px 0;
+}
+
+.growthStateTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Advice rail (V06): eyebrow, verdict, amount, then at most two rows. */
+.growthInsight {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.growthEyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.45;
+  letter-spacing: 0.06em;
+  color: var(--muted-foreground);
+}
+
+.growthStatusTitle {
+  margin: 6px 0 0;
+  overflow-wrap: break-word;
+  font-size: 20px;
+  line-height: 1.4;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+}
+
+.growthGapAmount {
+  margin: 8px 0 0;
+  overflow-wrap: break-word;
+  font-size: 22px;
+  line-height: 1.36;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.growthGapPercent {
+  margin: 4px 0 0;
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthInsightDivider {
+  margin: 16px 0;
+}
+
+.growthAdviceHeading {
+  margin: 0 0 4px;
+  overflow-wrap: break-word;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 600;
+}
+
+.growthAdviceList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.growthAdviceRow {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.growthAdviceRow:last-child {
+  border-bottom: 0;
+}
+
+.growthAdviceLink {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+}
+
+.growthAdviceLink:hover .growthAdviceTitle {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.growthAdviceText {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.growthAdviceTitle {
+  overflow-wrap: break-word;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.growthAdviceSupporting {
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthAdviceArrow {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: #08785a;
+}
+
+.growthAdviceEmpty {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted-foreground);
+}
+
+.growthRecommendationsRow {
+  margin: 16px 0 0;
+}
+
+/* On-demand trigger under a blank panel: button plus one honest line. */
+.growthTriggerNote {
+  margin: 16px 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.growthRecommendationsLink {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #08785a;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+.growthRecommendationsLink:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* Dark-mode series tokens (V02): light values ride as SVG props so tests can
+   pin the exact tokens; these rules adapt them after dark. Attribute
+   selectors target the two Line paths without depending on Recharts'
+   internal class names. */
+.dark .growthCurrentDot {
+  fill: #79a8ff;
+  stroke: var(--card);
+}
+
+.dark .growthProjectedDot {
+  fill: var(--card);
+  stroke: #69cfac;
+}
+
+.dark .growthCurrentLabel {
+  fill: #79a8ff;
+}
+
+.dark .growthProjectedLabel,
+.dark .growthProjectedWord {
+  fill: #69cfac;
+}
+
+.dark .growthCurrentWord {
+  fill: #79a8ff;
+}
+
+.dark .growthChart g path[stroke="#2563EB" i] {
+  stroke: #79a8ff;
+}
+
+.dark .growthChart g path[stroke="#08785A" i] {
+  stroke: #69cfac;
+}
+
+.dark .growthSummaryCurrent {
+  color: #79a8ff;
+}
+
+.dark .growthSummaryProjected,
+.dark .growthAdviceArrow,
+.dark .growthRecommendationsLink {
+  color: #69cfac;
+}
+
+.dark .growthLegendDotFilled {
+  background-color: #79a8ff;
+}
+
+.dark .growthLegendDotHollow {
+  border-color: #69cfac;
+  background-color: var(--card);
+}
+
+/* Living ends on both growth lines: a soft ring breathing outward at the
+   last current point and the last projected point, so the growth reads as
+   alive. Opacity and scale only — never position — and fully still under
+   reduced motion. Mirrors the legacy .revenuePulse pattern in series green
+   and blue. */
+.growthPulseCurrent,
+.growthPulseProjected {
+  fill: none;
+  stroke-width: 2;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: growth-ping 2.2s ease-out infinite;
+}
+
+.growthPulseCurrent {
+  stroke: #2563eb;
+}
+
+.growthPulseProjected {
+  stroke: #08785a;
+}
+
+@keyframes growth-ping {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.9;
+  }
+
+  70% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .growthPulseCurrent,
+  .growthPulseProjected {
+    animation: none;
+    opacity: 0;
+  }
+}
+
+.dark .growthPulseCurrent {
+  stroke: #79a8ff;
+}
+
+.dark .growthPulseProjected {
+  stroke: #69cfac;
+}
+
+/* 900–1099 card width: 65/35 side by side. */
+@container (min-width: 900px) {
+  .growthGrid {
+    grid-template-columns: minmax(0, 65%) auto minmax(0, 1fr);
+  }
+
+  .growthDividerVertical {
+    display: block;
+    margin: 24px 0;
+  }
+
+  .growthDividerHorizontal {
+    display: none;
+  }
+
+  .growthHead {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  .growthMain,
+  .growthSide {
+    padding: 24px;
+  }
+
+  .growthFoot {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+}
+
+/* 1100–1439 card width: 68/32 side by side. */
+@container (min-width: 1100px) {
+  .growthGrid {
+    grid-template-columns: minmax(0, 68%) auto minmax(0, 1fr);
+  }
+}
+
+/* ≥1440 card width: canonical 68.25/31.75 grid and the wide type scale. */
+@container (min-width: 1440px) {
+  .growthGrid {
+    grid-template-columns: minmax(0, 68.25%) auto minmax(0, 1fr);
+  }
+
+  .growthHead {
+    padding: 22px 30px;
+  }
+
+  /* Title 26/34 + 8 gap + subtitle 17/24 over 44 padding = 110 ≈ V01 109. */
+  .growthHeadings {
+    gap: 8px;
+  }
+
+  .growthMain {
+    padding: 38px 30px 24px;
+  }
+
+  /* V01 summary anchors: separator at card-x 485, second summary text at
+     553. The 384/613 split of the post-gap 985.9px lane plus the 12px gap,
+     the 1px border and the 67px rail lane land both exactly at the
+     canonical 1550 width and scale below it
+     (93 + 379.7 + 12 = 484.7; + 1 + 67 = 552.7). */
+  .growthSummaries {
+    grid-template-columns: minmax(0, 384fr) minmax(0, 613fr);
+  }
+
+  .growthSummary + .growthSummary {
+    padding-left: 67px;
+  }
+
+  /* V01 plot anchors: the y scale already spans the right distance, so the
+     whole chart rides 36px lower to sit the plot top at y=437 and zero at
+     y=710. Chart-internal text joins the wide type scale. */
+  .growthChart {
+    margin-top: 40px;
+  }
+
+  .growthChart .recharts-cartesian-axis-tick-value,
+  .growthCurrentLabel,
+  .growthProjectedLabel,
+  .growthCurrentWord,
+  .growthProjectedWord {
+    font-size: 16px;
+  }
+
+  .growthGuideLabel,
+  .growthBracketLabel {
+    font-size: 14px;
+  }
+
+  .growthSide {
+    padding: 30px 40px 24px;
+  }
+
+  .growthFoot {
+    padding-left: 30px;
+    padding-right: 30px;
+  }
+
+  .growthTitle {
+    font-size: 26px;
+    line-height: 1.31;
+  }
+
+  .growthSubtitle {
+    font-size: 17px;
+    line-height: 1.41;
+  }
+
+  .growthSummaryLabel {
+    font-size: 17px;
+    line-height: 1.41;
+  }
+
+  .growthSummaryCurrent,
+  .growthSummaryProjected {
+    font-size: 30px;
+    line-height: 1.27;
+  }
+
+  .growthAxisMeasure {
+    font-size: 16px;
+    line-height: 1.38;
+  }
+
+  .growthStatusTitle {
+    font-size: 26px;
+    line-height: 1.31;
+  }
+
+  .growthGapAmount {
+    font-size: 28px;
+    line-height: 1.29;
+  }
+
+  .growthGapPercent {
+    font-size: 17px;
+    line-height: 1.47;
+  }
+
+  .growthEyebrow {
+    font-size: 13px;
+    line-height: 1.54;
+  }
+
+  .growthAdviceTitle {
+    font-size: 19px;
+    line-height: 1.42;
+  }
+
+  .growthAdviceSupporting {
+    font-size: 17px;
+    line-height: 1.47;
+  }
+
+  .growthAdviceHeading {
+    font-size: 19px;
+  }
+
+  .growthFootLine,
+  .growthMethodNote,
+  .growthHint {
+    font-size: 15px;
+    line-height: 1.47;
+  }
+}
+
+/* ---------------- Task 7: interaction, disclosure and degraded states ----
+   Everything below is scoped to the growth section; the legacy revenue rules
+   above and every other card on the page are untouched. */
+
+/* Keyboard group around the chart: position context for the tooltip, with a
+   visible focus ring. Plotting itself stays static (V05 reduced motion). */
+.growthChartWrap {
+  position: relative;
+  min-width: 0;
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+.growthChartWrap:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+}
+
+/* Small shadcn-surfaced tooltip (V05): date, current, projected central and
+   range, signed difference. No big overlay panel. Flipping is inline
+   (left vs right at 70%); the 8px inset keeps it off the card edge. */
+.growthTooltip {
+  position: absolute;
+  top: 0;
+  z-index: 2;
+  min-width: 180px;
+  max-width: min(280px, calc(100% - 16px));
+  margin: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.12);
+  padding: 8px 12px;
+  pointer-events: none;
+}
+
+.growthTooltipDate {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.growthTooltipRow {
+  margin: 2px 0 0;
+  overflow-wrap: break-word;
+  font-size: 12px;
+  line-height: 1.5;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Method dialog trigger: a real button with a 44px target (V03). */
+.growthMethodButton {
+  min-height: 44px;
+}
+
+/* Horizon buttons keep the approved pill look with 44px targets (V03). */
+.growthHorizonRow button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* Method dialog body: fact list, assumptions and the value table. Wide
+   enough for six columns with a scroll fallback on narrow cards. */
+.growthDialog {
+  max-width: min(640px, calc(100vw - 2rem));
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+}
+
+.growthMethodFacts {
+  display: flex;
+  margin: 0;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.growthMethodFacts > div {
+  display: grid;
+  grid-template-columns: 110px minmax(0, 1fr);
+  gap: 4px 12px;
+}
+
+.growthMethodFacts dt {
+  font-weight: 600;
+}
+
+.growthMethodFacts dd {
+  margin: 0;
+  overflow-wrap: break-word;
+}
+
+.growthMethodAssumptions {
+  margin: 12px 0 0;
+  padding-left: 20px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
+.growthMethodAssumptions li + li {
+  margin-top: 4px;
+}
+
+.growthMethodTable {
+  margin-top: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Loading skeleton reserves summary, chart and rail space (V07): blanks
+   only, never example amounts or wavy lines. */
+.growthLoading {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+}
+
+.growthLoadingSummaries {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+}
+
+.growthLoadingSummary {
+  height: 64px;
+}
+
+.growthLoadingChart {
+  height: 340px;
+}
+
+.growthLoadingRail {
+  height: 120px;
+}
+
+.growthFailed {
+  padding: 20px;
+}
+
+/* Small cards (<560): tighter title/values, wrapped summaries, stacked
+   footer with the method control on its own row. The grid is already
+   single-column below 900; these rules only shrink type and spacing so
+   320px viewports never scroll sideways. */
+@container (max-width: 559px) {
+  .growthTitle {
+    font-size: 18px;
+    line-height: 1.44;
+  }
+
+  .growthSummaryCurrent,
+  .growthSummaryProjected {
+    font-size: 22px;
+    line-height: 1.36;
+  }
+
+  .growthSummaryLabel {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .growthFoot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .growthMethodButton {
+    align-self: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .growthTooltip {
+    transition: none;
+  }
+}

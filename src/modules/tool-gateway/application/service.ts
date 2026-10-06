@@ -11,10 +11,10 @@ import {
 /**
  * The deterministic Tool Gateway.
  *
- * One rule shapes the whole thing: the adapter is chosen *after* the claim
- * succeeds. A worker hands over a tool key and a parsed action; if the database
- * refuses, no adapter is ever looked up, so there is no code path from an
- * unauthorized action to a provider call.
+ * One rule shapes the whole thing: the provider is *called* only after the
+ * claim succeeds. A worker hands over a tool key and a parsed action; if the
+ * database refuses, no adapter is ever invoked, so there is no code path from
+ * an unauthorized action to a provider call.
  *
  * The gateway also owns the difference between a failure and an unknown
  * outcome. A rejected call is a failure and releases its reservation. A call
@@ -25,33 +25,84 @@ import {
 
 const DEFAULT_LEASE_SECONDS = 300;
 
+/**
+ * Which adapter serves which organization.
+ *
+ * A resolver rather than a list, because the sweep that drives this gateway
+ * spans every tenant while a provider credential belongs to exactly one. One
+ * shared adapter would have to hold one tenant's token and would publish
+ * everybody's work to that account.
+ *
+ * The two questions are deliberately separate. `supportedToolKeys` is about the
+ * deployment — can this build perform this kind of call at all — and is
+ * answered without touching the database, so a tool that is switched off costs
+ * nothing to refuse. `resolve` is about one organization, and may read that
+ * organization's stored connection.
+ */
+export type ToolAdapterResolver = {
+  /** Tool keys this deployment could perform for some organization. */
+  supportedToolKeys(): readonly ToolKey[];
+  /** This organization's adapter, or null when it has no usable connection. */
+  resolve(input: {
+    organizationId: string;
+    toolKey: ToolKey;
+  }): Promise<ToolAdapter | null>;
+};
+
+/**
+ * A resolver over a fixed list, for adapters that carry no per-tenant
+ * credential — fixtures, tests, and any provider configured once for the whole
+ * deployment.
+ */
+export function staticAdapters(adapters: readonly ToolAdapter[]): ToolAdapterResolver {
+  const registry = new Map<ToolKey, ToolAdapter>(
+    adapters.map((adapter) => [adapter.toolKey, adapter]),
+  );
+  return {
+    supportedToolKeys: () => [...registry.keys()],
+    resolve: async ({ toolKey }) => registry.get(toolKey) ?? null,
+  };
+}
+
 export type ToolGatewayDependencies = {
   store: ToolGatewayStore;
   /** The only route to a provider. Nothing else may hold an adapter. */
-  adapters: readonly ToolAdapter[];
+  adapters: ToolAdapterResolver;
 };
 
 export function createToolGateway(dependencies: ToolGatewayDependencies) {
-  const registry = new Map<ToolKey, ToolAdapter>(
-    dependencies.adapters.map((adapter) => [adapter.toolKey, adapter]),
-  );
-
   return {
     /** Which tools this deployment can actually perform. */
     registeredToolKeys(): readonly ToolKey[] {
-      return [...registry.keys()];
+      return dependencies.adapters.supportedToolKeys();
     },
 
     async execute(rawInput: ExecuteActionInput, signal: AbortSignal): Promise<ExecuteActionResult> {
       const input = executeActionInputSchema.parse(rawInput);
 
-      // Checked before the claim. Claiming for a tool this deployment cannot
-      // perform would burn an attempt and leave a lease on work nothing can do.
-      const adapter = registry.get(input.toolKey);
-      if (!adapter) {
+      // Both checks happen before the claim, because claiming for work that
+      // cannot be done would burn an attempt and leave a lease behind. The
+      // store's `fail` needs an invocation id, and there is no invocation to
+      // record for a call that was never made.
+      if (!dependencies.adapters.supportedToolKeys().includes(input.toolKey)) {
         throw new DomainError(
           "FEATURE_NOT_AVAILABLE",
           `No adapter is installed for ${input.toolKey}.`,
+        );
+      }
+
+      // Separate from the refusal above, and worth keeping separate: this
+      // deployment can do the thing, this organization has not connected an
+      // account that lets it. The sweep records that against the action and
+      // carries on to the next one.
+      const adapter = await dependencies.adapters.resolve({
+        organizationId: input.organizationId,
+        toolKey: input.toolKey,
+      });
+      if (!adapter) {
+        throw new DomainError(
+          "FEATURE_NOT_AVAILABLE",
+          `No connected account can perform ${input.toolKey} for this organization.`,
         );
       }
 

@@ -30,6 +30,23 @@ const organizationListSchema = z.object({
 
 type OrganizationOption = z.infer<typeof organizationListSchema>["organizations"][number];
 
+/**
+ * The organization's own mark, when the platform may draw one.
+ *
+ * Only `displayLogo` is read. The server has already decided whether the
+ * bytes were validated and whether a reviewer rejected them; re-deciding that
+ * here would be a second implementation of a rule that must not drift.
+ */
+const displayLogoSchema = z
+  .object({ displayLogo: z.object({ url: z.string(), label: z.string() }).nullable() })
+  .transform((body) => body.displayLogo);
+
+async function fetchDisplayLogo(organizationId: string) {
+  const response = await fetch(`/api/organizations/${organizationId}/brand`);
+  if (!response.ok) throw new Error("BRAND_IDENTITY_UNAVAILABLE");
+  return displayLogoSchema.parse(await response.json());
+}
+
 async function fetchOrganizations(): Promise<readonly OrganizationOption[]> {
   const response = await fetch("/api/organizations");
   if (!response.ok) throw new Error("ORGANIZATION_LIST_UNAVAILABLE");
@@ -48,6 +65,15 @@ export function OrganizationSwitcher() {
     queryFn: fetchOrganizations,
   });
 
+  // Its own query, so a brand read that fails costs the logo and nothing
+  // else — the switcher still lists and still switches.
+  const { data: logo } = useQuery({
+    queryKey: ["organizations", organizationId, "brand-identity", "display-logo"],
+    queryFn: () => fetchDisplayLogo(organizationId as string),
+    enabled: Boolean(organizationId),
+    retry: false,
+  });
+
   const active = data?.find((organization) => organization.id === organizationId) ?? null;
   const triggerLabel = isPending
     ? "Loading organizations"
@@ -63,8 +89,19 @@ export function OrganizationSwitcher() {
               tooltip={triggerLabel}
               className="data-[state=open]:bg-sidebar-accent"
             >
-              <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground">
-                <Building2 />
+              <span className="flex aspect-square size-8 shrink-0 items-center justify-center overflow-hidden rounded-md bg-accent text-accent-foreground">
+                {logo ? (
+                  /* eslint-disable-next-line @next/next/no-img-element -- a
+                     session-signed private URL the image optimizer cannot
+                     fetch. */
+                  <img
+                    src={logo.url}
+                    alt={logo.label}
+                    className="size-full object-contain"
+                  />
+                ) : (
+                  <Building2 />
+                )}
               </span>
               <span className="grid min-w-0 flex-1 text-left leading-tight">
                 <span className="truncate text-sm font-semibold">{triggerLabel}</span>

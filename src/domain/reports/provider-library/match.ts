@@ -99,9 +99,7 @@ export function matchProviderDefinition(input: {
     // is filed under a position no row can occupy rather than under the header
     // row, which on a statement is the company's own name.
     const headerRow =
-      rule.recordOrientation === "period_columns"
-        ? TRANSPOSED_HEADER_ROW_POSITION
-        : rule.headerRow;
+      rule.recordOrientation === "period_columns" ? TRANSPOSED_HEADER_ROW_POSITION : rule.headerRow;
     const candidate = sheet.headerCandidateDigests.find((row) => row.rowPosition === headerRow);
     if (!candidate) {
       return no({ reason: "header_row_not_profiled", normalizedSheetName: name, headerRow });
@@ -109,7 +107,11 @@ export function matchProviderDefinition(input: {
     const present = new Set(candidate.normalizedHeaderDigests);
     for (const field of rule.fields) {
       if (present.has(headerDigest(field.sourceHeader))) continue;
-      return no({ reason: "column_missing", normalizedSheetName: name, sourceHeader: field.sourceHeader });
+      return no({
+        reason: "column_missing",
+        normalizedSheetName: name,
+        sourceHeader: field.sourceHeader,
+      });
     }
   }
 
@@ -132,6 +134,9 @@ export function matchProviderDefinitions(input: {
 }): ProviderReportDefinition[] {
   return (input.definitions ?? PROVIDER_REPORT_DEFINITIONS)
     .map((definition) => matchProviderDefinition({ ...input, definition }))
-    .filter((result): result is Extract<DefinitionMatch, { outcome: "matched" }> => result.outcome === "matched")
+    .filter(
+      (result): result is Extract<DefinitionMatch, { outcome: "matched" }> =>
+        result.outcome === "matched",
+    )
     .map((result) => result.definition);
 }

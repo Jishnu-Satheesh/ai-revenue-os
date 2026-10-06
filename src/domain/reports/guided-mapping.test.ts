@@ -86,9 +86,7 @@ describe("what an operator cannot answer", () => {
 
   it("refuses a totals label in a column that carries a figure", () => {
     // The cell would have to be read as a word and as an amount at once.
-    expect(() =>
-      answers({ totalsRow: { sourceHeader: "total_sales", label: "Total" } }),
-    ).toThrow();
+    expect(() => answers({ totalsRow: { sourceHeader: "total_sales", label: "Total" } })).toThrow();
   });
 });
 
@@ -150,8 +148,19 @@ describe("figures for a mapping this path did not write", () => {
   it("records both figures from names it has never seen", () => {
     const document = buildGuidedProjectionDocument(
       legacy([
-        { canonicalField: "gross_sales", sourceHeader: "gross_sales", parser: "money", financialSign: "positive", required: true },
-        { canonicalField: "successful_orders", sourceHeader: "successful_orders", parser: "integer", required: true },
+        {
+          canonicalField: "gross_sales",
+          sourceHeader: "gross_sales",
+          parser: "money",
+          financialSign: "positive",
+          required: true,
+        },
+        {
+          canonicalField: "successful_orders",
+          sourceHeader: "successful_orders",
+          parser: "integer",
+          required: true,
+        },
       ]),
     );
 
@@ -167,8 +176,20 @@ describe("figures for a mapping this path did not write", () => {
     expect(() =>
       buildGuidedProjectionDocument(
         legacy([
-          { canonicalField: "gross_sales", sourceHeader: "gross_sales", parser: "money", financialSign: "positive", required: true },
-          { canonicalField: "net_sales", sourceHeader: "net_sales", parser: "money", financialSign: "positive", required: true },
+          {
+            canonicalField: "gross_sales",
+            sourceHeader: "gross_sales",
+            parser: "money",
+            financialSign: "positive",
+            required: true,
+          },
+          {
+            canonicalField: "net_sales",
+            sourceHeader: "net_sales",
+            parser: "money",
+            financialSign: "positive",
+            required: true,
+          },
         ]),
       ),
     ).toThrow(GuidedProjectionUndecidable);
@@ -177,7 +198,9 @@ describe("figures for a mapping this path did not write", () => {
   it("refuses a mapping with no figure in it at all", () => {
     expect(() =>
       buildGuidedProjectionDocument(
-        legacy([{ canonicalField: "outlet", sourceHeader: "outlet", parser: "text", required: true }]),
+        legacy([
+          { canonicalField: "outlet", sourceHeader: "outlet", parser: "text", required: true },
+        ]),
       ),
     ).toThrow(GuidedProjectionUndecidable);
   });
@@ -185,7 +208,13 @@ describe("figures for a mapping this path did not write", () => {
   it("dates a series only when every row must carry a date", () => {
     const optionalDate = legacy([
       { canonicalField: "seen_on", sourceHeader: "seen_on", parser: "local_date", required: false },
-      { canonicalField: "gross_sales", sourceHeader: "gross_sales", parser: "money", financialSign: "positive", required: true },
+      {
+        canonicalField: "gross_sales",
+        sourceHeader: "gross_sales",
+        parser: "money",
+        financialSign: "positive",
+        required: true,
+      },
     ]);
 
     expect(buildGuidedProjectionDocument(optionalDate).outputKind).toBe("exact_range");
@@ -215,7 +244,10 @@ describe("the pair actually reads a file", () => {
     });
 
     expect(result.observations).toHaveLength(2);
-    expect(result.observations[0]).toMatchObject({ periodStart: "2026-08-01", valueNumerator: "7000" });
+    expect(result.observations[0]).toMatchObject({
+      periodStart: "2026-08-01",
+      valueNumerator: "7000",
+    });
     expect(result.absentRowCount).toBe(2);
   });
 

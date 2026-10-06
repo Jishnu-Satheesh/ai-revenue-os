@@ -1,0 +1,1150 @@
+/**
+ * Channels landing foundation (Task 1, visual contract V00).
+ *
+ * Scoped theme + geometry only. `.root` wraps landing content; `.theme`
+ * carries the same variables onto portalled Dialog/Select/Tooltip content,
+ * because CSS inheritance stops at a portal. Nothing here restyles shared
+ * primitives globally: every selector lives under `.root` / `.theme` or is a
+ * module-hashed class composed explicitly by landing components.
+ */
+
+.root,
+.theme {
+  --channel-ink: #222624;
+  --channel-subdued: #69716c;
+  --channel-line: #e5e8e5;
+  --channel-soft: #f7f8f7;
+  --channel-primary: #127451;
+  --channel-primary-hover: #0e6143;
+  --channel-sage: #edf5f0;
+  --channel-earned: #29956b;
+  --channel-loss: #c58148;
+  --channel-reported: #bac8c0;
+  --channel-warning: #925e2c;
+  --channel-measured: #226f50;
+  --channel-coverage-bg: #f8f9f6;
+  --channel-note-bg: #fcfdfb;
+  --channel-note-text: #5e685f;
+  /* Task 8 P12 correction: the V05 reference denominator #9ca59d measures
+     2.40:1 on the rail background (19px regular text needs 4.5:1), so the
+     token is darkened to the nearest compliant green-gray, 4.61:1. The
+     headline figure and explanatory sentence already carry the meaning in
+     compliant shades; only this token value changed. */
+  --channel-denominator: #69746a;
+  --channel-neutral: #e3e6e1;
+  --channel-header-bg: #fafbf9;
+  --channel-radius: 12px;
+  --channel-title-size: 32px;
+
+  /* Scoped shadcn mapping: landing primitives read this palette while the
+     rest of the app keeps the shared tokens. Destructive keeps its meaning. */
+  --foreground: var(--channel-ink);
+  --primary: var(--channel-primary);
+  --primary-foreground: #ffffff;
+  --muted: var(--channel-soft);
+  --muted-foreground: var(--channel-subdued);
+  --border: var(--channel-line);
+  --input: var(--channel-line);
+  --card: #ffffff;
+  --card-foreground: var(--channel-ink);
+  --popover: #ffffff;
+  --popover-foreground: var(--channel-ink);
+}
+
+.root {
+  color: var(--channel-ink);
+  font-size: 13px;
+}
+
+/* Page title: 32px desktop, 28px on narrow screens (V01). */
+.title {
+  margin: 0;
+  font-size: var(--channel-title-size);
+  font-weight: 700;
+  letter-spacing: -1.3px;
+  line-height: normal;
+}
+
+.subtitle {
+  margin: 7px 0 0;
+  color: var(--channel-subdued);
+  font-size: 12px;
+}
+
+/* Displayed figures are tabular proportional sans, never font-mono. */
+.num {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.6px;
+}
+
+.headlineNum {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+}
+
+.currencyPrefix {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--channel-subdued);
+  margin-right: 4px;
+}
+
+/*
+ * 38px control geometry (V00). Composed onto shadcn Button/Trigger via
+ * className so primitives keep semantics, disabled handling and focus
+ * behavior; only the measurements come from here.
+ */
+.control {
+  min-height: 38px;
+  padding: 8px 13px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.root :focus-visible,
+.theme :focus-visible {
+  outline: 2px solid var(--channel-primary);
+  outline-offset: 4px;
+}
+
+.root button,
+.theme button,
+.root a,
+.theme a {
+  cursor: pointer;
+}
+
+/* V03 summary strip (Task 3): one open strip, top/bottom line borders. */
+.statStrip {
+  display: grid;
+  grid-template-columns: 1.32fr 1fr 1fr 1fr;
+  border-top: 1px solid var(--channel-line);
+  border-bottom: 1px solid var(--channel-line);
+  padding: 23px 0;
+  margin: 0 0 29px;
+}
+
+.statCell {
+  padding: 0 24px;
+  min-width: 0;
+}
+
+.statCell:first-child {
+  padding-left: 0;
+}
+
+.statCell + .statCell {
+  border-left: 1px solid var(--channel-line);
+}
+
+.statLabel {
+  margin: 0;
+  font-size: 11px;
+  color: var(--channel-subdued);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.statValue {
+  margin: 9px 0 7px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.statCell:first-child .statValue {
+  font-size: 34px;
+  line-height: 35px;
+}
+
+/*
+ * Semantic metric colors (not decoration): Earned echoes the earned bar
+ * series, loss echoes the loss series; the neutral totals stay ink.
+ * Measured on white: earned 3.75:1, loss 3.18:1 — both clear the 3:1
+ * large-text bar these 28–34px semibold headlines are judged against.
+ */
+.statValueEarned {
+  color: var(--channel-earned);
+}
+
+.statValueLost {
+  color: var(--channel-loss);
+}
+
+.statPrefix {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--channel-subdued);
+  margin-right: 4px;
+}
+
+.statNote {
+  margin: 0;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+/*
+ * V04 comparison plot (Task 3): outer grid with reserved label/value gutters
+ * (95px/remaining/75px desktop). Names and end values live outside Recharts so
+ * row alignment never depends on chart margins; the plot column holds one
+ * shared-domain BarChart sized at exactly 49px per row plus the axis height.
+ */
+.compareGrid {
+  display: grid;
+  grid-template-columns: 95px minmax(0, 1fr) 75px;
+  column-gap: 12px;
+  align-items: start;
+}
+
+.compareNames,
+.compareValues {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compareCell {
+  min-height: 49px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.compareValues .compareCell {
+  justify-content: flex-end;
+}
+
+.compareNameButton {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--channel-ink);
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.comparePlot {
+  position: relative;
+  min-width: 0;
+}
+
+.compareEndValue {
+  font-size: 11px;
+  font-weight: 650;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.compareDash {
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+.compareNoFigure {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 49px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  font-size: 10px;
+  color: var(--channel-subdued);
+  pointer-events: none;
+}
+
+/*
+ * V04/V05 comparison body (Task 4): plot beside the coverage rail inside the
+ * same Card. Desktop grid `minmax(0,1fr) 254px`; 217px at <=1200, 220px at
+ * <=980, stacked below 650px. The plot cell carries the Task 3 content
+ * padding so the rail's border reaches the content edges.
+ */
+.compareBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 254px;
+}
+
+.comparePlotCell {
+  min-width: 0;
+  padding: 0 25px 15px;
+}
+
+/* V05 coverage rail (Task 4): pale surface, border-left inside the Card. */
+.coverageRail {
+  background: var(--channel-coverage-bg);
+  border-left: 1px solid var(--channel-line);
+  padding: 25px 23px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.coverageEyebrow {
+  margin: 0;
+  text-transform: uppercase;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.6px;
+  color: var(--channel-subdued);
+}
+
+.coverageBig {
+  margin: 13px 0 7px;
+  font-size: 31px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  font-variant-numeric: tabular-nums;
+}
+
+.coverageBigDenom {
+  font-size: 19px;
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--channel-denominator);
+}
+
+.coverageSentence {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--channel-subdued);
+}
+
+/* Purely visual per-channel strip; text counts follow, so aria-hidden. */
+.coverageStrip {
+  display: flex;
+  gap: 5px;
+  margin: 14px 0 18px;
+}
+
+.coverageSegment {
+  height: 6px;
+  flex: 1;
+  border-radius: 2px;
+  min-width: 0;
+}
+
+.coverageRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin: 7px 0;
+  font-size: 11px;
+}
+
+.coverageRowLabel {
+  color: var(--channel-subdued);
+}
+
+.coverageRowCount {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Margin-top auto pins the review link to the rail bottom. */
+.coverageReview {
+  margin-top: auto;
+  padding-top: 22px;
+}
+
+/*
+ * V06 comparison explanation strip (Task 4): full Card width at the bottom,
+ * after the earned-definition footer. Informational only: no pointer cursor,
+ * no link styling, no click handler on the strip itself.
+ */
+.explanationStrip {
+  margin: 0;
+  border-top: 1px solid var(--channel-line);
+  padding: 13px 23px;
+  background: var(--channel-note-bg);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--channel-note-text);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.explanationStripIcon {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  color: var(--channel-primary);
+}
+
+/* Content breakpoints are explicit px values, never Tailwind's sm (V00/R). */
+@media (max-width: 1200px) {
+  .root,
+  .theme {
+    --channel-stat-pad-x: 16px;
+  }
+
+  .statCell {
+    padding: 0 16px;
+  }
+
+  .statCell:first-child {
+    padding-left: 0;
+  }
+
+  .compareGrid {
+    grid-template-columns: 80px minmax(0, 1fr) 66px;
+    column-gap: 8px;
+  }
+
+  .compareBody {
+    grid-template-columns: minmax(0, 1fr) 217px;
+  }
+
+  .comparePlotCell {
+    padding: 0 18px 16px;
+  }
+
+  .coverageRail {
+    padding: 23px 18px;
+  }
+}
+
+@media (max-width: 980px) {
+  .root,
+  .theme {
+    --channel-stat-pad-x: 16px;
+  }
+
+  .compareBody {
+    grid-template-columns: minmax(0, 1fr) 220px;
+  }
+}
+
+@media (max-width: 650px) {
+  .root,
+  .theme {
+    --channel-title-size: 28px;
+  }
+
+  .subtitle {
+    max-width: 210px;
+    line-height: 1.65;
+  }
+
+  .control {
+    padding: 8px 10px;
+    font-size: 11px;
+  }
+
+  /* V03 mobile: two-by-two metrics. Notes stay 11px (P12): 9px would pass the
+     4.5:1 ratio but reads poorly at this size, so the contract's documented
+     correction applies. */
+  .statStrip {
+    grid-template-columns: 1fr 1fr;
+    padding: 0;
+  }
+
+  .statCell {
+    padding: 18px 10px;
+  }
+
+  .statCell:first-child {
+    padding-left: 10px;
+  }
+
+  .statCell + .statCell {
+    border-left: none;
+  }
+
+  .statCell:nth-child(even) {
+    border-left: 1px solid var(--channel-line);
+  }
+
+  .statCell:nth-child(n + 3) {
+    border-top: 1px solid var(--channel-line);
+  }
+
+  .statValue,
+  .statCell:first-child .statValue {
+    font-size: 27px;
+    line-height: 32px;
+  }
+
+  .statPrefix {
+    font-size: 11px;
+  }
+
+  /* V04 mobile: narrower gutters, shorter rows. */
+  .compareGrid {
+    grid-template-columns: 67px minmax(0, 1fr) 57px;
+    column-gap: 7px;
+  }
+
+  /* V05/V06 mobile: rail stacks below the plot with a top border. */
+  .compareBody {
+    display: block;
+  }
+
+  .comparePlotCell {
+    padding: 0 16px;
+  }
+
+  .coverageRail {
+    border-left: none;
+    border-top: 1px solid var(--channel-line);
+    padding: 17px;
+  }
+
+  .coverageBig {
+    font-size: 26px;
+    margin: 8px 0;
+  }
+
+  .coverageStrip {
+    margin: 12px 0;
+  }
+
+  .coverageRow {
+    margin: 5px 0;
+  }
+
+  .coverageReview {
+    padding-top: 12px;
+  }
+
+  .explanationStrip {
+    padding: 13px 16px;
+    font-size: 10px;
+    align-items: flex-start;
+  }
+
+  .compareCell,
+  .compareNoFigure {
+    min-height: 45px;
+    height: 45px;
+  }
+
+  .compareNameButton,
+  .compareEndValue {
+    font-size: 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root *,
+  .root *::before,
+  .root *::after,
+  .theme *,
+  .theme *::before,
+  .theme *::after {
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/*
+ * V07–V10 directory (Task 5): compact five-column table on desktop, stacked
+ * cards at <=650px. Both render from the same rows; `display:none` keeps
+ * exactly one set in the focus/announcement tree, and no IDs are duplicated
+ * because neither rendering mints any. Breakpoints are explicit px values,
+ * never Tailwind's sm (R).
+ */
+.directory {
+  margin-top: 32px;
+}
+
+@media (min-width: 1601px) {
+  .directory {
+    margin-top: 38px;
+  }
+}
+
+@media (max-width: 650px) {
+  .directory {
+    margin-top: 27px;
+  }
+}
+
+/* V07 header: title + active-count badge + subtitle, About link at right. */
+.dirHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.dirTitle {
+  margin: 0;
+  /* Matches Growth Intelligence H2 sections (text-xl semibold). */
+  font-size: 20px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+}
+
+.dirCount {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--channel-subdued);
+  padding: 2px 7px;
+  border: 1px solid var(--channel-line);
+  border-radius: 5px;
+  margin-left: 6px;
+  vertical-align: middle;
+  font-variant-numeric: tabular-nums;
+}
+
+.dirSubtitle {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--channel-subdued);
+}
+
+.dirAbout {
+  font-size: 12px;
+  font-weight: 700;
+  gap: 7px;
+  height: auto;
+  padding: 0;
+}
+
+.dirAboutIcon {
+  width: 18px;
+  height: 18px;
+}
+
+@media (max-width: 650px) {
+  .dirHeader {
+    align-items: flex-start;
+  }
+
+  .dirAbout {
+    font-size: 10px;
+  }
+}
+
+/* V08 tools: counted ToggleGroup + search; search goes full width <=650px. */
+.dirTools {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 17px;
+  margin-bottom: 13px;
+}
+
+.dirFilters {
+  gap: 3px;
+  /* Task 8 (320px pass): the four counted items total ~369px, wider than a
+     320px viewport or the 358px real-shell content at 390px. Let the items
+     wrap instead of forcing horizontal scroll (V08 "wrapping when
+     necessary"). Single-row widths are unchanged. */
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.dirFilterItem {
+  padding: 7px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+.dirFilterItem[data-state="on"] {
+  background: #eef1ee;
+  color: var(--channel-ink);
+  font-weight: 700;
+}
+
+.dirFilterCount {
+  font-size: 9px;
+  margin-left: 5px;
+  /* Task 8 P12 correction: the V08 reference #899189 measures 3.24:1 on
+     white (9px text needs 4.5:1), so the count uses the nearest palette
+     shade compliant on both the resting and the selected (#eef1ee, 4.79:1)
+     chip backgrounds. Counts also ride in each radio's accessible name. */
+  color: #626c65;
+}
+
+/* Wrapper so a disabled evidence filter still surfaces its tooltip. */
+.dirFilterHint {
+  display: inline-flex;
+}
+
+.dirSearch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--channel-line);
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: var(--channel-subdued);
+}
+
+.dirSearch > svg {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.dirSearchInput {
+  width: 142px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  padding: 0;
+  height: auto;
+  min-height: 0;
+}
+
+/* The explicit X button is the only clear affordance; never show the native
+   one beside it. */
+.dirSearchInput[type="search"]::-webkit-search-cancel-button {
+  display: none;
+}
+
+.dirClear {
+  width: 24px;
+  height: 24px;
+}
+
+.dirClear svg {
+  width: 14px;
+  height: 14px;
+}
+
+.dirMixedNote {
+  margin: 0 0 13px;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+@media (max-width: 650px) {
+  .dirTools {
+    flex-wrap: wrap;
+  }
+
+  .dirSearch {
+    flex: 1 1 100%;
+  }
+
+  .dirSearchInput {
+    width: 100%;
+  }
+}
+
+/* V09 table card: one border shared by the table (or its empty state) and
+   the footer. Generated Table/Card ring/padding are zeroed here, in scope. */
+.dirCard {
+  border: 1px solid var(--channel-line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.dirTableWrap {
+  display: block;
+}
+
+.dirTable thead tr {
+  background: var(--channel-header-bg);
+  border-bottom: 1px solid var(--channel-line);
+}
+
+.dirTable tbody tr:hover {
+  background: #fcfdfb;
+}
+
+.dirHead {
+  background: var(--channel-header-bg);
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--channel-subdued);
+  padding: 12px 17px;
+}
+
+.dirHeadActions {
+  text-align: right;
+}
+
+.dirCell {
+  padding: 17px;
+  font-size: 11px;
+  white-space: normal;
+  vertical-align: middle;
+}
+
+.dirCellActions {
+  text-align: right;
+}
+
+@media (max-width: 1200px) {
+  .dirHead {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .dirCell {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  /* Locations stay in state (Manage/mobile); the column hides <=1200px. */
+  .dirLocationCell {
+    display: none;
+  }
+}
+
+/* Sort lives in the Reported revenue header: plain label + thin text arrow,
+   never a dropdown chevron. */
+.dirSort {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+}
+
+.dirSort:disabled {
+  cursor: default;
+}
+
+.dirSortArrow {
+  font-size: 10px;
+}
+
+/* Channel cell: category tile + wrapping name + category string. */
+.dirIdentity {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.dirTile {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--channel-sage);
+  color: var(--channel-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.dirTilePhysical {
+  background: #f1f1ed;
+  color: #848676;
+}
+
+.dirName {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.dirCategory {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+/* Revenue cell: prefix + tabular value, then share or the honest reason. */
+.dirMoney {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dirMoneyPrefix {
+  font-size: 10px;
+  color: var(--channel-subdued);
+  margin-right: 4px;
+}
+
+.dirMoneyValue {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dirMoneyDash {
+  margin: 0;
+  font-size: 12px;
+  color: var(--channel-subdued);
+}
+
+.dirSub {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+/* Data cell: dot + text badge, color never the only encoding. */
+.dirBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 5px;
+  padding: 4px 7px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.dirDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.dirBadgeMeasured {
+  background: var(--channel-sage);
+  color: var(--channel-measured);
+}
+
+.dirBadgeRevenue {
+  background: #f0f2f0;
+  color: #626c65;
+}
+
+.dirBadgeReview {
+  background: #faf2e7;
+  color: var(--channel-warning);
+}
+
+.dirBadgeArchived {
+  background: #eef1ee;
+  color: #626c65;
+}
+
+.dirBadgeNeutral {
+  background: var(--channel-soft);
+  color: var(--channel-subdued);
+}
+
+.dirLocation {
+  margin: 0;
+  font-size: 11px;
+  color: var(--channel-subdued);
+}
+
+.dirLocation + .dirLocation {
+  margin-top: 4px;
+}
+
+/* Trailing actions: real audit Link + ellipsis Manage/View details. */
+.dirActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.dirAuditLink {
+  font-size: 10px;
+  color: var(--channel-subdued);
+  padding: 5px;
+  gap: 4px;
+}
+
+.dirAuditLink:hover {
+  color: var(--channel-primary);
+}
+
+.dirAuditLink svg {
+  width: 13px;
+  height: 13px;
+}
+
+.dirEllipsis {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 5px;
+  color: var(--channel-subdued);
+}
+
+.dirEllipsis svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* V10 mobile cards: hidden on desktop; the table hides at <=650px. */
+.dirMobile {
+  display: none;
+}
+
+@media (max-width: 650px) {
+  .dirTableWrap {
+    display: none;
+  }
+
+  .dirMobile {
+    display: grid;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .dirMobileItem {
+    padding: 14px 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 7px;
+    row-gap: 14px;
+    border-bottom: 1px solid var(--channel-line);
+  }
+
+  .dirMobileItem:last-child {
+    border-bottom: none;
+  }
+
+  .dirMobileIdentity {
+    grid-column: 1 / -1;
+  }
+
+  .dirMobileCaption {
+    margin: 0 0 7px;
+    font-size: 10px;
+    color: var(--channel-subdued);
+  }
+
+  .dirMobileLocation {
+    margin-top: 8px;
+  }
+
+  .dirMobileActions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--channel-line);
+    padding-top: 8px;
+  }
+
+  .dirMobileActions .dirAuditLink {
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
+}
+
+/* V10 footer: count + period left, directory-only note right. */
+.dirFoot {
+  background: var(--channel-header-bg);
+  border-top: 1px solid var(--channel-line);
+  padding: 12px 16px;
+  font-size: 10px;
+  color: var(--channel-subdued);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+@media (max-width: 650px) {
+  .dirFoot {
+    flex-direction: column;
+    min-width: 0;
+    gap: 4px;
+  }
+}
+
+/* V11 empty states: full-width blocks inside the card, tools retained. */
+.dirEmpty {
+  padding: 44px 20px;
+  text-align: center;
+  display: grid;
+  justify-items: center;
+}
+
+.dirEmptyIcon {
+  width: 32px;
+  height: 32px;
+  color: var(--channel-subdued);
+}
+
+.dirEmptyTitle {
+  margin: 12px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.dirEmptyCopy {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--channel-subdued);
+}
+
+.dirEmptyAction {
+  margin-top: 15px;
+}
+
+/* D04–D06 management dialog (Task 6, visual contract D00/D04–D06).
+ * Disclosure shells for Locations / Report labels: trigger row, live count
+ * and a chevron that points up while expanded. Task 7 fills the forms below
+ * these shells; geometry here stays trigger-only. */
+.disclosureTrigger {
+  font-size: 12px;
+  font-weight: 600;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.disclosureCount {
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--channel-subdued);
+}
+
+.disclosureChevron {
+  width: 16px;
+  height: 16px;
+  color: var(--channel-subdued);
+  transition: transform 150ms ease;
+}
+
+.disclosureTrigger[data-state="open"] .disclosureChevron {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .disclosureChevron {
+    transition: none;
+  }
+}
+
+/* D06 AlertDialog follows the D00 520px content width. The generated
+ * primitive caps smaller viewports at its own max, so this scoped override
+ * (unlayered, attribute-specific) carries the portal content explicitly —
+ * the same reason `.theme` rides every portalled surface. */
+.theme[data-slot="alert-dialog-content"] {
+  max-width: min(520px, calc(100vw - 28px));
+  max-height: 90svh;
+  overflow-y: auto;
+}

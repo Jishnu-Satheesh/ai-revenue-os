@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "status": "approved_visual_reference",
+  "approvedAt": "2026-09-24",
+  "approvalBasis": "User explicitly approved the prototype as the replacement visual reference in the implementation-handoff request.",
+  "originalWireframeAvailable": false,
+  "wireframeComparisonWaivedByReplacementApproval": true,
+  "source": {
+    "path": ".superdesign/creative-studio-independent/prototype.html",
+    "sha256": "9bdef5dc39342f1f1425149233766003e0ae05bb9535963288b00ad60fb41672",
+    "superdesignDraftId": "21d0f45c-6ad2-4d78-a831-03df6684d43a",
+    "superdesignVersion": 2,
+    "previewUrl": "https://p.superdesign.dev/draft/21d0f45c-6ad2-4d78-a831-03df6684d43a"
+  },
+  "canonicalViewport": {
+    "width": 1728,
+    "height": 1080,
+    "deviceScaleFactor": 1,
+    "zoomPercent": 100,
+    "theme": "light"
+  },
+  "artifacts": [
+    { "path": "Desktop.png", "state": "history", "width": 1728, "height": 1080, "sha256": "06b25bc32d616cc4513d6f0367a862900f90d37574ce82c15519e94f0cd2fec3" },
+    { "path": "Canvas.png", "state": "canvas", "width": 1728, "height": 1080, "sha256": "6ba78ad3251ee9026ed64cebbb6f0192a433ffbfc172fe8875635a4b769068cc" },
+    { "path": "Reference-picker.png", "state": "picker", "width": 1728, "height": 1080, "sha256": "a5355eb61ba0a634d97ff4e1b34591c9ee64869d4189a2ab4a027728fb738f9f" },
+    { "path": "Loading.png", "state": "loading", "width": 1728, "height": 1080, "sha256": "ecbeb3aad820be506dac54d77cb692676aeae7a5566b71bd52e35e3994772da0" },
+    { "path": "Streaming.png", "state": "streaming_simulation", "width": 1728, "height": 1080, "sha256": "a460dee44786aa26fc147c4d986f79776e5cab180243f19f12e77fa3ad20e96c" },
+    { "path": "Markers.png", "state": "markers", "width": 1728, "height": 1080, "sha256": "c47a9360231a7ab674a64742c14ce9e92a255f2a09f3b772b9ef60195095f82d" },
+    { "path": "Empty.png", "state": "empty", "width": 1728, "height": 1080, "sha256": "8604616d96ec25f5b01d8b90bb58d261f90829aa1d6b0059aa83e806dca7a9aa" },
+    { "path": "Error.png", "state": "error", "width": 1728, "height": 1080, "sha256": "69f553d4e9b03c52fa355eaaaa34f46c6128374a2c40265ee50e1aa1b47beb30" },
+    { "path": "Desktop-1440.png", "state": "history", "width": 1440, "height": 900, "sha256": "1d37293dc0686e7803f6c8d7f42a8af2fdb5ac15fa207de589b02f39f7dd3765" },
+    { "path": "Mobile-history.png", "state": "mobile_history", "width": 390, "height": 844, "sha256": "e5b6c68390e59e77645f93a41df342e81514e5a50b85ffb08518816393d9c34a" },
+    { "path": "Mobile-settings.png", "state": "mobile_settings", "width": 390, "height": 844, "sha256": "758c5d992335abc938ad66b3d19e660c1b6c3b0a7d3fa7aef817a83397d18d81" }
+  ]
+}

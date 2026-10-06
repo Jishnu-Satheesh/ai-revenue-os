@@ -3,10 +3,15 @@ import { resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-const componentSource = readFileSync(
-  resolve(process.cwd(), "src/components/integrations/report-package-upload.tsx"),
-  "utf8",
-);
+// Slice 1 moved the §1 package detail into the drawer file, so the source
+// strings below live across both files. The expectations are unchanged; only
+// the scanned set widened.
+const componentSource = [
+  "src/components/integrations/report-package-upload.tsx",
+  "src/components/integrations/report-package-drawer.tsx",
+]
+  .map((file) => readFileSync(resolve(process.cwd(), file), "utf8"))
+  .join("\n");
 
 describe("ReportPackageUpload client boundary", () => {
   it("does not import the Node-hashed reconciliation module into the browser bundle", () => {
@@ -16,7 +21,9 @@ describe("ReportPackageUpload client boundary", () => {
 
   it("names failed projection actions as retries and recognises a failed run", () => {
     expect(componentSource).toContain('latestProjection?.status === "failed"');
-    expect(componentSource).toContain('reportPackage.status === "projection_failed"');
+    // Optional chaining: the drawer derives above its early return so the
+    // hook count never changes between open and closed renders.
+    expect(componentSource).toContain('reportPackage?.status === "projection_failed"');
     expect(componentSource).toContain('"Retry projection"');
   });
 

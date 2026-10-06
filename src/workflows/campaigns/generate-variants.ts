@@ -23,7 +23,7 @@ import {
   type ReferenceCandidateReader,
   type ReferenceObjectReader,
 } from "@/workflows/campaigns/generate-bundle";
-import type { CampaignImageReference } from "@/ai/campaign-generation-provider";
+import type { FinalImageReference } from "@/ai/campaign-generation-provider";
 import { GENERATE_VARIANTS_LEASE_SECONDS } from "@/workflows/campaigns/durations";
 
 /**
@@ -65,7 +65,8 @@ export type VariantPlanner = {
     imageGuidance: {
       subjectDescription: string | null;
       resolution: ReturnType<typeof resolveReferences>;
-      references: readonly CampaignImageReference[];
+      /** Fenced: the variant draw is a final-image call, never evidence. */
+      finalImageReferences: readonly FinalImageReference[];
       blueprint: ArtDirectionBlueprint;
       hardConstraints: readonly string[];
     };
@@ -287,7 +288,7 @@ async function produce({
         }),
         subjectDescription: pinned.subjectDescription,
         resolution,
-        references,
+        blueprintEvidence: references.blueprintEvidence,
       });
       spentMinor += planned.costMinor ?? 0;
       if (spentMinor > payload.costCeilingMinor) {
@@ -353,7 +354,7 @@ async function produce({
         imageGuidance: {
           subjectDescription: pinned.subjectDescription,
           resolution,
-          references,
+          finalImageReferences: references.finalImage,
           blueprint: blueprintsByKey[blueprintKey(direction.id, ordinal + 1)]!,
           hardConstraints,
         },

@@ -8,6 +8,7 @@ vi.mock("server-only", () => ({}));
 
 const mocks = vi.hoisted(() => ({
   pathname: "/organizations/11111111-1111-4111-8111-111111111111/integrations",
+  params: new URLSearchParams(),
   getOrganizationContext: vi.fn(),
   assertIntegrationHubEnabled: vi.fn(),
   getOrganization: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), refresh: vi.fn() }),
+  useSearchParams: () => mocks.params,
 }));
 vi.mock("@/lib/api/organization-context", () => ({
   getOrganizationContext: mocks.getOrganizationContext,
@@ -108,10 +110,17 @@ function renderClient(options: { fetchNeverResolves?: boolean } = {}) {
   );
 }
 
+it("opens the report package tab from an agent review link", () => {
+  mocks.params = new URLSearchParams("tab=data-sources&package=33333333-3333-4333-8333-333333333333");
+  renderClient();
+  expect(screen.getByRole("tab", {name:"Data sources"})).toHaveAttribute("aria-selected","true");
+});
+
 beforeEach(() => {
   // reset, not clear: a rejection stubbed by one case must not leak into the
   // next one's authorized happy path.
   vi.resetAllMocks();
+  mocks.params = new URLSearchParams();
   mocks.pathname = `/organizations/${organizationId}/integrations`;
   mocks.getOrganizationContext.mockResolvedValue({
     organizationId,
@@ -265,17 +274,22 @@ describe("route-aware app chrome", () => {
    * operator to an organization overview for an organization that does not
    * exist. It stayed invisible while the campaign was the last crumb -- the
    * last crumb's href is cleared -- and became clickable the moment a page was
-   * added below it.
+   * added below it. The campaign crumb should still land on the campaign's own
+   * page, not the organization overview.
    */
-  it("links only the organization crumb, never a deeper id", () => {
+  it("gives every non-current crumb its own route, never a deeper id's overview", () => {
     const campaignId = "783ab4e1-279d-4fba-8dc1-1a33cd3df2e5";
     const crumbs = deriveRouteCrumbs(
       `/organizations/${organizationId}/campaigns/${campaignId}/studio`,
     );
 
-    expect(crumbs[0]?.href).toBe(`/organizations/${organizationId}/overview`);
-    expect(crumbs.find((crumb) => crumb.label === campaignId)?.href).toBeUndefined();
-    expect(crumbs.every((crumb) => crumb.href === undefined || crumb === crumbs[0])).toBe(true);
+    expect(crumbs.map((crumb) => crumb.href)).toEqual([
+      `/organizations/${organizationId}/overview`,
+      `/organizations/${organizationId}/campaigns`,
+      `/organizations/${organizationId}/campaigns/${campaignId}`,
+      // The last crumb is the current page and is never a link.
+      undefined,
+    ]);
   });
 
   it("targets Overview from the organization crumb", () => {

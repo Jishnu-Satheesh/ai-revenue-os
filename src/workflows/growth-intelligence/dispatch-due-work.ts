@@ -34,9 +34,7 @@ export type DispatchDueDependencies = {
     cooldownSeconds: number;
   }): Promise<readonly DueGrowthIntelligenceRequest[]>;
   trigger(input: {
-    taskId:
-      | "growth-intelligence.run-market-research"
-      | "growth-intelligence.consolidate-market-evidence";
+    taskId: "growth-intelligence.run-market-research" | "growth-intelligence.run-synthesis";
     organizationId: string;
     requestId: string;
     correlationId: string;
@@ -52,12 +50,17 @@ export type DispatchDueResult = {
 };
 
 const RESEARCH_TASK_ID = "growth-intelligence.run-market-research" as const;
-const CONSOLIDATION_TASK_ID = "growth-intelligence.consolidate-market-evidence" as const;
+const SYNTHESIS_TASK_ID = "growth-intelligence.run-synthesis" as const;
 
-const RESEARCH_KINDS = new Set([
-  "market_research",
-  "evidence_reassessment",
+const RESEARCH_KINDS = new Set(["market_research", "evidence_reassessment"]);
+
+// Synthesis owns every analysis input: handoff children, fresh business
+// evidence and the weekly cadence. Consolidation stays a separately
+// exercised maintenance task, never a due-dispatch target.
+const SYNTHESIS_KINDS = new Set([
+  "market_evidence_changed",
   "business_evidence_changed",
+  "weekly_synthesis",
 ]);
 
 export async function dispatchDueWork(
@@ -75,8 +78,8 @@ export async function dispatchDueWork(
   for (const request of due) {
     const taskId = RESEARCH_KINDS.has(request.kind)
       ? RESEARCH_TASK_ID
-      : request.kind === "weekly_synthesis"
-        ? CONSOLIDATION_TASK_ID
+      : SYNTHESIS_KINDS.has(request.kind)
+        ? SYNTHESIS_TASK_ID
         : null;
     // profile_discovery is owned by the Market Profile proposal flow and any
     // unknown kind is owned by a future increment. Skipping leaves the row

@@ -34,3 +34,28 @@ describe("art direction blueprint", () => {
     ).toBe(false);
   });
 });
+
+describe("the blueprint's avoid notes", () => {
+  it("accepts twelve distinct avoid notes and refuses a thirteenth", () => {
+    const twelve = Array.from({ length: 12 }, (_, index) => `avoid note ${index + 1}`);
+
+    expect(
+      artDirectionBlueprintSchema.safeParse({ ...VALID_BLUEPRINT, avoid: twelve }).success,
+    ).toBe(true);
+    expect(
+      artDirectionBlueprintSchema.safeParse({
+        ...VALID_BLUEPRINT,
+        avoid: [...twelve, "avoid note 13"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("refuses avoid notes that repeat, so the cap cannot be padded", () => {
+    const parsed = artDirectionBlueprintSchema.safeParse({
+      ...VALID_BLUEPRINT,
+      avoid: ["busy tableware", "Busy Tableware"],
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+});

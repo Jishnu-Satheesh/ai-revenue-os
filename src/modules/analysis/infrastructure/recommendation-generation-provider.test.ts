@@ -9,8 +9,10 @@ vi.mock("ai", () => ({
 }));
 
 const languageModel = vi.fn((id: string) => ({ id }));
+const googleSearchTool = vi.fn(() => ({ type: "provider-defined", name: "google_search" }));
 vi.mock("@ai-sdk/google", () => ({
-  createGoogleGenerativeAI: () => languageModel,
+  createGoogleGenerativeAI: () =>
+    Object.assign(languageModel, { tools: { googleSearch: googleSearchTool } }),
 }));
 
 vi.mock("@/lib/env", () => ({
@@ -32,12 +34,14 @@ function lastTextCall() {
     system: string;
     prompt: string;
     abortSignal: AbortSignal;
+    tools?: Record<string, unknown>;
   };
 }
 
 beforeEach(() => {
   generateText.mockReset();
   languageModel.mockClear();
+  googleSearchTool.mockClear();
 });
 
 describe("extractJsonText", () => {
@@ -96,6 +100,31 @@ describe("recommendation generation provider", () => {
     expect(call.prompt).toBe("Some evidence.");
     expect(call.abortSignal).toBeInstanceOf(AbortSignal);
     expect(RECOMMENDATION_GENERATION_TIMEOUT_MS).toBe(180_000);
+  });
+
+  it("attaches the Google Search grounding tool for pilot runs", async () => {
+    generateText.mockResolvedValue({ text: "{}" });
+    const provider = createRecommendationGenerationProvider({ modelId: "gemini-2.0-flash" });
+
+    await provider.generate("You narrate results.", "Some evidence.", { useGrounding: true });
+
+    expect(googleSearchTool).toHaveBeenCalledTimes(1);
+    const call = lastTextCall();
+    expect(Object.keys(call.tools ?? {})).toEqual(["google_search"]);
+    expect(call.system).toBe("You narrate results.");
+    expect(call.prompt).toBe("Some evidence.");
+  });
+
+  it("sends no tools for non-pilot runs, keeping today's call shape", async () => {
+    generateText.mockResolvedValue({ text: "{}" });
+    const provider = createRecommendationGenerationProvider({ modelId: "gemini-2.0-flash" });
+
+    await provider.generate("You narrate results.", "Some evidence.");
+    expect(lastTextCall()).not.toHaveProperty("tools");
+
+    await provider.generate("You narrate results.", "Some evidence.", { useGrounding: false });
+    expect(lastTextCall()).not.toHaveProperty("tools");
+    expect(googleSearchTool).not.toHaveBeenCalled();
   });
 
   it("unwraps a fenced JSON answer from the model", async () => {

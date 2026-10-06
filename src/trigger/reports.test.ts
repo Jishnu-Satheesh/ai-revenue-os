@@ -51,7 +51,9 @@ import type { Database } from "@/lib/supabase/database.types";
 describe("Report Package Trigger abort on refusal", () => {
   it("imports AbortTaskRunError from the Trigger SDK", async () => {
     const source = await readFile(resolve(process.cwd(), "src/trigger/reports.ts"), "utf8");
-    expect(source).toMatch(/import\s*{\s*AbortTaskRunError\s*,\s*logger\s*,\s*schemaTask\s*}\s*from\s*"@trigger\.dev\/sdk"/);
+    expect(source).toMatch(
+      /import\s*{\s*AbortTaskRunError\s*,\s*logger\s*,\s*schemaTask\s*}\s*from\s*"@trigger\.dev\/sdk"/,
+    );
   });
 
   it("aborts exactly three report tasks without retrying when a projection is refused", async () => {
@@ -74,7 +76,9 @@ describe("Report Package Trigger abort on refusal", () => {
     const profileBlock = source.slice(profileStart, profileEnd);
     const profileAbortsInBlock = profileBlock.match(/throw new AbortTaskRunError\(/g);
     const profileLogger = profileBlock.indexOf('logger.info("report_package.profile_completed"');
-    const profileAbort = profileBlock.indexOf('throw new AbortTaskRunError(`report-package refused');
+    const profileAbort = profileBlock.indexOf(
+      "throw new AbortTaskRunError(`report-package refused",
+    );
     expect(profileAbortsInBlock).toHaveLength(1);
     expect(profileLogger).toBeGreaterThan(0);
     expect(profileAbort).toBeGreaterThan(profileLogger);
@@ -84,8 +88,12 @@ describe("Report Package Trigger abort on refusal", () => {
     const validationEnd = source.indexOf("export const reportPackageProjectionTask");
     const validationBlock = source.slice(validationStart, validationEnd);
     const validationAbortsInBlock = validationBlock.match(/throw new AbortTaskRunError\(/g);
-    const validationLogger = validationBlock.indexOf('logger.info("report_package.validation_completed"');
-    const validationAbort = validationBlock.indexOf('throw new AbortTaskRunError(`report-package refused');
+    const validationLogger = validationBlock.indexOf(
+      'logger.info("report_package.validation_completed"',
+    );
+    const validationAbort = validationBlock.indexOf(
+      "throw new AbortTaskRunError(`report-package refused",
+    );
     expect(validationAbortsInBlock).toHaveLength(1);
     expect(validationLogger).toBeGreaterThan(0);
     expect(validationAbort).toBeGreaterThan(validationLogger);
@@ -94,8 +102,12 @@ describe("Report Package Trigger abort on refusal", () => {
     const projectionStart = source.indexOf("export const reportPackageProjectionTask");
     const projectionBlock = source.slice(projectionStart);
     const projectionAbortsInBlock = projectionBlock.match(/throw new AbortTaskRunError\(/g);
-    const projectionLogger = projectionBlock.indexOf('logger.info("report_package.projection_completed"');
-    const projectionAbort = projectionBlock.indexOf('throw new AbortTaskRunError(`report-package refused');
+    const projectionLogger = projectionBlock.indexOf(
+      'logger.info("report_package.projection_completed"',
+    );
+    const projectionAbort = projectionBlock.indexOf(
+      "throw new AbortTaskRunError(`report-package refused",
+    );
     expect(projectionAbortsInBlock).toHaveLength(1);
     expect(projectionLogger).toBeGreaterThan(0);
     expect(projectionAbort).toBeGreaterThan(projectionLogger);
@@ -291,8 +303,15 @@ describe("reportPackageProjectionTask auto-analysis dispatch wiring", () => {
     // Only the two RPC names this run actually calls are wired -- claim (to
     // set the grain, exactly as reports.ts does) and complete (whose payload
     // uses the real report_packages column names: status, channel_id,
-    // branch_id, declared_period_start, declared_period_end). Anything else
-    // is a test bug, not a case to swallow.
+    // branch_id, declared_period_start, declared_period_end,
+    // period_timezone). Anything else is a test bug, not a case to swallow.
+    //
+    // `period_timezone` is not optional here. The auto-analysis selector
+    // refuses to dispatch without it, deliberately: a run whose window carries
+    // no calendar would be analysed against the server's zone rather than the
+    // branch's, and every date would be quietly shifted. The real RPC returns
+    // `to_jsonb(package_row)`, so the column is always present -- a fixture
+    // that omits it is describing a row the database cannot produce.
     rpcMock.mockImplementation(async (name: string) => {
       if (name === "claim_governed_report_package_projection") {
         return {
@@ -313,6 +332,7 @@ describe("reportPackageProjectionTask auto-analysis dispatch wiring", () => {
             branch_id: BRANCH_ID,
             declared_period_start: "2026-03-01",
             declared_period_end: "2026-03-31",
+            period_timezone: "Asia/Dubai",
           },
           error: null,
         };

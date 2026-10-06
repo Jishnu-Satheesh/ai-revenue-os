@@ -381,8 +381,7 @@ export function buildOverviewActionQueue(input: {
     actions.push({
       kind: "foundation",
       title: "Nobody is named as the approver yet",
-      impact:
-        "Nothing this platform suggests can be acted on until a real person has to say yes.",
+      impact: "Nothing this platform suggests can be acted on until a real person has to say yes.",
       ...(input.permissions.canManagePolicies
         ? { href: "#organization-management", actionLabel: "Name an approver" }
         : {}),
@@ -411,8 +410,7 @@ export function buildOverviewActionQueue(input: {
         applicable > 0
           ? `${applicable - priced} of ${applicable} costs are not recorded yet`
           : "Some of what you sell has no cost recorded",
-      impact:
-        "Until they are in, we can only give you a range for what you kept — not one number.",
+      impact: "Until they are in, we can only give you a range for what you kept — not one number.",
       ...(input.permissions.canManageCore
         ? {
             href: `/organizations/${input.organizationId}/onboarding?section=cost_structure`,

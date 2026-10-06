@@ -18,6 +18,7 @@ export type ProjectionCompletionSummary = {
   windowStart: unknown;
   windowEnd: unknown;
   periodGrain: AnalysisGrain | null;
+  periodTimezone: unknown;
 };
 
 export type AutoAnalysisInput = {
@@ -26,6 +27,7 @@ export type AutoAnalysisInput = {
   windowStart: string;
   windowEnd: string;
   periodGrain: AnalysisGrain;
+  windowTimezone: string;
 };
 
 /**
@@ -45,17 +47,28 @@ export function selectAutoAnalysisInput(
   if (completion.projectionOutcome !== "projected" || completion.packageStatus !== "projected") {
     return null;
   }
-  const { channelId, branchId, windowStart, windowEnd, periodGrain } = completion;
+  const { channelId, branchId, windowStart, windowEnd, periodGrain, periodTimezone } = completion;
   if (
     typeof channelId !== "string" ||
     typeof branchId !== "string" ||
     typeof windowStart !== "string" ||
     typeof windowEnd !== "string" ||
+    // A run with no zone cannot be cache-keyed and cannot be reproduced, so it
+    // is better not started than started unreproducibly.
+    typeof periodTimezone !== "string" ||
+    periodTimezone.length === 0 ||
     periodGrain === null
   ) {
     return null;
   }
-  return { channelId, branchId, windowStart, windowEnd, periodGrain };
+  return {
+    channelId,
+    branchId,
+    windowStart,
+    windowEnd,
+    periodGrain,
+    windowTimezone: periodTimezone,
+  };
 }
 
 /**

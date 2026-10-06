@@ -231,16 +231,29 @@ describe("authenticated Growth Intelligence read repository", () => {
 
 function workspacePersistence(results: Record<string, QueryResult[]> = {}) {
   const queues = new Map(Object.entries(results).map(([table, rows]) => [table, [...rows]]));
-  const calls: Array<{ table: string; filters: Array<[string, unknown]>; limit?: number }> = [];
+  const calls: Array<{
+    table: string;
+    filters: Array<[string, unknown]>;
+    limit?: number;
+    select?: string;
+  }> = [];
   const from = vi.fn((table: string) => {
     const result = queues.get(table)?.shift() ?? { data: [], error: null };
-    const call: { table: string; filters: Array<[string, unknown]>; limit?: number } = {
+    const call: {
+      table: string;
+      filters: Array<[string, unknown]>;
+      limit?: number;
+      select?: string;
+    } = {
       table,
       filters: [],
     };
     calls.push(call);
     const builder = {
-      select: vi.fn(() => builder),
+      select: vi.fn((columns: string) => {
+        call.select = columns;
+        return builder;
+      }),
       eq: vi.fn((key: string, value: unknown) => {
         call.filters.push([key, value]);
         return builder;
@@ -274,6 +287,7 @@ function workspaceItemRow(overrides = {}) {
     kind: "insight",
     narrative: "Delivery orders spike on rainy Thursdays.",
     item_fingerprint: "a".repeat(64),
+    growth_intelligence_synthesis_run_id: "71000000-0000-4000-8000-000000000071",
     evidence_fingerprint: "b".repeat(64),
     support_grade: "corroborated",
     freshness: "current",
@@ -309,18 +323,14 @@ describe("workspace reads", () => {
     });
     const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
 
-    await expect(repository.readOrganizationTimeZone(organizationId)).resolves.toBe(
-      "Asia/Dubai",
-    );
+    await expect(repository.readOrganizationTimeZone(organizationId)).resolves.toBe("Asia/Dubai");
   });
 
   it("refuses to guess a timezone when none is stored", async () => {
     const db = workspacePersistence({ organizations: [{ data: [], error: null }] });
     const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
 
-    await expect(repository.readOrganizationTimeZone(organizationId)).rejects.toThrow(
-      /timezone/i,
-    );
+    await expect(repository.readOrganizationTimeZone(organizationId)).rejects.toThrow(/timezone/i);
   });
 
   it("lists current items through the viewed month with their latest decision and pin", async () => {
@@ -365,6 +375,18 @@ describe("workspace reads", () => {
           error: null,
         },
       ],
+      growth_intelligence_item_feedback: [
+        {
+          data: [
+            {
+              growth_intelligence_item_id: "70000000-0000-4000-8000-000000000007",
+              actor_id: actorId,
+              helpful: false,
+            },
+          ],
+          error: null,
+        },
+      ],
     });
     const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
 
@@ -378,6 +400,7 @@ describe("workspace reads", () => {
     expect(items).toHaveLength(2);
     expect(items[0]).toMatchObject({ id: "70000000-0000-4000-8000-000000000007" });
     expect(items[0]!.decision).toBe("acknowledged");
+    expect(items[0]!.myFeedback).toBe(false);
     expect(items[1]!.activityMonth).toBe("2026-07");
     expect(items[1]!.pinned).toBe(true);
     const itemQuery = db.calls.find((call) => call.table === "growth_intelligence_items")!;
@@ -413,6 +436,18 @@ describe("workspace reads", () => {
           error: null,
         },
       ],
+      channel_recommendation_feedback: [
+        {
+          data: [
+            {
+              recommendation_id: "60000000-0000-4000-8000-000000000006",
+              actor_id: actorId,
+              helpful: true,
+            },
+          ],
+          error: null,
+        },
+      ],
     });
     const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
 
@@ -435,8 +470,90 @@ describe("workspace reads", () => {
       createdAt: "2026-09-02T08:00:00.000Z",
       snoozedUntil: null,
     });
+    expect(rows[0]!.myFeedback).toBe(true);
   });
 
+  it("lazy-loads stored citation ids onto channel rows from their own table", async () => {
+    const db = workspacePersistence({
+      channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],
+      channel_recommendation_decisions: [{ data: [], error: null }],
+      channel_recommendation_preferences: [{ data: [], error: null }],
+      channel_recommendation_feedback: [{ data: [], error: null }],
+      channel_recommendation_citations: [
+        {
+          data: [
+            {
+              recommendation_id: "60000000-0000-4000-8000-000000000006",
+              finding_id: "finding-1",
+              organization_id: organizationId,
+            },
+            {
+              recommendation_id: "60000000-0000-4000-8000-000000000006",
+              finding_id: "finding-2",
+              organization_id: organizationId,
+            },
+          ],
+          error: null,
+        },
+      ],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const rows = await repository.listChannelRecommendationRecords({
+      organizationId,
+      actorId,
+      limit: 100,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.citationFindingIds).toEqual(["finding-1", "finding-2"]);
+    const call = db.calls.find((entry) => entry.table === "channel_recommendation_citations")!;
+    expect(call.filters).toContainEqual(["organization_id", organizationId]);
+  });
+
+  it("skips per-viewer lookups for the worker's empty actor on recommendations", async () => {
+    const db = workspacePersistence({
+      channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],
+      channel_recommendation_decisions: [{ data: [], error: null }],
+      channel_recommendation_citations: [{ data: [], error: null }],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const rows = await repository.listChannelRecommendationRecords({
+      organizationId,
+      actorId: "",
+      limit: 100,
+    });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.pinned).toBe(false);
+    expect(rows[0]!.myFeedback).toBeNull();
+    const tables = db.calls.map((entry) => entry.table);
+    expect(tables).not.toContain("channel_recommendation_preferences");
+    expect(tables).not.toContain("channel_recommendation_feedback");
+  });
+
+  it("skips per-viewer lookups for the worker's empty actor on items", async () => {
+    const db = workspacePersistence({
+      growth_intelligence_items: [{ data: [workspaceItemRow()], error: null }],
+      growth_intelligence_item_decisions: [{ data: [], error: null }],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const items = await repository.listWorkspaceItems({
+      organizationId,
+      actorId: "",
+      throughMonth: "2026-09",
+      limit: 100,
+    });
+
+    expect(items).toHaveLength(1);
+    expect(items[0]!.pinned).toBe(false);
+    expect(items[0]!.myFeedback).toBeNull();
+    const tables = db.calls.map((entry) => entry.table);
+    expect(tables).not.toContain("growth_intelligence_item_preferences");
+    expect(tables).not.toContain("growth_intelligence_item_feedback");
+  });
   it("carries a stored channel snooze with its horizon instead of failing the read", async () => {
     const db = workspacePersistence({
       channel_recommendations: [{ data: [channelRecommendationRow()], error: null }],
@@ -546,7 +663,8 @@ describe("workspace reads", () => {
     expect(call.filters).toContainEqual(["organization_id", organizationId]);
   });
 
-  it("skips decision and pin lookups when there is nothing to resolve", async () => {    const db = workspacePersistence({
+  it("skips decision and pin lookups when there is nothing to resolve", async () => {
+    const db = workspacePersistence({
       growth_intelligence_items: [{ data: [], error: null }],
       channel_recommendations: [{ data: [], error: null }],
     });
@@ -568,5 +686,25 @@ describe("workspace reads", () => {
       "channel_recommendations",
       "growth_intelligence_items",
     ]);
+  });
+
+  it("selects the synthesis run lineage and maps it onto workspace items", async () => {
+    const db = workspacePersistence({
+      growth_intelligence_items: [{ data: [workspaceItemRow()], error: null }],
+      growth_intelligence_item_decisions: [{ data: [], error: null }],
+      growth_intelligence_item_preferences: [{ data: [], error: null }],
+    });
+    const repository = createAuthenticatedGrowthIntelligenceReadRepository(db.client);
+
+    const items = await repository.listWorkspaceItems({
+      organizationId,
+      actorId,
+      throughMonth: "2026-09",
+      limit: 100,
+    });
+
+    expect(items[0]!.synthesisRunId).toBe("71000000-0000-4000-8000-000000000071");
+    const call = db.calls.find((entry) => entry.table === "growth_intelligence_items")!;
+    expect(call.select).toContain("growth_intelligence_synthesis_run_id");
   });
 });

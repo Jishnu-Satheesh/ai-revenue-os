@@ -2,7 +2,7 @@ import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { resolveAnalysisMonth } from "@/domain/analysis/calendar";
+import { isWindowCovered, mergeCoverageSegments } from "@/domain/analysis/window-selection";
 import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/analysis/types";
 import { toCalendarDate } from "@/domain/metrics/periods";
 import type { Database } from "@/lib/supabase/database.types";
@@ -16,6 +16,9 @@ import type {
   ChannelFindingRecord,
   ChannelRecommendationDecisionRecord,
   ChannelRecommendationRecord,
+  DailyMetricAggregate,
+  MetricAggregateGrain,
+  RecommendationViewerState,
 } from "@/modules/analysis/application/ports";
 
 /**
@@ -36,8 +39,13 @@ const MAX_FINDINGS = 500;
 const MAX_EVIDENCE = 5_000;
 /** UUID filters above this size exceed common gateway request-line limits. */
 const EVIDENCE_METRIC_BATCH_SIZE = 200;
-/** A picker an operator can read, not every package they ever uploaded. */
-const MAX_EVIDENCE_WINDOWS = 24;
+/**
+ * A picker an operator can read, not every package they ever uploaded.
+ *
+ * Exported rather than repeated at the call site that caps its own read, so
+ * the page and the resolver cannot drift apart.
+ */
+export const MAX_EVIDENCE_WINDOWS = 24;
 const MAX_LINEAGE = 10_000;
 /**
  * The narrator files at most six recommendations per submission, but a run may
@@ -49,6 +57,25 @@ const MAX_CITATIONS = 600;
 const MAX_RECOMMENDATION_DECISIONS = 1_000;
 /** The two codes the money band reads, and nothing else. */
 const BAND_CODES = ["WINDOW_GROSS_REVENUE", "ORDER_CANCELLATION_LOSS"] as const;
+/**
+ * Every code the business-performance card reads for one window: the money
+ * band, the funnel window sums (orders placed, menu views), the cancellation
+ * share of orders, and cost-context presence. One row per code per run, except
+ * the funnel detector, which writes one row per stage pair (three).
+ */
+const CARD_CODES = [
+  "WINDOW_GROSS_REVENUE",
+  "ORDER_CANCELLATION_LOSS",
+  "FUNNEL_STAGE_CONVERSION",
+  "ORDER_CANCELLATION_ATTRIBUTION_SHARE_OF_ORDERS",
+  "CHANNEL_COST_LOAD_OF_REVENUE",
+  "COMPANY_COST_STRUCTURE_OF_REVENUE",
+] as const;
+/**
+ * The most finding rows one run can contribute to the card read: one per code
+ * above, with the funnel detector's three stage pairs counted separately.
+ */
+const MAX_CARD_FINDINGS_PER_RUN = 10;
 /**
  * Completed runs for one declared window, across every channel in the
  * organization. Not one row per channel: re-running an analysis over the same
@@ -66,6 +93,22 @@ const MAX_CHANNEL_BAND_RUNS = 2_000;
  * history must not be able to make this query unbounded.
  */
 const MAX_ANALYSED_WINDOW_ROWS = 500;
+/**
+ * How far a daily-aggregate read looks beyond the asked range. A period row's
+ * `period_start` is an instant while the range names calendar days, and the
+ * two can disagree by a day at every timezone edge -- a Dubai day opens at
+ * 20:00 UTC the evening before. Two days comfortably covers any zone offset;
+ * the calendar-day check below still decides what counts.
+ */
+const DAILY_AGGREGATE_FETCH_WIDENING_DAYS = 2;
+/** A day in milliseconds, for the fetch-window widening above. */
+const MS_PER_DAY = 86_400_000;
+/**
+ * Governed rows one organization can plausibly hold for a handful of metric
+ * keys over one picked range, at every grain the card reads. A fence, not a
+ * page size: reaching it means the caller asked for more than a card may read.
+ */
+const MAX_DAILY_AGGREGATE_ROWS = 10_000;
 
 export class ChannelAnalysisReadError extends Error {
   constructor(public readonly code: string) {
@@ -198,10 +241,93 @@ function toFindingRecord(row: ChannelFindingRow): ChannelFindingRecord {
   };
 }
 
+/**
+ * The newest completed run per channel for exactly one declared window.
+ *
+ * Newest first, so the first run seen for a channel is the one that stands. A
+ * channel re-analysed over the same window has two completed runs, and the
+ * later answer is the current one. Shared by the money band and the card read
+ * so the two can never resolve "the run for this window" differently.
+ */
+async function loadLatestRunIdsByChannel(
+  supabase: AnalysisClient,
+  input: {
+    organizationId: string;
+    windowStart: string;
+    windowEnd: string;
+    grain: AnalysisGrain;
+  },
+): Promise<Map<string, string>> {
+  const { data: runs, error: runError } = await supabase
+    .from("channel_analysis_runs")
+    .select("id, channel_id, completed_at")
+    .eq("organization_id", input.organizationId)
+    .eq("window_start", input.windowStart)
+    .eq("window_end", input.windowEnd)
+    .eq("period_grain", input.grain)
+    .eq("status", "completed")
+    .not("channel_id", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(MAX_CHANNEL_BAND_RUNS);
+  if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
+
+  const latestByChannel = new Map<string, string>();
+  for (const row of runs ?? []) {
+    const channelId = row.channel_id as string;
+    if (!latestByChannel.has(channelId)) latestByChannel.set(channelId, row.id);
+  }
+  return latestByChannel;
+}
+
+/**
+ * Open findings for a set of runs, restricted to an allowlist of codes.
+ *
+ * A superseded finding is the answer a later run replaced. Two figures for
+ * one question on one page is worse than one figure -- the same reason
+ * loadFindingsForRun filters to open findings. Batched because PostgREST folds
+ * an `.in()` filter's values into the request line, and one filter naming
+ * every run id can exceed a common gateway's request-line limit before RLS or
+ * the database ever sees the query.
+ */
+async function loadOpenFindingsForRuns(
+  supabase: AnalysisClient,
+  input: {
+    organizationId: string;
+    runIds: readonly string[];
+    codes: readonly string[];
+    maxPerRun: number;
+    boundErrorCode: string;
+  },
+): Promise<Map<string, ChannelFindingRecord[]>> {
+  const byRun = new Map<string, ChannelFindingRecord[]>();
+  for (let offset = 0; offset < input.runIds.length; offset += EVIDENCE_METRIC_BATCH_SIZE) {
+    const batch = input.runIds.slice(offset, offset + EVIDENCE_METRIC_BATCH_SIZE);
+    const { data, error: findingError } = await supabase
+      .from("channel_findings")
+      .select(CHANNEL_FINDING_COLUMNS)
+      .eq("organization_id", input.organizationId)
+      .in("analysis_run_id", [...batch])
+      .in("code", [...input.codes])
+      .eq("status", "open")
+      .limit(batch.length * input.maxPerRun + 1);
+    if (findingError) throw new ChannelAnalysisReadError(findingError.code ?? "unknown");
+    if ((data ?? []).length > batch.length * input.maxPerRun)
+      throw new ChannelAnalysisReadError(input.boundErrorCode);
+
+    for (const row of data ?? []) {
+      const mapped = toFindingRecord(row);
+      const group = byRun.get(mapped.analysisRunId) ?? [];
+      group.push(mapped);
+      byRun.set(mapped.analysisRunId, group);
+    }
+  }
+  return byRun;
+}
+
 /** The columns a run record is built from, named once so the list a single
  *  run is read with cannot drift from the list the page's list is read with. */
 const CHANNEL_RUN_COLUMNS =
-  "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at";
+  "id, channel_id, branch_id, window_start, window_end, period_grain, window_timezone, registry_version, detector_versions, result_digest, status, finding_count, observation_count, needs_data_count, safe_failure_code, started_at, completed_at";
 
 type ChannelAnalysisRunRow = Pick<
   Database["public"]["Tables"]["channel_analysis_runs"]["Row"],
@@ -214,6 +340,7 @@ type ChannelAnalysisRunRow = Pick<
   | "window_timezone"
   | "registry_version"
   | "detector_versions"
+  | "result_digest"
   | "status"
   | "finding_count"
   | "observation_count"
@@ -222,6 +349,74 @@ type ChannelAnalysisRunRow = Pick<
   | "started_at"
   | "completed_at"
 >;
+
+/**
+ * The per-viewer layer over a run's narration, read as one unit.
+ *
+ * Decisions and feedback travel together because they share a fate: neither
+ * may enter the run cache, and both are merged back onto a cached payload by
+ * the page. Reading them here, once, keeps the two callers that need them --
+ * the full read below and the standalone viewer-state port -- from drifting
+ * apart about what "a viewer's state" contains.
+ */
+async function readViewerState(
+  supabase: AnalysisClient,
+  input: {
+    organizationId: string;
+    recommendationIds: readonly string[];
+    viewerId: string;
+  },
+): Promise<{
+  decisionsById: Map<string, ChannelRecommendationDecisionRecord[]>;
+  feedbackById: Map<string, boolean>;
+}> {
+  // Every triage answer ever recorded; which one stands is decided by the
+  // view builder from `created_at`, not silently here. The actor's name
+  // arrives in the row itself, snapshotted definer-side when the answer
+  // was written, so no profiles read happens here -- a session cannot see
+  // another member's profile row, and must not borrow authority to try.
+  const { data: decisions, error: decisionError } = await supabase
+    .from("channel_recommendation_decisions")
+    .select(
+      "id, recommendation_id, decision, dismissal_reason, snoozed_until, actor_id, actor_display_name, created_at",
+    )
+    .eq("organization_id", input.organizationId)
+    .in("recommendation_id", [...input.recommendationIds])
+    .order("created_at", { ascending: false })
+    .limit(MAX_RECOMMENDATION_DECISIONS);
+  if (decisionError) throw new ChannelAnalysisReadError(decisionError.code ?? "unknown");
+
+  // One vote per actor per recommendation, and the only vote a page can
+  // honestly show the reader is their own.
+  const { data: feedback, error: feedbackError } = await supabase
+    .from("channel_recommendation_feedback")
+    .select("recommendation_id, helpful")
+    .eq("organization_id", input.organizationId)
+    .eq("actor_id", input.viewerId)
+    .in("recommendation_id", [...input.recommendationIds]);
+  if (feedbackError) throw new ChannelAnalysisReadError(feedbackError.code ?? "unknown");
+
+  const decisionsById = new Map<string, ChannelRecommendationDecisionRecord[]>();
+  for (const entry of decisions ?? []) {
+    const own = decisionsById.get(entry.recommendation_id) ?? [];
+    own.push({
+      recommendationId: entry.recommendation_id,
+      decision: entry.decision,
+      reason: entry.dismissal_reason,
+      snoozedUntil:
+        entry.snoozed_until === null || entry.snoozed_until === undefined
+          ? null
+          : String(entry.snoozed_until),
+      actorId: entry.actor_id,
+      actorName: entry.actor_display_name,
+      createdAt: entry.created_at,
+    });
+    decisionsById.set(entry.recommendation_id, own);
+  }
+  const feedbackById = new Map((feedback ?? []).map((row) => [row.recommendation_id, row.helpful]));
+
+  return { decisionsById, feedbackById };
+}
 
 function toRunRecord(row: ChannelAnalysisRunRow): ChannelAnalysisRunRecord {
   return {
@@ -234,6 +429,7 @@ function toRunRecord(row: ChannelAnalysisRunRow): ChannelAnalysisRunRecord {
     windowTimezone: row.window_timezone,
     registryVersion: row.registry_version,
     detectorVersions: toDetectorVersions(row.detector_versions),
+    resultDigest: row.result_digest,
     status: row.status,
     findingCount: row.finding_count,
     observationCount: row.observation_count,
@@ -451,70 +647,105 @@ export function createAuthenticatedChannelAnalysisRepository(
     },
 
     async loadChannelBandsForWindow({ organizationId, windowStart, windowEnd, grain }) {
-      const { data: runs, error: runError } = await supabase
-        .from("channel_analysis_runs")
-        .select("id, channel_id, completed_at")
-        .eq("organization_id", organizationId)
-        .eq("window_start", windowStart)
-        .eq("window_end", windowEnd)
-        .eq("period_grain", grain)
-        .eq("status", "completed")
-        .not("channel_id", "is", null)
-        .order("completed_at", { ascending: false })
-        .limit(MAX_CHANNEL_BAND_RUNS);
-      if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
-
-      // Newest first, so the first run seen for a channel is the one that
-      // stands. A channel re-analysed over the same window has two completed
-      // runs, and the later answer is the current one.
-      const latestByChannel = new Map<string, string>();
-      for (const row of runs ?? []) {
-        const channelId = row.channel_id as string;
-        if (!latestByChannel.has(channelId)) latestByChannel.set(channelId, row.id);
-      }
+      const latestByChannel = await loadLatestRunIdsByChannel(supabase, {
+        organizationId,
+        windowStart,
+        windowEnd,
+        grain,
+      });
       if (latestByChannel.size === 0) return [];
 
-      // Batched for the same reason loadEvidenceWindows batches its metric
-      // reads: PostgREST folds an `.in()` filter's values into the request
-      // line, and one filter naming every channel's run id can exceed a
-      // common gateway's request-line limit before RLS or the database ever
-      // sees the query.
-      const runIds = [...latestByChannel.values()];
-      const byRun = new Map<string, ChannelFindingRecord[]>();
-      for (let offset = 0; offset < runIds.length; offset += EVIDENCE_METRIC_BATCH_SIZE) {
-        const batch = runIds.slice(offset, offset + EVIDENCE_METRIC_BATCH_SIZE);
-        const { data, error: findingError } = await supabase
-          .from("channel_findings")
-          .select(CHANNEL_FINDING_COLUMNS)
-          .eq("organization_id", organizationId)
-          .in("analysis_run_id", batch)
-          .in("code", [...BAND_CODES])
-          // A superseded finding is the answer a later run replaced. Two
-          // figures for one question on one page is worse than one figure --
-          // the same reason loadFindingsForRun filters to open findings, and
-          // this band must never disagree with that page over the same run.
-          .eq("status", "open")
-          // Each detector writes at most one open finding per code per run,
-          // so two band codes read means at most two rows per run id in the
-          // batch.
-          .limit(batch.length * BAND_CODES.length + 1);
-        if (findingError) throw new ChannelAnalysisReadError(findingError.code ?? "unknown");
-        if ((data ?? []).length > batch.length * BAND_CODES.length)
-          throw new ChannelAnalysisReadError("BAND_FINDINGS_NOT_BOUNDED");
-
-        for (const row of data ?? []) {
-          const mapped = toFindingRecord(row);
-          const group = byRun.get(mapped.analysisRunId) ?? [];
-          group.push(mapped);
-          byRun.set(mapped.analysisRunId, group);
-        }
-      }
+      // Each detector writes at most one open finding per code per run, so
+      // two band codes read means at most two rows per run id in the batch.
+      const byRun = await loadOpenFindingsForRuns(supabase, {
+        organizationId,
+        runIds: [...latestByChannel.values()],
+        codes: [...BAND_CODES],
+        maxPerRun: BAND_CODES.length,
+        boundErrorCode: "BAND_FINDINGS_NOT_BOUNDED",
+      });
 
       return [...latestByChannel.entries()].map(
         ([channelId, analysisRunId]): ChannelBandRecord => ({
           channelId,
           analysisRunId,
           findings: byRun.get(analysisRunId) ?? [],
+        }),
+      );
+    },
+
+    async loadChannelCardFindingsForWindow({ organizationId, windowStart, windowEnd, grain }) {
+      const latestByChannel = await loadLatestRunIdsByChannel(supabase, {
+        organizationId,
+        windowStart,
+        windowEnd,
+        grain,
+      });
+      if (latestByChannel.size === 0) return [];
+
+      const byRun = await loadOpenFindingsForRuns(supabase, {
+        organizationId,
+        runIds: [...latestByChannel.values()],
+        codes: [...CARD_CODES],
+        maxPerRun: MAX_CARD_FINDINGS_PER_RUN,
+        boundErrorCode: "CARD_FINDINGS_NOT_BOUNDED",
+      });
+
+      return [...latestByChannel.entries()].map(
+        ([channelId, analysisRunId]): ChannelBandRecord => ({
+          channelId,
+          analysisRunId,
+          findings: byRun.get(analysisRunId) ?? [],
+        }),
+      );
+    },
+
+    async loadChannelRangeCardFindingsForWindow({ organizationId, windowStart, windowEnd }) {
+      // Exact dates at any grain, newest first. One bounded read rather than
+      // one per grain: an organization re-analysing the same dates stays one
+      // query, and the per-channel choice below cannot disagree with itself.
+      const { data: runs, error: runError } = await supabase
+        .from("channel_analysis_runs")
+        .select("id, channel_id, period_grain, completed_at")
+        .eq("organization_id", organizationId)
+        .eq("window_start", windowStart)
+        .eq("window_end", windowEnd)
+        .eq("status", "completed")
+        .not("channel_id", "is", null)
+        .order("completed_at", { ascending: false })
+        .limit(MAX_CHANNEL_BAND_RUNS);
+      if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
+
+      // Coarsest run wins per channel, newest among equals: rows arrive
+      // newest first, so the first row seen at the best rank stands.
+      const rank: Record<string, number> = { month: 0, week: 1, day: 2, span: 3 };
+      const latestByChannel = new Map<string, string>();
+      const rankByChannel = new Map<string, number>();
+      for (const row of runs ?? []) {
+        const channelId = row.channel_id as string;
+        const grainRank = rank[row.period_grain];
+        if (grainRank === undefined) continue;
+        const current = rankByChannel.get(channelId);
+        if (current === undefined || grainRank < current) {
+          rankByChannel.set(channelId, grainRank);
+          latestByChannel.set(channelId, row.id);
+        }
+      }
+      if (latestByChannel.size === 0) return [];
+
+      const rangeByRun = await loadOpenFindingsForRuns(supabase, {
+        organizationId,
+        runIds: [...latestByChannel.values()],
+        codes: [...CARD_CODES],
+        maxPerRun: MAX_CARD_FINDINGS_PER_RUN,
+        boundErrorCode: "CARD_FINDINGS_NOT_BOUNDED",
+      });
+
+      return [...latestByChannel.entries()].map(
+        ([channelId, analysisRunId]): ChannelBandRecord => ({
+          channelId,
+          analysisRunId,
+          findings: rangeByRun.get(analysisRunId) ?? [],
         }),
       );
     },
@@ -543,38 +774,27 @@ export function createAuthenticatedChannelAnalysisRepository(
       return keys;
     },
 
-    async loadAnalysisMonthTimeline({ organizationId, channelId }) {
-      // The horizon comes from declared package dates, not from surviving
-      // evidence rows: a package whose rows were all superseded still declares
-      // the month, and a gap month must stay selectable. Two bounded rows.
-      const earliestBase = supabase
+    async loadCoverageSegments({ organizationId, channelId }) {
+      const base = supabase
         .from("integration_report_packages")
-        .select("declared_period_start")
+        .select("declared_period_start, declared_period_end")
         .eq("organization_id", organizationId)
         .eq("status", "projected")
-        .not("declared_period_start", "is", null);
-      const latestBase = supabase
-        .from("integration_report_packages")
-        .select("declared_period_end")
-        .eq("organization_id", organizationId)
-        .eq("status", "projected")
+        .not("declared_period_start", "is", null)
         .not("declared_period_end", "is", null);
-      const earliestScoped =
-        channelId === null ? earliestBase : earliestBase.eq("channel_id", channelId);
-      const latestScoped = channelId === null ? latestBase : latestBase.eq("channel_id", channelId);
-      const { data: earliestRows, error: earliestError } = await earliestScoped
+      const { data, error } = await (channelId === null ? base : base.eq("channel_id", channelId))
         .order("declared_period_start", { ascending: true })
-        .limit(1);
-      if (earliestError) throw new ChannelAnalysisReadError(earliestError.code ?? "unknown");
-      const { data: latestRows, error: latestError } = await latestScoped
-        .order("declared_period_end", { ascending: false })
-        .limit(1);
-      if (latestError) throw new ChannelAnalysisReadError(latestError.code ?? "unknown");
+        .limit(MAX_EVIDENCE_WINDOWS);
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
 
-      const earliest = (earliestRows ?? [])[0]?.declared_period_start;
-      const latest = (latestRows ?? [])[0]?.declared_period_end;
-      if (typeof earliest !== "string" || typeof latest !== "string") return null;
-      return { firstMonth: earliest.slice(0, 7), lastMonth: latest.slice(0, 7) };
+      return mergeCoverageSegments(
+        (data ?? []).flatMap((row) =>
+          typeof row.declared_period_start === "string" &&
+          typeof row.declared_period_end === "string"
+            ? [{ windowStart: row.declared_period_start, windowEnd: row.declared_period_end }]
+            : [],
+        ),
+      );
     },
 
     async loadEvidence({ organizationId, findingIds }) {
@@ -656,6 +876,19 @@ export function createAuthenticatedChannelAnalysisRepository(
       });
     },
 
+    async countRecommendationsForRun({ organizationId, analysisRunId }) {
+      // An exact head count: one indexed lookup, no row data. The fence caps
+      // a run's filings, so this stays a small number by construction.
+      const { count, error } = await supabase
+        .from("channel_recommendations")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("analysis_run_id", analysisRunId);
+
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+      return count ?? 0;
+    },
+
     async loadRecommendationsForRun({ organizationId, analysisRunId, viewerId }) {
       // Only the displayed run's narration, for the same reason findings are
       // read per run: words narrated over another window must not sit above
@@ -687,33 +920,17 @@ export function createAuthenticatedChannelAnalysisRepository(
         .limit(MAX_CITATIONS);
       if (citationError) throw new ChannelAnalysisReadError(citationError.code ?? "unknown");
 
-      // Every triage answer ever recorded; which one stands is decided by the
-      // view builder from `created_at`, not silently here. The actor's name
-      // arrives in the row itself, snapshotted definer-side when the answer
-      // was written, so no profiles read happens here -- a session cannot see
-      // another member's profile row, and must not borrow authority to try.
-      const { data: decisions, error: decisionError } = await supabase
-        .from("channel_recommendation_decisions")
-        .select(
-          "id, recommendation_id, decision, dismissal_reason, snoozed_until, actor_id, actor_display_name, created_at",
-        )
-        .eq("organization_id", organizationId)
-        .in("recommendation_id", [...recommendationIds])
-        .order("created_at", { ascending: false })
-        .limit(MAX_RECOMMENDATION_DECISIONS);
-      if (decisionError) throw new ChannelAnalysisReadError(decisionError.code ?? "unknown");
-
-      const decisionRows = decisions ?? [];
-
-      // One vote per actor per recommendation, and the only vote this page can
-      // honestly show the reader is their own.
-      const { data: feedback, error: feedbackError } = await supabase
-        .from("channel_recommendation_feedback")
-        .select("recommendation_id, helpful")
-        .eq("organization_id", organizationId)
-        .eq("actor_id", viewerId)
-        .in("recommendation_id", [...recommendationIds]);
-      if (feedbackError) throw new ChannelAnalysisReadError(feedbackError.code ?? "unknown");
+      // A null viewer asks for the shareable text alone: the run cache holds
+      // this payload under the run id, where any viewer's decisions would
+      // leak to every other operator who opens the same range. The page reads
+      // the viewer's own layer separately and merges it back before display.
+      const { decisionsById, feedbackById } =
+        viewerId === null
+          ? {
+              decisionsById: new Map<string, ChannelRecommendationDecisionRecord[]>(),
+              feedbackById: new Map<string, boolean>(),
+            }
+          : await readViewerState(supabase, { organizationId, recommendationIds, viewerId });
 
       const citationsByRecommendation = new Map<string, string[]>();
       for (const row of citations ?? []) {
@@ -721,79 +938,99 @@ export function createAuthenticatedChannelAnalysisRepository(
         own.push(row.finding_id);
         citationsByRecommendation.set(row.recommendation_id, own);
       }
-      const feedbackByRecommendation = new Map(
-        (feedback ?? []).map((row) => [row.recommendation_id, row.helpful]),
-      );
 
-      // A run can be narrated more than once: a re-submission writes new rows
-      // rather than overwriting, and two tellings of one run on one page would
-      // read as two answers to one question. The rows arrive newest-first, so
-      // the first row seen per digest is that submission's newest item -- and
-      // the digest whose newest item is newest overall is the telling the page
-      // shows. Ties keep the first-seen submission, deterministically.
+      // A run can be narrated twice: the first narration plus one gap-fill
+      // that cites only previously-uncited findings (Amendment C, ADR 0053).
+      // The fence guarantees the two tellings cite disjoint findings, so both
+      // show: hiding the first telling behind the second would un-advise
+      // chapters the gap-fill never touched. Rows arrive newest-first, so the
+      // newest telling is kept whole; an older-telling item survives only
+      // when it cites something no newer telling cites — a newer telling
+      // that re-cites a finding replaces the older words about it. Items
+      // without citations carry no receipt and stay with their own telling.
       const newestByDigest = new Map<string, string>();
       for (const row of recommendationRows) {
         if (!newestByDigest.has(row.result_digest)) {
           newestByDigest.set(row.result_digest, row.created_at);
         }
       }
-      const [displayedDigest] = [...newestByDigest.entries()].sort((left, right) =>
-        right[1].localeCompare(left[1]),
-      )[0];
+      const digestOrder = new Map(
+        [...newestByDigest.entries()]
+          .sort((left, right) => right[1].localeCompare(left[1]))
+          .map(([digest], index) => [digest, index]),
+      );
+      // One pass, newest first: the keep decision for an older item must see
+      // every newer telling's citations, so filtering and accumulating cannot
+      // be split across two passes.
+      const citedByNewer = new Set<string>();
+      const displayed: typeof recommendationRows = [];
+      for (const row of recommendationRows) {
+        const citations = citationsByRecommendation.get(row.id) ?? [];
+        if (digestOrder.get(row.result_digest) !== 0) {
+          if (citations.length === 0) continue;
+          if (!citations.some((findingId) => !citedByNewer.has(findingId))) continue;
+        }
+        displayed.push(row);
+        for (const findingId of citations) citedByNewer.add(findingId);
+      }
 
-      return recommendationRows
-        .filter((row) => row.result_digest === displayedDigest)
-        .map(
-          (row): ChannelRecommendationRecord => ({
-            id: row.id,
-            analysisRunId: analysisRunId,
-            channelId: row.channel_id,
-            branchId: row.branch_id,
-            label: row.label,
-            headline: row.headline,
-            detail: row.detail,
-            supportedActions: toStringArray(row.supported_actions),
-            limitations: toStringArray(row.limitations),
-            resultDigest: row.result_digest,
-            citationFindingIds: citationsByRecommendation.get(row.id) ?? [],
-            decisions: decisionRows.flatMap((entry): ChannelRecommendationDecisionRecord[] =>
-              entry.recommendation_id === row.id
-                ? [
-                    {
-                      recommendationId: entry.recommendation_id,
-                      decision: entry.decision,
-                      reason: entry.dismissal_reason,
-                      snoozedUntil:
-                        entry.snoozed_until === null || entry.snoozed_until === undefined
-                          ? null
-                          : String(entry.snoozed_until),
-                      actorId: entry.actor_id,
-                      actorName: entry.actor_display_name,
-                      createdAt: entry.created_at,
-                    },
-                  ]
-                : [],
-            ),
-            myFeedback: feedbackByRecommendation.get(row.id) ?? null,
-            createdAt: row.created_at,
-          }),
-        );
+      return displayed.map(
+        (row): ChannelRecommendationRecord => ({
+          id: row.id,
+          analysisRunId: analysisRunId,
+          channelId: row.channel_id,
+          branchId: row.branch_id,
+          label: row.label,
+          headline: row.headline,
+          detail: row.detail,
+          supportedActions: toStringArray(row.supported_actions),
+          limitations: toStringArray(row.limitations),
+          resultDigest: row.result_digest,
+          citationFindingIds: citationsByRecommendation.get(row.id) ?? [],
+          decisions: decisionsById.get(row.id) ?? [],
+          myFeedback: feedbackById.get(row.id) ?? null,
+          createdAt: row.created_at,
+        }),
+      );
     },
 
-    async resolveMonthInput({ organizationId, channelId, month }) {
-      const timeline = await repository.loadAnalysisMonthTimeline({
+    async loadRecommendationViewerState({ organizationId, analysisRunId, viewerId }) {
+      // The ids first, because the decisions table names no run: without them
+      // this read cannot tell one run's answers from another's, and answering
+      // with another run's triage state would be the same defect as showing
+      // another window's figures.
+      const { data: rows, error } = await supabase
+        .from("channel_recommendations")
+        .select("id")
+        .eq("organization_id", organizationId)
+        .eq("analysis_run_id", analysisRunId)
+        .limit(MAX_RECOMMENDATIONS);
+      if (error) throw new ChannelAnalysisReadError(error.code ?? "unknown");
+
+      const recommendationIds = (rows ?? []).map((row) => row.id);
+      if (recommendationIds.length === 0) return [];
+
+      const { decisionsById, feedbackById } = await readViewerState(supabase, {
         organizationId,
-        channelId,
+        recommendationIds,
+        viewerId,
       });
-      if (timeline === null) return null;
-      let bounds: { windowStart: string; windowEnd: string };
-      try {
-        bounds = resolveAnalysisMonth(month, timeline);
-      } catch {
-        // Outside the known timeline: a normal empty state for the caller,
-        // not a row the database failed to return.
-        return null;
-      }
+      return recommendationIds.map(
+        (recommendationId): RecommendationViewerState => ({
+          recommendationId,
+          decisions: decisionsById.get(recommendationId) ?? [],
+          myFeedback: feedbackById.get(recommendationId) ?? null,
+        }),
+      );
+    },
+
+    async resolveWindowInput({ organizationId, channelId, from, to }) {
+      const segments = await repository.loadCoverageSegments({ organizationId, channelId });
+      // The first of the two independent checks. The worker repeats it under
+      // its lease, so a range that became uncovered between this read and the
+      // claim is still refused.
+      if (!isWindowCovered(from, to, segments)) return null;
+      const bounds = { windowStart: from, windowEnd: to };
 
       const { data: orgRows, error: orgError } = await supabase
         .from("organizations")
@@ -804,11 +1041,9 @@ export function createAuthenticatedChannelAnalysisRepository(
       const timeZone = (orgRows ?? [])[0]?.default_timezone;
       if (typeof timeZone !== "string" || timeZone.length === 0) return null;
 
-      // The grain the month's own packages wrote, by current-row majority
-      // with ties breaking finer. Packages outside the month still vote when
-      // nothing declares it: an empty month inherits the channel's known
-      // primary grain, and a channel with no packages at all resolves day
-      // grain so the coverage detector can state that no evidence exists.
+      // Unchanged from the monthly resolver: the grain the range's own packages
+      // wrote, by current-row majority with ties breaking finer. Packages
+      // outside the range still vote when nothing declares it.
       const windows = await repository.loadEvidenceWindows({
         organizationId,
         channelId,
@@ -833,6 +1068,279 @@ export function createAuthenticatedChannelAnalysisRepository(
           right[1] - left[1] || fineness.indexOf(left[0]) - fineness.indexOf(right[0]),
       )[0];
       return { ...bounds, timeZone, grain };
+    },
+
+    async loadRunForWindow({ organizationId, channelId, branchId, windowStart, windowEnd }) {
+      // Exactly this window, via the same `(organization_id, channel_id,
+      // window_start desc, created_at desc)` index `loadRuns` uses -- an
+      // equality match on its leading columns, newest first if re-analysis
+      // ever produced more than one run for the same declared range.
+      const base = supabase
+        .from("channel_analysis_runs")
+        .select("id, status, cache_key, finding_count, observation_count, needs_data_count")
+        .eq("organization_id", organizationId)
+        .eq("channel_id", channelId)
+        .eq("window_start", windowStart)
+        .eq("window_end", windowEnd);
+      const scoped =
+        branchId === undefined
+          ? base
+          : branchId === null
+            ? base.is("branch_id", null)
+            : base.eq("branch_id", branchId);
+      const { data: run, error: runError } = await scoped
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (runError) throw new ChannelAnalysisReadError(runError.code ?? "unknown");
+      if (!run) return null;
+
+      // The narrator is a second fenced worker that writes rows here only
+      // after the run above is `completed` (ADR 0037), so a `completed` run
+      // with zero rows is still waiting on it, not finished.
+      const { count, error: countError } = await supabase
+        .from("channel_recommendations")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("analysis_run_id", run.id);
+      if (countError) throw new ChannelAnalysisReadError(countError.code ?? "unknown");
+
+      return {
+        id: run.id,
+        status: run.status,
+        cacheKey: run.cache_key,
+        findingCount: run.finding_count,
+        observationCount: run.observation_count ?? 0,
+        needsDataCount: run.needs_data_count ?? 0,
+        recommendationCount: count ?? 0,
+      };
+    },
+
+    async loadCompletedRunCountSince({ organizationId, since, windowStartMin, windowEndMax }) {
+      const { count, error: countError } = await supabase
+        .from("channel_analysis_runs")
+        .select("id", { count: "exact", head: true })
+        .eq("organization_id", organizationId)
+        .eq("status", "completed")
+        .gt("completed_at", since)
+        .gte("window_start", windowStartMin)
+        .lte("window_end", windowEndMax);
+      if (countError) throw new ChannelAnalysisReadError(countError.code ?? "unknown");
+      return count ?? 0;
+    },
+
+    async loadDailyMetricAggregates({ organizationId, from, to, metricKeys }) {
+      const keys = [...new Set(metricKeys)].filter((key) => key.length > 0);
+      // Nothing to resolve and no days to cover: answer without touching the
+      // database rather than issuing queries that can only return empty.
+      if (keys.length === 0 || from > to) return [];
+
+      // Metric keys name shared or organization-owned definitions; the ledgers
+      // below carry only definition ids. The organization's own row wins over
+      // the shared one, mirroring the metric series repository, and an
+      // inactive definition contributes nothing. Keys are at most a handful
+      // per card, so one query covers the shared and owned rows together.
+      const { data: definitionRows, error: definitionError } = await supabase
+        .from("metric_definitions")
+        .select("id, key, organization_id, is_active")
+        .in("key", keys)
+        .limit(keys.length * 2 + 1);
+      if (definitionError) throw new ChannelAnalysisReadError(definitionError.code ?? "unknown");
+      if ((definitionRows ?? []).length > keys.length * 2)
+        throw new ChannelAnalysisReadError("METRIC_DEFINITIONS_NOT_BOUNDED");
+      const definitionIdByKey = new Map<string, string>();
+      for (const row of definitionRows ?? []) {
+        if (!row.is_active) continue;
+        if (row.organization_id !== null && row.organization_id !== organizationId) continue;
+        if (!definitionIdByKey.has(row.key) || row.organization_id === organizationId) {
+          definitionIdByKey.set(row.key, row.id);
+        }
+      }
+      const definitionIds = [...definitionIdByKey.values()];
+      if (definitionIds.length === 0) return [];
+      const keyByDefinitionId = new Map<string, string>();
+      for (const [key, id] of definitionIdByKey) keyByDefinitionId.set(id, key);
+
+      const fetchStart = new Date(
+        Date.parse(`${from}T00:00:00Z`) - DAILY_AGGREGATE_FETCH_WIDENING_DAYS * MS_PER_DAY,
+      );
+      const fetchEndExclusive = new Date(
+        Date.parse(`${to}T00:00:00Z`) + (DAILY_AGGREGATE_FETCH_WIDENING_DAYS + 1) * MS_PER_DAY,
+      );
+
+      // Day, week, and month period rows. A row is never split across the
+      // range edge or the days inside it: fully-inside rows arrive whole at
+      // their own grain, and the card builder -- not this read -- picks which
+      // grain states each range total. Digested and channel-carrying, like the
+      // governed window reads: a row without a digest was never reconciled,
+      // and an organization-wide row belongs to no channel's figure.
+      const { data: periodRows, error: periodError } = await supabase
+        .from("normalized_metrics")
+        .select(
+          "channel_id, metric_definition_id, period_grain, period_start, period_end, period_timezone, value_numerator, currency",
+        )
+        .eq("organization_id", organizationId)
+        .in("metric_definition_id", definitionIds)
+        .in("period_grain", ["day", "week", "month"])
+        .is("superseded_by_id", null)
+        .eq("reconciliation_state", "current")
+        .not("reconciliation_digest", "is", null)
+        .not("channel_id", "is", null)
+        .gte("period_start", fetchStart.toISOString())
+        .lt("period_start", fetchEndExclusive.toISOString())
+        .order("period_start", { ascending: true })
+        .limit(MAX_DAILY_AGGREGATE_ROWS);
+      if (periodError) throw new ChannelAnalysisReadError(periodError.code ?? "unknown");
+      if ((periodRows ?? []).length >= MAX_DAILY_AGGREGATE_ROWS)
+        throw new ChannelAnalysisReadError("DAILY_AGGREGATES_NOT_BOUNDED");
+
+      // Span totals overlapping the range, under the same standing-row rule.
+      // The dates are plain calendar days, compared directly like the
+      // analysis evidence loader compares them.
+      const { data: spanRows, error: spanError } = await supabase
+        .from("exact_range_metric_observations")
+        .select(
+          "channel_id, metric_definition_id, period_start, period_end, value_numerator, currency",
+        )
+        .eq("organization_id", organizationId)
+        .in("metric_definition_id", definitionIds)
+        .is("superseded_by_id", null)
+        .eq("reconciliation_state", "current")
+        .not("reconciliation_digest", "is", null)
+        .not("channel_id", "is", null)
+        .lte("period_start", to)
+        .gte("period_end", from)
+        .limit(MAX_DAILY_AGGREGATE_ROWS);
+      if (spanError) throw new ChannelAnalysisReadError(spanError.code ?? "unknown");
+      if ((spanRows ?? []).length >= MAX_DAILY_AGGREGATE_ROWS)
+        throw new ChannelAnalysisReadError("DAILY_AGGREGATES_NOT_BOUNDED");
+
+      const buckets = new Map<
+        string,
+        {
+          spanStart: string;
+          spanEnd: string;
+          grain: MetricAggregateGrain;
+          channelId: string;
+          metricKey: string;
+          total: number;
+          currencies: Set<string>;
+          hasNullCurrency: boolean;
+        }
+      >();
+      const add = (
+        spanStart: string,
+        spanEnd: string,
+        grain: MetricAggregateGrain,
+        channelId: string,
+        metricKey: string,
+        numerator: number,
+        currency: string | null,
+      ) => {
+        const fingerprint = `${grain}|${spanStart}|${spanEnd}|${channelId}|${metricKey}`;
+        const bucket = buckets.get(fingerprint) ?? {
+          spanStart,
+          spanEnd,
+          grain,
+          channelId,
+          metricKey,
+          total: 0,
+          currencies: new Set<string>(),
+          hasNullCurrency: false,
+        };
+        bucket.total += numerator;
+        if (currency === null) bucket.hasNullCurrency = true;
+        else bucket.currencies.add(currency);
+        buckets.set(fingerprint, bucket);
+      };
+
+      for (const row of periodRows ?? []) {
+        const metricKey = keyByDefinitionId.get(row.metric_definition_id);
+        const channelId = row.channel_id;
+        if (!metricKey || typeof channelId !== "string") continue;
+        if (
+          row.period_grain !== "day" &&
+          row.period_grain !== "week" &&
+          row.period_grain !== "month"
+        )
+          continue;
+        // `period_end` is the exclusive next local midnight, so the last day
+        // inside the period is the instant a millisecond before it -- the same
+        // conversion the evidence read uses.
+        const startDay = toCalendarDate(new Date(row.period_start), row.period_timezone);
+        const endDay = toCalendarDate(
+          new Date(Date.parse(row.period_end) - 1),
+          row.period_timezone,
+        );
+        // Fully inside the range or nothing: a row reaching past either edge
+        // states a total for days nobody asked about, and clipping it would
+        // state a part nobody reported.
+        if (startDay < from || endDay > to) continue;
+        // A day-grain row is one calendar day by definition; a wider one is
+        // corrupt input rather than a wider fact, and stays out.
+        if (row.period_grain === "day" && startDay !== endDay) continue;
+        const numerator = toExactQuantity(row.value_numerator);
+        if (numerator === null) throw new ChannelAnalysisReadError("VALUE_NOT_EXACT");
+        add(startDay, endDay, row.period_grain, channelId, metricKey, numerator, row.currency);
+      }
+
+      for (const row of spanRows ?? []) {
+        const metricKey = keyByDefinitionId.get(row.metric_definition_id);
+        const channelId = row.channel_id;
+        if (!metricKey || typeof channelId !== "string") continue;
+        // Fully inside at any length, stated in plain calendar days like the
+        // analysis evidence loader compares them. A single-day span is a day
+        // fact and merges into the day bucket; a longer span arrives whole so
+        // the builder can add it once to its range totals, never as bars.
+        if (row.period_start < from || row.period_end > to) continue;
+        const numerator = toExactQuantity(row.value_numerator);
+        if (numerator === null) throw new ChannelAnalysisReadError("VALUE_NOT_EXACT");
+        add(
+          row.period_start,
+          row.period_end,
+          row.period_start === row.period_end ? "day" : "span",
+          channelId,
+          metricKey,
+          numerator,
+          row.currency,
+        );
+      }
+
+      const aggregates: DailyMetricAggregate[] = [...buckets.values()].map((bucket) => ({
+        day: bucket.spanStart,
+        spanStart: bucket.spanStart,
+        spanEnd: bucket.spanEnd,
+        grain: bucket.grain,
+        channelId: bucket.channelId,
+        metricKey: bucket.metricKey,
+        totalNumerator: bucket.total,
+        // One currency or none: a mixed group refuses to name one, so the
+        // builder states no combined total rather than one in a lucky currency.
+        currency:
+          !bucket.hasNullCurrency && bucket.currencies.size === 1
+            ? ([...bucket.currencies][0] ?? null)
+            : null,
+      }));
+      aggregates.sort((left, right) =>
+        left.spanStart < right.spanStart
+          ? -1
+          : left.spanStart > right.spanStart
+            ? 1
+            : left.spanEnd < right.spanEnd
+              ? -1
+              : left.spanEnd > right.spanEnd
+                ? 1
+                : left.channelId < right.channelId
+                  ? -1
+                  : left.channelId > right.channelId
+                    ? 1
+                    : left.metricKey < right.metricKey
+                      ? -1
+                      : left.metricKey > right.metricKey
+                        ? 1
+                        : 0,
+      );
+      return aggregates;
     },
   };
   return repository;

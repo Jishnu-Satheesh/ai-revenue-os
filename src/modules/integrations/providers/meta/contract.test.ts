@@ -9,6 +9,13 @@ import * as metaContractModule from "@/modules/integrations/providers/meta/contr
 
 const NOW = new Date("2026-08-11T12:00:00.000Z");
 
+/**
+ * Inside the checked-in contract's own review window, which moves whenever the
+ * contract is re-verified. Kept separate from `NOW` so the synthetic fixtures
+ * below keep testing the schema rather than today's date.
+ */
+const CONTRACT_NOW = new Date("2026-09-15T12:00:00.000Z");
+
 const verifiedFixture = {
   schemaVersion: 1,
   providerKey: "fixture_provider",
@@ -106,7 +113,7 @@ const verifiedFixture = {
 
 describe("verified provider contract boundary", () => {
   it("accepts the checked-in Meta contract while its controlled-account actions remain blocked", () => {
-    const parsed = getMetaCampaignProviderContract(NOW);
+    const parsed = getMetaCampaignProviderContract(CONTRACT_NOW);
 
     expect(parsed.providerKey).toBe("meta_campaign");
     // Must equal what the SDK actually calls. FacebookAdsApi.VERSION is a
@@ -122,7 +129,7 @@ describe("verified provider contract boundary", () => {
 
   it("exposes the checked-in Meta contract only through current temporal validation", () => {
     expect("metaCampaignProviderContract" in metaContractModule).toBe(false);
-    expect(() => getMetaCampaignProviderContract(new Date("2026-09-10T00:00:00.000Z"))).toThrow(
+    expect(() => getMetaCampaignProviderContract(new Date("2026-10-15T00:00:00.000Z"))).toThrow(
       /expired/i,
     );
   });
@@ -324,5 +331,84 @@ describe("verified provider contract boundary", () => {
     expect(() =>
       parseVerifiedProviderContract({ ...verifiedFixture, guessedPermission: true }, NOW),
     ).toThrow();
+  });
+});
+
+describe("what the 2026-09-15 re-verification actually proved", () => {
+  it("proves the Instagram feed image limits from the official media reference", () => {
+    const parsed = getMetaCampaignProviderContract(CONTRACT_NOW);
+    const feed = parsed.placements.find(({ key }) => key === "instagram.feed_image");
+
+    // These are the numbers the POST /{ig-user-id}/media reference states, and
+    // they are what a draft is checked against before anyone tries to publish
+    // it. A plausible-looking guess here would fail at Meta instead.
+    expect(feed?.verificationStatus).toBe("verified");
+    expect(feed?.limits).toEqual({
+      maxPayloadBytes: 8_000_000,
+      maxCopyCharacters: 2200,
+      maxHashtags: 30,
+    });
+  });
+
+  it("leaves every placement the re-verification did not cover blocked", () => {
+    const parsed = getMetaCampaignProviderContract(CONTRACT_NOW);
+    const blocked = parsed.placements
+      .filter(({ verificationStatus }) => verificationStatus !== "verified")
+      .map(({ key }) => key);
+
+    // Stories limits are not documented on the pages consulted, and Facebook
+    // and ads were not part of this pass. Reading the contract must not suggest
+    // otherwise.
+    expect(blocked.sort()).toEqual([
+      "facebook.feed_image",
+      "facebook.image_story",
+      "instagram.image_story",
+      "meta_ads.feed_image",
+      "meta_ads.image_story",
+    ]);
+  });
+
+  it("keeps the controlled account unproven, so nothing may actually publish", () => {
+    const parsed = getMetaCampaignProviderContract(CONTRACT_NOW);
+
+    // Reading a public document proves what the API allows. It cannot prove
+    // that this organization's account is eligible to do it, and no amount of
+    // documentation ever will.
+    expect(
+      parsed.accountPrerequisites.every(
+        ({ verificationStatus }) => verificationStatus === "blocked",
+      ),
+    ).toBe(true);
+    expect(parsed.actions).toEqual([]);
+  });
+
+  it("records that organic impressions cannot be collected, rather than substituting a metric", () => {
+    const parsed = getMetaCampaignProviderContract(CONTRACT_NOW);
+
+    // Meta deprecated impressions for media created after 2024-07-02. Mapping
+    // reach or views onto the registry's impressions would put a different
+    // measurement behind a name people already trust.
+    expect(parsed.knownRestrictions.map(({ code }) => code)).toContain(
+      "meta.instagram_organic_impressions_unavailable",
+    );
+  });
+});
+
+describe("the checked-in contract against the real clock", () => {
+  /**
+   * Deliberately time-dependent, and the only test here that is.
+   *
+   * This contract lapsed on 2026-09-10 and nothing said so. It was found five
+   * days later only because a feature that needed it stopped working, having
+   * looked fine in every test — every other test in this file pins its own
+   * date, so all of them kept passing over an expired record.
+   *
+   * A failure here means the review is due, not that the code is broken. Fix
+   * it by re-checking the official sources and updating `verifiedAt`,
+   * `expiresAt` and every evidence `checkedAt` to what was actually read.
+   * Never by moving the dates alone.
+   */
+  it("is inside its own review window today", () => {
+    expect(() => getMetaCampaignProviderContract(new Date())).not.toThrow();
   });
 });

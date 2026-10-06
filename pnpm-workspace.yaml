@@ -30,3 +30,8 @@ minimumReleaseAgeExclude:
   - '@napi-rs/canvas-win32-arm64-msvc@1.0.8'
   - '@napi-rs/canvas-win32-x64-msvc@1.0.8'
   - '@napi-rs/canvas@1.0.8'
+  - '@ai-sdk/gateway@3.0.191'
+  - '@ai-sdk/google@3.0.122'
+  - '@ai-sdk/provider-utils@4.0.51'
+  - '@ai-sdk/provider@3.0.16'
+  - ai@6.0.280

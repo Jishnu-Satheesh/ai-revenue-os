@@ -30,7 +30,7 @@ const manualCreateSchema = subjectProfileContentSchema.omit({ organizationId: tr
   draftDescription: z.literal(false).optional(),
 });
 const draftedCreateSchema = subjectDraftRequestSchema
-  .omit({ organizationId: true, correlationId: true })
+  .omit({ organizationId: true, correlationId: true, actorId: true })
   .extend({ draftDescription: z.literal(true) });
 const editSchema = subjectProfileContentSchema.omit({ organizationId: true }).extend({
   action: z.literal("edit"),
@@ -120,6 +120,7 @@ export function createSubjectRouteHandlers(dependencies: SubjectRouteHandlerDepe
           body.draftDescription === true
             ? await service.draft({
                 organizationId: context.organizationId,
+                actorId: context.user.id,
                 correlationId,
                 name: body.name,
                 slug: body.slug,

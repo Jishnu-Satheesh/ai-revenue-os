@@ -39,6 +39,23 @@ function persistence(result: { data: unknown; error: { message?: string } | null
         calls.push({ name, args });
         return result;
       },
+      from() {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    // The probe defaults to a miss; tests that need a hit pass
+                    // their own client.
+                    maybeSingle: async () => ({ data: null, error: null }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      },
     },
   };
 }
@@ -183,5 +200,120 @@ describe("createPosterRenderStore", () => {
     const { client } = persistence({ data: { unexpected: true }, error: null });
 
     await expect(createPosterRenderStore(client).record(record())).rejects.toThrow();
+  });
+
+  /**
+   * The retry probe: a previous attempt's row for this exact digest, so the
+   * worker can skip drawing it again. Scoped to the tenant, campaign and
+   * version -- a digest hit anywhere else is not a reuse.
+   */
+  it("finds a previous render by digest for the retry probe", async () => {
+    const seen: { table: string; columns: string }[] = [];
+    const client = {
+      async rpc() {
+        throw new Error("must not record during a probe");
+      },
+      from(table: string) {
+        return {
+          select: (columns: string) => {
+            seen.push({ table, columns });
+            return {
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    eq: () => ({
+                      maybeSingle: async () => ({
+                        data: {
+                          id: "3f1d5e2a-0000-4000-8000-00000000000a",
+                          state: "rendered",
+                          refusal_code: null,
+                          text_values: { caption: "Kerala fish curry" },
+                          output_storage_path: "org/campaign/version/posters/b.png",
+                          output_content_hash: "c".repeat(64),
+                          output_mime_type: "image/png",
+                          output_width_px: 600,
+                          output_height_px: 400,
+                        },
+                        error: null,
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            };
+          },
+        };
+      },
+    };
+
+    const found = await createPosterRenderStore(client).findByDigest({
+      organizationId: ORGANIZATION_ID,
+      campaignId: "3f1d5e2a-0000-4000-8000-000000000002",
+      bundleVersionId: "3f1d5e2a-0000-4000-8000-000000000003",
+      renderDigest: "b".repeat(64),
+    });
+
+    expect(seen[0].table).toBe("campaign_poster_renders");
+    expect(found).toMatchObject({
+      renderId: "3f1d5e2a-0000-4000-8000-00000000000a",
+      state: "rendered",
+      outputContentHash: "c".repeat(64),
+    });
+  });
+
+  it("reports no previous render as a miss, never an invented row", async () => {
+    const { client } = persistence({
+      data: {
+        render_id: "3f1d5e2a-0000-4000-8000-00000000000a",
+        state: "rendered",
+        replayed: false,
+      },
+      error: null,
+    });
+
+    await expect(
+      createPosterRenderStore(client).findByDigest({
+        organizationId: ORGANIZATION_ID,
+        campaignId: "3f1d5e2a-0000-4000-8000-000000000002",
+        bundleVersionId: "3f1d5e2a-0000-4000-8000-000000000003",
+        renderDigest: "b".repeat(64),
+      }),
+    ).resolves.toBeNull();
+  });
+
+  /**
+   * A read that failed is not an absent render. Treating it as one would draw,
+   * store and record a second output for work already done.
+   */
+  it("throws when the probe cannot read, rather than reporting a miss", async () => {
+    const client = {
+      async rpc() {
+        throw new Error("must not record during a probe");
+      },
+      from() {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: async () => ({ data: null, error: { message: "boom" } }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      },
+    };
+
+    await expect(
+      createPosterRenderStore(client).findByDigest({
+        organizationId: ORGANIZATION_ID,
+        campaignId: "3f1d5e2a-0000-4000-8000-000000000002",
+        bundleVersionId: "3f1d5e2a-0000-4000-8000-000000000003",
+        renderDigest: "b".repeat(64),
+      }),
+    ).rejects.toThrow();
   });
 });

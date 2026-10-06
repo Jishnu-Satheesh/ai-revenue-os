@@ -57,7 +57,12 @@ describe("verifyFontHashes", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("unreachable");
     expect(result.problems).toEqual([
-      { file: changed, kind: "hash_mismatch", expected: FONT_MANIFEST[0]!.sha256, observed: "0".repeat(64) },
+      {
+        file: changed,
+        kind: "hash_mismatch",
+        expected: FONT_MANIFEST[0]!.sha256,
+        observed: "0".repeat(64),
+      },
     ]);
   });
 

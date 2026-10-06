@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { reportContractDocumentSchema } from "@/domain/reports/contracts";
-import { projectExactRangeMetrics, reportProjectionDocumentSchema } from "@/domain/reports/projection";
+import {
+  projectExactRangeMetrics,
+  reportProjectionDocumentSchema,
+} from "@/domain/reports/projection";
 import { selectContractSheet } from "@/domain/reports/sheet-locator";
 
 const sheets = [
@@ -19,16 +22,24 @@ describe("finding the sheet a contract describes", () => {
     // Talabat names the worksheet after the export range, so January's download
     // and March's do not share a name. The contract that was approved against
     // one has to keep working on the other.
-    const rule = { normalizedSheetName: "performance", sheetLocator: { kind: "position", position: 1 } } as const;
+    const rule = {
+      normalizedSheetName: "performance",
+      sheetLocator: { kind: "position", position: 1 },
+    } as const;
 
     expect(selectContractSheet(rule, sheets)).toBe(sheets[0]);
-    expect(selectContractSheet(rule, [{ normalizedSheetName: "talabat_mar_2026_performance" }])).toEqual({
+    expect(
+      selectContractSheet(rule, [{ normalizedSheetName: "talabat_mar_2026_performance" }]),
+    ).toEqual({
       normalizedSheetName: "talabat_mar_2026_performance",
     });
   });
 
   it("finds nothing rather than the wrong tab when the position is not there", () => {
-    const rule = { normalizedSheetName: "performance", sheetLocator: { kind: "position", position: 4 } } as const;
+    const rule = {
+      normalizedSheetName: "performance",
+      sheetLocator: { kind: "position", position: 4 },
+    } as const;
 
     expect(selectContractSheet(rule, sheets)).toBeUndefined();
   });
@@ -83,7 +94,10 @@ describe("projecting through a positional locator", () => {
       document,
       declaredCurrency: "AED",
       sheets: [
-        { normalizedSheetName: "talabat_mar_2026_performance_re", rows: [["Gross Sales"], [70], [19]] },
+        {
+          normalizedSheetName: "talabat_mar_2026_performance_re",
+          rows: [["Gross Sales"], [70], [19]],
+        },
       ],
     });
 
@@ -96,10 +110,7 @@ describe("what a contract may say about positions", () => {
     expect(() =>
       reportContractDocumentSchema.parse({
         ...contract,
-        sheets: [
-          contract.sheets[0],
-          { ...contract.sheets[0], normalizedSheetName: "second" },
-        ],
+        sheets: [contract.sheets[0], { ...contract.sheets[0], normalizedSheetName: "second" }],
       }),
     ).toThrow();
   });

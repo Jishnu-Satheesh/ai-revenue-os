@@ -246,6 +246,96 @@ describe("Market Evidence repository", () => {
     ]);
   });
 
+  it("accepts begin metadata with research-brief fields (canary regression)", async () => {
+    const db = persistence();
+    const repository = createMarketEvidenceRepository(db.client);
+
+    const result = await repository.begin({
+      organizationId,
+      requestId,
+      claimToken,
+      metadata: {
+        adapterProvider: "qualified-research",
+        adapterVersion: "market-research@1",
+        modelProvider: "gemini",
+        modelVersion: "gemini-2.5-flash",
+        runFingerprint: "c".repeat(64),
+        queryPlanDigest: "e".repeat(64),
+        correlationId: "60000000-0000-4000-8000-000000000006",
+        briefManifestId: "manifest-001",
+        briefDigest: "f".repeat(64),
+        briefStatus: "ready",
+      },
+    });
+
+    expect(result).toEqual({ runId, status: "partial", replayed: false });
+    expect(db.rpc).toHaveBeenCalledWith(
+      "begin_market_research_run",
+      expect.objectContaining({
+        p_metadata: expect.objectContaining({
+          briefManifestId: "manifest-001",
+          briefDigest: "f".repeat(64),
+          briefStatus: "ready",
+        }),
+      }),
+    );
+  });
+
+  it("accepts begin metadata with null brief identity (brief resolved without manifest)", async () => {
+    const db = persistence();
+    const repository = createMarketEvidenceRepository(db.client);
+
+    const result = await repository.begin({
+      organizationId,
+      requestId,
+      claimToken,
+      metadata: {
+        adapterProvider: "qualified-research",
+        adapterVersion: "market-research@1",
+        modelProvider: "gemini",
+        modelVersion: "gemini-2.5-flash",
+        runFingerprint: "c".repeat(64),
+        queryPlanDigest: "e".repeat(64),
+        correlationId: "60000000-0000-4000-8000-000000000006",
+        briefManifestId: null,
+        briefDigest: null,
+        briefStatus: "empty",
+      },
+    });
+
+    expect(result).toEqual({ runId, status: "partial", replayed: false });
+    expect(db.rpc).toHaveBeenCalledOnce();
+  });
+
+  it("still refuses unknown extra metadata keys at the begin boundary", async () => {
+    const db = persistence();
+    const repository = createMarketEvidenceRepository(db.client);
+
+    await expect(
+      repository.begin({
+        organizationId,
+        requestId,
+        claimToken,
+        metadata: {
+          adapterProvider: "qualified-research",
+          adapterVersion: "market-research@1",
+          modelProvider: null,
+          modelVersion: null,
+          runFingerprint: "c".repeat(64),
+          queryPlanDigest: "e".repeat(64),
+          correlationId: "60000000-0000-4000-8000-000000000006",
+          unexpectedKey: "nope",
+        } as unknown as Parameters<typeof repository.begin>[0]["metadata"],
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "DOMAIN_ERROR",
+        message: "Market Evidence must contain compact citations and claims only.",
+      }),
+    );
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
   it("returns safe persistence copy instead of exposing a worker database error", async () => {
     const rpc = vi.fn().mockResolvedValue({
       data: null,
@@ -285,5 +375,426 @@ describe("Market Evidence repository", () => {
         message: "Market Evidence could not be recorded.",
       }),
     );
+  });
+
+  it("admits a bounded excerpt with its qualification and retain-until policy", async () => {
+    const db = persistence();
+    const provenancedPayload: MarketEvidencePayload = {
+      ...payload,
+      sources: [
+        {
+          ...payload.sources[0]!,
+          excerptText: "A public notice about weekend demand near the marina.",
+          excerptDigest: "b".repeat(64),
+          qualificationVersion: "BRAVE-ORDER-2026-09-08",
+          retainUntil: "2027-09-01T00:00:00Z",
+        },
+      ],
+    };
+
+    const result = await createMarketEvidenceRepository(db.client).record({
+      organizationId,
+      requestId,
+      claimToken,
+      runId,
+      payload: provenancedPayload,
+    });
+
+    expect(result).toEqual({ runId, claimCount: 1, replayed: false });
+    expect(db.rpc).toHaveBeenCalledWith(
+      "record_market_evidence_claims",
+      expect.objectContaining({ p_payload: provenancedPayload }),
+    );
+  });
+
+  it("surfaces a lost lease distinctly so the worker stops mutating evidence", async () => {
+    const lost = { message: "market_research_claim_lost" };
+    const recordRpc = vi.fn().mockResolvedValue({ data: null, error: lost });
+    const repository = createMarketEvidenceRepository({ rpc: recordRpc });
+
+    await expect(
+      repository.record({ organizationId, requestId, claimToken, runId, payload }),
+    ).rejects.toMatchObject({ code: "RESEARCH_CLAIM_LOST" });
+    expect(recordRpc).toHaveBeenCalledOnce();
+
+    const throwingRpc = vi.fn().mockRejectedValue(new Error("market_research_claim_lost"));
+    await expect(
+      createMarketEvidenceRepository({ rpc: throwingRpc }).record({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        payload,
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_CLAIM_LOST" });
+
+    const completeRpc = vi.fn().mockResolvedValue({ data: null, error: lost });
+    await expect(
+      createMarketEvidenceRepository({ rpc: completeRpc }).complete({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        result: {
+          outcome: "partial",
+          resultDigest: "d".repeat(64),
+          sourceAttemptCount: 1,
+          sourceSuccessCount: 1,
+          adapterCostMicrosUsd: 42_000,
+          adapterLatencyMs: 721,
+        },
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_CLAIM_LOST" });
+  });
+
+  it("refuses claims that cite unavailable or excluded sources before any RPC", async () => {
+    const db = persistence();
+    for (const availability of ["unavailable", "excluded"] as const) {
+      const inadmissible = {
+        ...payload,
+        sources: [
+          {
+            ...payload.sources[0]!,
+            availability,
+            contentDigest: null,
+            safeFailureCode: "SOURCE_ACCESS_REFUSED",
+          },
+        ],
+      } as unknown as MarketEvidencePayload;
+
+      await expect(
+        createMarketEvidenceRepository(db.client).record({
+          organizationId,
+          requestId,
+          claimToken,
+          runId,
+          payload: inadmissible,
+        }),
+      ).rejects.toEqual(
+        expect.objectContaining({
+          code: "DOMAIN_ERROR",
+          message: "Market Evidence must contain compact citations and claims only.",
+        }),
+      );
+    }
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses an excerpt without its digest, and an over-long excerpt", async () => {
+    const db = persistence();
+    const digestlessPayload = {
+      ...payload,
+      sources: [{ ...payload.sources[0], excerptText: "A notice without a digest." }],
+    } as unknown as MarketEvidencePayload;
+
+    await expect(
+      createMarketEvidenceRepository(db.client).record({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        payload: digestlessPayload,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "DOMAIN_ERROR",
+        message: "Market Evidence must contain compact citations and claims only.",
+      }),
+    );
+
+    const oversizedPayload = {
+      ...payload,
+      sources: [
+        {
+          ...payload.sources[0],
+          excerptText: "x".repeat(2_001),
+          excerptDigest: "b".repeat(64),
+          qualificationVersion: "BRAVE-ORDER-2026-09-08",
+          retainUntil: "2027-09-01T00:00:00Z",
+        },
+      ],
+    } as unknown as MarketEvidencePayload;
+
+    await expect(
+      createMarketEvidenceRepository(db.client).record({
+        organizationId,
+        requestId,
+        claimToken,
+        runId,
+        payload: oversizedPayload,
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({
+        code: "DOMAIN_ERROR",
+        message: "Market Evidence must contain compact citations and claims only.",
+      }),
+    );
+    expect(db.rpc).not.toHaveBeenCalled();
+  });
+});
+
+describe("Market Evidence repository pipeline handoff", () => {
+  const pipelineId = "60000000-0000-4000-8000-000000000006";
+  const synthesisRunId = "70000000-0000-4000-8000-000000000007";
+
+  const completionResult = {
+    outcome: "completed" as const,
+    resultDigest: "d".repeat(64),
+    sourceAttemptCount: 1,
+    sourceSuccessCount: 1,
+    adapterCostMicrosUsd: 42_000,
+    adapterLatencyMs: 721,
+  };
+
+  const coverage = [
+    {
+      slotKey: "local_market",
+      kind: "local_market" as const,
+      outcome: "supported" as const,
+      attemptIds: ["11111111-1111-4111-8111-111111111111"],
+      acceptedClaimIds: [] as string[],
+    },
+  ];
+
+  it("completes research and schedules synthesis through one fenced call", async () => {
+    const rpc = vi.fn(async () => ({
+      data: {
+        runId,
+        pipelineStage: "preparing_insights",
+        synthesisRequestId: "80000000-0000-4000-8000-000000000008",
+        eligibleClaimCount: 1,
+        replayed: false,
+      },
+      error: null,
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    const result = await repository.completePipeline({
+      organizationId,
+      pipelineId,
+      requestId,
+      claimToken,
+      runId,
+      result: completionResult,
+      coverage,
+    });
+
+    expect(result).toEqual({
+      runId,
+      pipelineStage: "preparing_insights",
+      synthesisRequestId: "80000000-0000-4000-8000-000000000008",
+      eligibleClaimCount: 1,
+      replayed: false,
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_market_research_pipeline",
+      expect.objectContaining({
+        p_organization_id: organizationId,
+        p_pipeline_id: pipelineId,
+        p_request_id: requestId,
+        p_claim_token: claimToken,
+        p_market_research_run_id: runId,
+      }),
+    );
+  });
+
+  it("rejects unbounded coverage before any pipeline RPC", async () => {
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    await expect(
+      repository.completePipeline({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken,
+        runId,
+        result: completionResult,
+        coverage: Array.from({ length: 27 }, (_, index) => ({
+          slotKey: `topic-${index}`,
+          kind: "topic" as const,
+          outcome: "supported" as const,
+        })),
+      }),
+    ).rejects.toEqual(expect.objectContaining({ code: "DOMAIN_ERROR" }));
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a lost pipeline lease distinctly", async () => {
+    const rpc = vi.fn(async () => ({
+      data: null,
+      error: { message: "market_research_claim_lost" },
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    await expect(
+      repository.completePipeline({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken,
+        runId,
+        result: completionResult,
+        coverage,
+      }),
+    ).rejects.toMatchObject({ code: "RESEARCH_CLAIM_LOST" });
+  });
+
+  it("finalizes synthesis items, request and pipeline through one fenced call", async () => {
+    const rpc = vi.fn(async () => ({
+      data: {
+        runId: synthesisRunId,
+        itemCount: 2,
+        supersededItemIds: [],
+        pipelineStage: "ready",
+        replayed: false,
+      },
+      error: null,
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    const result = await repository.completeSynthesisPipeline({
+      organizationId,
+      requestId,
+      claimToken,
+      runId: synthesisRunId,
+      result: {
+        outcome: "completed",
+        resultDigest: "e".repeat(64),
+        items: [],
+      },
+    });
+
+    expect(result).toEqual({
+      runId: synthesisRunId,
+      itemCount: 2,
+      supersededItemIds: [],
+      pipelineStage: "ready",
+      replayed: false,
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "complete_market_synthesis_pipeline",
+      expect.objectContaining({
+        p_organization_id: organizationId,
+        p_request_id: requestId,
+        p_claim_token: claimToken,
+        p_synthesis_run_id: synthesisRunId,
+      }),
+    );
+  });
+
+  it("fails synthesis runs through the fenced pipeline fail path", async () => {
+    const rpc = vi.fn(async () => ({
+      data: { runId: synthesisRunId, pipelineStage: "synthesis_failed", replayed: false },
+      error: null,
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    const result = await repository.failSynthesisPipeline({
+      organizationId,
+      requestId,
+      claimToken,
+      runId: synthesisRunId,
+      failureCode: "SYNTHESIS_NO_VALID_CANDIDATE",
+    });
+
+    expect(result).toEqual({
+      runId: synthesisRunId,
+      pipelineStage: "synthesis_failed",
+      replayed: false,
+    });
+    expect(rpc).toHaveBeenCalledWith(
+      "fail_market_synthesis_pipeline",
+      expect.objectContaining({ p_safe_failure_code: "SYNTHESIS_NO_VALID_CANDIDATE" }),
+    );
+  });
+
+  it("fails research pipelines through the fenced pipeline fail path, with or without a run row", async () => {
+    const pipelineId = "50000000-0000-4000-8000-000000000005";
+    const rpc = vi.fn(async () => ({
+      data: { pipelineStage: "research_failed", replayed: false },
+      error: null,
+    }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    const withoutRun = await repository.failPipeline({
+      organizationId,
+      pipelineId,
+      requestId,
+      claimToken,
+      runId: null,
+      failureCode: "EXTRACTION_UNAVAILABLE",
+      adapterCostMicrosUsd: 0,
+      adapterLatencyMs: 0,
+    });
+
+    expect(withoutRun).toEqual({ pipelineStage: "research_failed", replayed: false });
+    expect(rpc).toHaveBeenCalledWith(
+      "fail_market_research_pipeline",
+      expect.objectContaining({
+        p_organization_id: organizationId,
+        p_pipeline_id: pipelineId,
+        p_request_id: requestId,
+        p_claim_token: claimToken,
+        p_market_research_run_id: null,
+        p_safe_failure_code: "EXTRACTION_UNAVAILABLE",
+        p_adapter_cost_micros_usd: 0,
+        p_adapter_latency_ms: 0,
+      }),
+    );
+
+    const withRun = await repository.failPipeline({
+      organizationId,
+      pipelineId,
+      requestId,
+      claimToken,
+      runId,
+      failureCode: "ADAPTER_UNAVAILABLE",
+      adapterCostMicrosUsd: 1_000,
+      adapterLatencyMs: 210,
+    });
+
+    expect(withRun).toEqual({ pipelineStage: "research_failed", replayed: false });
+    expect(rpc).toHaveBeenCalledWith(
+      "fail_market_research_pipeline",
+      expect.objectContaining({
+        p_market_research_run_id: runId,
+        p_safe_failure_code: "ADAPTER_UNAVAILABLE",
+        p_adapter_cost_micros_usd: 1_000,
+        p_adapter_latency_ms: 210,
+      }),
+    );
+  });
+
+  it("refuses pipeline failure spend outside the governed bounds", async () => {
+    const pipelineId = "50000000-0000-4000-8000-000000000005";
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    const repository = createMarketEvidenceRepository({ rpc });
+
+    await expect(
+      repository.failPipeline({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken,
+        runId,
+        failureCode: "ADAPTER_UNAVAILABLE",
+        adapterCostMicrosUsd: 50_000_001,
+        adapterLatencyMs: 0,
+      }),
+    ).rejects.toThrow(DomainError);
+    await expect(
+      repository.failPipeline({
+        organizationId,
+        pipelineId,
+        requestId,
+        claimToken,
+        runId,
+        failureCode: "ADAPTER_UNAVAILABLE",
+        adapterCostMicrosUsd: 0,
+        adapterLatencyMs: 600_001,
+      }),
+    ).rejects.toThrow(DomainError);
+    expect(rpc).not.toHaveBeenCalled();
   });
 });

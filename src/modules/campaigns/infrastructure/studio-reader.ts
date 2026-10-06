@@ -57,7 +57,10 @@ export async function readCampaignList(
       // Only read the run when there is no version to explain the campaign. A
       // settled campaign's generation history is not what this list is for.
       const run = latest ? null : await read.latestGenerationRun(organizationId, campaign.id);
-      return toCampaignListItem(campaign, latest, run, now);
+      // The most recent approval whatever became of it, so a card can say
+      // "expired" rather than the flat "not approved" a live-only read gives.
+      const approval = latest ? await read.getLatestApproval(organizationId, campaign.id) : null;
+      return toCampaignListItem(campaign, latest, run, now, approval);
     }),
   );
 }
@@ -94,7 +97,11 @@ export async function readStudioView(
   // this campaign rather than trusted to belong to it.
   if (!version || version.campaignId !== campaignId) return null;
 
-  const approval = await read.getLiveApproval(organizationId, campaignId);
+  // The Studio explains; it does not authorize. Reading the live-only approval
+  // here rendered a superseded approval as "nothing has been approved for this
+  // campaign yet", directly beside a panel saying an approval had been
+  // invalidated. `toApproval` derives the real status from the row.
+  const approval = await read.getLatestApproval(organizationId, campaignId);
 
   const previewUrls = options.previews
     ? await readAssetPreviewUrls(options.previews.database, options.previews.storage, {

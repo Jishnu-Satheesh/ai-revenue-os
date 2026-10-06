@@ -1,3 +1,4 @@
+import type { CoverageSegment } from "@/domain/analysis/window-selection";
 import type { AnalysisGrain, DetectorSeverity, FindingKind } from "@/domain/analysis/types";
 
 /**
@@ -20,6 +21,14 @@ export type ChannelAnalysisRunRecord = {
   windowTimezone: string;
   registryVersion: number;
   detectorVersions: readonly { key: string; calculationVersion: number }[];
+  /**
+   * Binds a completed run to the exact result the run cache holds. Null
+   * exactly when the run is still `running`, which the table's own
+   * `status = 'running'` check already guarantees -- so a null digest means
+   * "not finished", and callers treat the run as uncacheable rather than as
+   * an error.
+   */
+  resultDigest: string | null;
   status: "running" | "completed" | "failed";
   findingCount: number;
   observationCount: number;
@@ -148,6 +157,19 @@ export type ChannelRecommendationRecord = {
 };
 
 /**
+ * Everything about one recommendation that belongs to a person rather than to
+ * the run: every triage answer ever recorded for it, and the viewing
+ * operator's own helpfulness vote.
+ */
+export type RecommendationViewerState = {
+  recommendationId: string;
+  /** Newest first, so the latest answer is also the first stored one. */
+  decisions: readonly ChannelRecommendationDecisionRecord[];
+  /** The viewer's own vote; null when they have not voted. */
+  myFeedback: boolean | null;
+};
+
+/**
  * A window an operator can actually ask about.
  *
  * The window is the one a governed package *declared*, not the span its
@@ -186,22 +208,53 @@ export type ChannelBandRecord = {
   findings: readonly ChannelFindingRecord[];
 };
 
+/**
+ * Which governed statement one aggregate row carries.
+ *
+ * `day` is a day-grain period row for exactly one calendar day (single-day
+ * exact-range rows merge into the same bucket -- both are one-day facts).
+ * `week` and `month` are period rows whose whole calendar span sits fully
+ * inside the asked range. `span` is an exact-range row stated for several
+ * days, fully inside the range, carried whole: splitting it would invent
+ * daily figures nobody reported.
+ */
+export type MetricAggregateGrain = "day" | "week" | "month" | "span";
+
+/**
+ * One governed metric's summed fact for one channel: a single calendar day,
+ * or -- for `week`, `month`, and `span` rows -- the fully-inside calendar
+ * span the figure was stated for.
+ *
+ * Daily bars read `day` rows only: every such row states exactly one day
+ * inside the asked range, so summing them per day never splits a week total
+ * or repeats it once per day it touches. Gaps stay absent: a day with no row
+ * is unmeasured, never zero.
+ *
+ * Range totals (the tiles and shares the card builder assembles) sum these
+ * per channel and key with the dedup a daily shape cannot state: per channel
+ * and key, the finest period grain fully inside the range wins (day, then
+ * week, then month), and `span` rows fully inside the range are added once
+ * each on top. `currency` is null when a merged group mixes currencies or
+ * carries none, so the builder refuses a mixed-currency total honestly
+ * rather than stating one in an arbitrary currency.
+ */
+export type DailyMetricAggregate = {
+  day: string;
+  /** Inclusive calendar days, stated in each row's own timezone. */
+  spanStart: string;
+  spanEnd: string;
+  grain: MetricAggregateGrain;
+  channelId: string;
+  metricKey: string;
+  totalNumerator: number;
+  currency: string | null;
+};
+
 /** A window some channel has a completed analysis for. */
 export type AnalysedWindowKey = {
   windowStart: string;
   windowEnd: string;
   grain: AnalysisGrain;
-};
-
-/**
- * The contiguous month horizon a channel's declared packages cover, as
- * canonical `YYYY-MM` bounds. A package with no current rows still
- * contributes its declared dates: otherwise a gap disappears from the picker
- * precisely when it is useful to inspect.
- */
-export type AnalysisMonthTimeline = {
-  firstMonth: string;
-  lastMonth: string;
 };
 
 export type ChannelAnalysisReadPort = {
@@ -257,9 +310,44 @@ export type ChannelAnalysisReadPort = {
   loadRecommendationsForRun(input: {
     organizationId: string;
     analysisRunId: string;
-    /** The signed-in reader, whose own feedback vote is the only one read. */
-    viewerId: string;
+    /**
+     * The signed-in reader, whose own feedback vote is the only one read.
+     * Null asks for the recommendations without any viewer's decisions
+     * attached -- the shareable layer that is safe to hold in the run cache,
+     * because caching decisions under a run id would show one operator
+     * another's choices.
+     */
+    viewerId: string | null;
   }): Promise<ChannelRecommendationRecord[]>;
+
+  /**
+   * How many items one run has filed. The view cache keys on it: a completed
+   * run's analysis never changes, but Amendment C lets one gap-fill narration
+   * land afterwards, and a key without the count serves the pre-gap-fill
+   * payload for the whole TTL. Filings are insert-only -- `complete` deletes
+   * only the lease row -- so the count is monotonic per run and a changed
+   * count always means a changed narration. If a delete path for filed items
+   * ever appears, this key must change with it.
+   */
+  countRecommendationsForRun(input: {
+    organizationId: string;
+    analysisRunId: string;
+  }): Promise<number>;
+
+  /**
+   * The per-viewer layer over one run's narration: every triage answer and
+   * the viewer's own feedback vote, keyed by recommendation.
+   *
+   * Read separately from the shareable text so the run cache never holds it:
+   * callers merge these onto a cached payload before building the view, which
+   * is what keeps one operator's accept and dismiss decisions out of another
+   * operator's page.
+   */
+  loadRecommendationViewerState(input: {
+    organizationId: string;
+    analysisRunId: string;
+    viewerId: string;
+  }): Promise<RecommendationViewerState[]>;
 
   /**
    * Every window this organization has governed evidence for, newest first.
@@ -302,23 +390,130 @@ export type ChannelAnalysisReadPort = {
   loadAnalysedWindowKeys(input: { organizationId: string }): Promise<AnalysedWindowKey[]>;
 
   /**
-   * The month horizon for one channel's picker, or null when the channel has
-   * no projected package. Two bounded rows, never a full package listing.
+   * The card findings of the latest completed run per channel for one declared
+   * window: the two money-band codes plus the count and share codes the
+   * business-performance card reads (order and menu-view totals, the
+   * cancellation share of orders, and cost-context presence).
+   *
+   * Separate from `loadChannelBandsForWindow` because that record's contract
+   * is the money band and nothing else; widening it would let a future reader
+   * believe the roll-up sums funnel figures too.
    */
-  loadAnalysisMonthTimeline(input: {
+  loadChannelCardFindingsForWindow(input: {
     organizationId: string;
-    channelId: string | null;
-  }): Promise<AnalysisMonthTimeline | null>;
+    windowStart: string;
+    windowEnd: string;
+    grain: AnalysisGrain;
+  }): Promise<ChannelBandRecord[]>;
 
   /**
-   * The server-resolved monthly input: the month's own window, the
-   * organization's zone, and the finest grain the month's packages wrote. Null
-   * when the month is outside the known timeline or nothing declares it.
+   * The card findings of the newest completed run per channel for exact dates
+   * at any grain: the same codes `loadChannelCardFindingsForWindow` reads.
+   *
+   * A channel analysed twice over the same dates at two grains reads once --
+   * the coarsest run wins, newest among equals -- because two figures for one
+   * question on one card is worse than one. Every figure is still a sum over
+   * the very same dates, so grains mix honestly here where windows must not.
    */
-  resolveMonthInput(input: { organizationId: string; channelId: string; month: string }): Promise<{
+  loadChannelRangeCardFindingsForWindow(input: {
+    organizationId: string;
+    windowStart: string;
+    windowEnd: string;
+  }): Promise<ChannelBandRecord[]>;
+
+  /**
+   * The unbroken stretches of dates this channel's projected packages declare.
+   *
+   * Declared periods rather than surviving evidence, for the reason the month
+   * timeline used before it: a package whose rows were all superseded still
+   * declared the period, and a gap inside a declaration must stay selectable
+   * so the coverage detector can report it.
+   */
+  loadCoverageSegments(input: {
+    organizationId: string;
+    channelId: string | null;
+  }): Promise<CoverageSegment[]>;
+
+  /**
+   * The server-resolved window: the picked range, the organization's zone, and
+   * the grain the range's own packages wrote. Null when any day of the range is
+   * outside the declared coverage, or when nothing is declared at all.
+   */
+  resolveWindowInput(input: {
+    organizationId: string;
+    channelId: string;
+    from: string;
+    to: string;
+  }): Promise<{
     windowStart: string;
     windowEnd: string;
     timeZone: string;
     grain: AnalysisGrain;
   } | null>;
+
+  /**
+   * The newest run for exactly this window, and whether its narration landed.
+   *
+   * Exactly this window, never one that merely covers it: two windows are two
+   * questions, and showing one window's figures under another's heading is the
+   * defect this whole change exists to remove.
+   */
+  loadRunForWindow(input: {
+    organizationId: string;
+    channelId: string;
+    branchId?: string | null;
+    windowStart: string;
+    windowEnd: string;
+  }): Promise<{
+    id: string;
+    status: "running" | "completed" | "failed";
+    cacheKey: string | null;
+    findingCount: number;
+    observationCount?: number;
+    needsDataCount?: number;
+    recommendationCount: number;
+  } | null>;
+
+  /**
+   * Completed runs newer than `since` inside a date box around the card's
+   * windows: the live currency verdict behind a cached assembled card.
+   *
+   * A box rather than tuple pairs by construction -- a run starting inside
+   * the box for an overlapping-but-different window is a false positive that
+   * rebuilds, while a missed newer run would serve a contradicted answer.
+   * Only ever a count: the caller needs "anything new", never the rows.
+   */
+  loadCompletedRunCountSince(input: {
+    organizationId: string;
+    since: string;
+    windowStartMin: string;
+    windowEndMax: string;
+  }): Promise<number>;
+
+  /**
+   * Summed governed metric facts per channel over an inclusive date range,
+   * for the business-performance card's aggregate read path (sales, orders,
+   * menu views, cancellations, cost presence).
+   *
+   * Single-day facts arrive as `day` rows; week and month period rows fully
+   * inside the range arrive whole as `week` and `month` rows; exact-range
+   * rows fully inside the range arrive whole as `span` rows (single-day ones
+   * merge into the day bucket). Rows merely overlapping the range never
+   * arrive clipped or split: a partial figure stated as whole would invent
+   * coverage nobody reported.
+   *
+   * Only `reconciliation_state = 'current'` rows with no successor take part,
+   * each carrying a reconciliation digest and a channel, exactly like the
+   * governed window reads detectors see. Everything stays scoped to the
+   * organization through the caller's authenticated session; RLS decides
+   * visibility, and no service role is involved. Unknown or inactive metric
+   * keys simply contribute nothing. An empty key list, or `from` later than
+   * `to`, answers empty without querying.
+   */
+  loadDailyMetricAggregates(input: {
+    organizationId: string;
+    from: string;
+    to: string;
+    metricKeys: readonly string[];
+  }): Promise<DailyMetricAggregate[]>;
 };

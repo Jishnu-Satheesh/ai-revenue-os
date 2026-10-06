@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(28);
+select extensions.plan(30);
 
 -- Structure -----------------------------------------------------------------
 
@@ -40,7 +40,7 @@ select extensions.is(
 );
 select extensions.is(
   (select count(*)::bigint from public.permissions where scope = 'organization'),
-  45::bigint,
+  57::bigint,
   'the organization vocabulary is seeded'
 );
 select extensions.ok(
@@ -94,6 +94,39 @@ select extensions.is(
   array['admin', 'operator', 'owner']::text[],
   'only operator and above can manage Growth Intelligence'
 );
+select extensions.is(
+  (
+    select pg_catalog.array_agg(organization_role::text order by organization_role::text)
+    from public.organization_role_permissions
+    where permission_key = 'studio.read'
+  ),
+  array['admin', 'operator', 'owner', 'viewer']::text[],
+  'every organization role can open Creative Studio'
+);
+select extensions.is(
+  (
+    select pg_catalog.array_agg(organization_role::text order by organization_role::text)
+    from public.organization_role_permissions
+    where permission_key = 'studio.generate'
+  ),
+  array['admin', 'operator', 'owner']::text[],
+  'only operator and above can run Studio generations'
+);
+select extensions.ok(
+  not exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'operator' and permission_key = 'studio.policy_manage'
+  ),
+  'an operator cannot change the Studio generation policy'
+);
+select extensions.ok(
+  not exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'viewer'
+      and permission_key in ('studio.edit', 'studio.generate', 'studio.policy_manage')
+  ),
+  'a viewer reads Studio but changes nothing in it'
+);
 
 -- The specific boundaries the product depends on.
 select extensions.ok(
@@ -109,6 +142,23 @@ select extensions.ok(
     where organization_role = 'operator' and permission_key = 'memory.write'
   ),
   'but an operator can still write memory'
+);
+select extensions.ok(
+  not exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'operator'
+      and permission_key in ('memory.manage_integrations', 'memory.retry_capture')
+  ),
+  'but an operator cannot change capture settings or retry captures'
+);
+select extensions.ok(
+  exists (
+    select 1 from public.organization_role_permissions
+    where organization_role = 'admin'
+      and permission_key in ('memory.manage_integrations', 'memory.retry_capture')
+    having count(*) = 2
+  ),
+  'while an admin holds both capture permissions'
 );
 -- Approving the exact version that will run is an operator's job, and always
 -- was in practice: `approve_campaign_bundle` admits one. The catalogue caught up

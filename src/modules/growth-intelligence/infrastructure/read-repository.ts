@@ -167,9 +167,7 @@ export type GrowthIntelligenceReadRepository = {
     actorId: string;
     limit: number;
   }): Promise<ChannelRecommendationRow[]>;
-  listDraftRequestStates(input: {
-    organizationId: string;
-  }): Promise<DraftRequestState[]>;
+  listDraftRequestStates(input: { organizationId: string }): Promise<DraftRequestState[]>;
 };
 
 function query<T>(persistence: MarketWatchPersistence, table: string): QueryBuilder<T> {
@@ -350,20 +348,14 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
     },
 
     async readOrganizationTimeZone(organizationId) {
-      const result = await query<Record<string, unknown>[]>(
-        persistence,
-        "organizations",
-      )
+      const result = await query<Record<string, unknown>[]>(persistence, "organizations")
         .select("default_timezone")
         .eq("id", organizationId)
         .limit(1);
       if (result.error) readFailure();
       const timeZone = (result.data ?? [])[0]?.default_timezone;
       if (typeof timeZone !== "string" || timeZone.length === 0) {
-        throw new DomainError(
-          "DOMAIN_ERROR",
-          "The organization's timezone is not available.",
-        );
+        throw new DomainError("DOMAIN_ERROR", "The organization's timezone is not available.");
       }
       return timeZone;
     },
@@ -374,7 +366,7 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
         "growth_intelligence_items",
       )
         .select(
-          "id,kind,narrative,item_fingerprint,evidence_fingerprint,support_grade,freshness,urgency,goal_alignment,activity_month,missing_input,created_at",
+          "id,kind,narrative,item_fingerprint,growth_intelligence_synthesis_run_id,evidence_fingerprint,support_grade,freshness,urgency,goal_alignment,activity_month,missing_input,created_at",
         )
         .eq("organization_id", input.organizationId)
         .eq("status", "current")
@@ -386,7 +378,15 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       const rows = result.data ?? [];
       if (rows.length === 0) return [];
       const itemIds = rows.map((row) => String(row.id));
-      const [decisions, preferences] = await Promise.all([
+      // The nightly worker passes an empty actor so shared reads stay
+      // viewer-neutral: per-viewer preference and feedback lookups match
+      // nothing by contract, so they are skipped rather than sent with an
+      // unusable actor filter that the database would reject.
+      const noViewerRows = Promise.resolve({
+        data: [] as Record<string, unknown>[],
+        error: null,
+      });
+      const [decisions, preferences, feedback] = await Promise.all([
         query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_decisions")
           .select(
             "growth_intelligence_item_id,decision,reason,snoozed_until,item_fingerprint,created_at",
@@ -394,16 +394,26 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .eq("organization_id", input.organizationId)
           .in("growth_intelligence_item_id", itemIds)
           .order("created_at", { ascending: false }),
-        query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_preferences")
-          .select("growth_intelligence_item_id,pinned")
-          .eq("organization_id", input.organizationId)
-          .eq("user_id", input.actorId)
-          .in("growth_intelligence_item_id", itemIds),
+        input.actorId === ""
+          ? noViewerRows
+          : query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_preferences")
+              .select("growth_intelligence_item_id,pinned")
+              .eq("organization_id", input.organizationId)
+              .eq("user_id", input.actorId)
+              .in("growth_intelligence_item_id", itemIds),
+        input.actorId === ""
+          ? noViewerRows
+          : query<Record<string, unknown>[]>(persistence, "growth_intelligence_item_feedback")
+              .select("growth_intelligence_item_id,helpful")
+              .eq("organization_id", input.organizationId)
+              .eq("actor_id", input.actorId)
+              .in("growth_intelligence_item_id", itemIds),
       ]);
       if (decisions.error) readFailure();
       if (preferences.error) readFailure();
+      if (feedback.error) readFailure();
       const latestDecision = new Map<string, Record<string, unknown>>();
-      for (const decision of (decisions.data ?? [])) {
+      for (const decision of decisions.data ?? []) {
         const key = String(decision.growth_intelligence_item_id);
         if (!latestDecision.has(key)) latestDecision.set(key, decision);
       }
@@ -412,18 +422,26 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .filter((preference) => preference.pinned === true)
           .map((preference) => String(preference.growth_intelligence_item_id)),
       );
+      const myFeedback = new Map(
+        (feedback.data ?? []).map((row) => [
+          String(row.growth_intelligence_item_id),
+          row.helpful === true,
+        ]),
+      );
       return rows.map((row) =>
-        mapWorkspaceItem(row, latestDecision.get(String(row.id)) ?? null, pinned.has(String(row.id))),
+        mapWorkspaceItem(
+          row,
+          latestDecision.get(String(row.id)) ?? null,
+          pinned.has(String(row.id)),
+          myFeedback.get(String(row.id)) ?? null,
+        ),
       );
     },
 
     async listChannelRecommendationRecords(input) {
-      const result = await query<Record<string, unknown>[]>(
-        persistence,
-        "channel_recommendations",
-      )
+      const result = await query<Record<string, unknown>[]>(persistence, "channel_recommendations")
         .select(
-          "id,channel_id,branch_id,label,headline,detail,window_start,window_end,created_at",
+          "id,channel_id,branch_id,label,headline,detail,window_start,window_end,created_at,supported_actions,limitations",
         )
         .eq("organization_id", input.organizationId)
         .order("created_at", { ascending: false })
@@ -432,22 +450,53 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
       const rows = result.data ?? [];
       if (rows.length === 0) return [];
       const recommendationIds = rows.map((row) => String(row.id));
-      const [decisions, preferences] = await Promise.all([
+      // Empty-actor reads skip the per-viewer lookups (see listWorkspaceItems):
+      // the nightly worker shares rows across viewers by design.
+      const noViewerRows = Promise.resolve({
+        data: [] as Record<string, unknown>[],
+        error: null,
+      });
+      const [decisions, preferences, feedback, citations] = await Promise.all([
         query<Record<string, unknown>[]>(persistence, "channel_recommendation_decisions")
           .select("recommendation_id,decision,snoozed_until,created_at")
           .eq("organization_id", input.organizationId)
           .in("recommendation_id", recommendationIds)
           .order("created_at", { ascending: false }),
-        query<Record<string, unknown>[]>(persistence, "channel_recommendation_preferences")
-          .select("channel_recommendation_id,pinned,snoozed_until")
+        input.actorId === ""
+          ? noViewerRows
+          : query<Record<string, unknown>[]>(persistence, "channel_recommendation_preferences")
+              .select("channel_recommendation_id,pinned,snoozed_until")
+              .eq("organization_id", input.organizationId)
+              .eq("user_id", input.actorId)
+              .in("channel_recommendation_id", recommendationIds),
+        input.actorId === ""
+          ? noViewerRows
+          : query<Record<string, unknown>[]>(persistence, "channel_recommendation_feedback")
+              .select("recommendation_id,helpful")
+              .eq("organization_id", input.organizationId)
+              .eq("actor_id", input.actorId)
+              .in("recommendation_id", recommendationIds),
+        // Lazy-load the stored finding ids each narration cited, so the card
+        // can name its evidence instead of claiming none was cited.
+        query<Record<string, unknown>[]>(persistence, "channel_recommendation_citations")
+          .select("recommendation_id,finding_id")
           .eq("organization_id", input.organizationId)
-          .eq("user_id", input.actorId)
-          .in("channel_recommendation_id", recommendationIds),
+          .in("recommendation_id", recommendationIds),
       ]);
       if (decisions.error) readFailure();
       if (preferences.error) readFailure();
+      if (feedback.error) readFailure();
+      if (citations.error) readFailure();
+      const citationFindingIds = new Map<string, string[]>();
+      for (const citation of citations.data ?? []) {
+        const key = String(citation.recommendation_id);
+        const findingId = String(citation.finding_id);
+        const existing = citationFindingIds.get(key);
+        if (existing) existing.push(findingId);
+        else citationFindingIds.set(key, [findingId]);
+      }
       const latestDecision = new Map<string, Record<string, unknown>>();
-      for (const decision of (decisions.data ?? [])) {
+      for (const decision of decisions.data ?? []) {
         const key = String(decision.recommendation_id);
         if (!latestDecision.has(key)) latestDecision.set(key, decision);
       }
@@ -457,27 +506,29 @@ export function createAuthenticatedGrowthIntelligenceReadRepository(
           .map((preference) => String(preference.channel_recommendation_id)),
       );
       const preferenceSnoozedUntil = new Map<string, string>();
-      for (const preference of (preferences.data ?? [])) {
+      for (const preference of preferences.data ?? []) {
         const key = String(preference.channel_recommendation_id);
         if (preferenceSnoozedUntil.has(key)) continue;
         if (preference.snoozed_until === null || preference.snoozed_until === undefined) continue;
         preferenceSnoozedUntil.set(key, String(preference.snoozed_until));
       }
+      const myFeedback = new Map(
+        (feedback.data ?? []).map((row) => [String(row.recommendation_id), row.helpful === true]),
+      );
       return rows.map((row) =>
         mapChannelRecommendationRecord(
           row,
           latestDecision.get(String(row.id)) ?? null,
           pinned.has(String(row.id)),
           preferenceSnoozedUntil.get(String(row.id)) ?? null,
+          myFeedback.get(String(row.id)) ?? null,
+          citationFindingIds.get(String(row.id)) ?? [],
         ),
       );
     },
 
     async listDraftRequestStates(input) {
-      const result = await query<Record<string, unknown>[]>(
-        persistence,
-        "campaign_draft_requests",
-      )
+      const result = await query<Record<string, unknown>[]>(persistence, "campaign_draft_requests")
         .select("opportunity_id,status,campaign_id,created_at,updated_at")
         .eq("organization_id", input.organizationId)
         .order("created_at", { ascending: false })
@@ -523,16 +574,21 @@ function mapWorkspaceItem(
   row: Record<string, unknown>,
   decision: Record<string, unknown> | null,
   pinned: boolean,
+  myFeedback: boolean | null,
 ): SynthesizedItemRow {
   const kind = String(row.kind);
   if (kind !== "insight" && kind !== "recommendation" && kind !== "data_gap") readFailure();
   const decisionValue = decision ? String(decision.decision) : null;
   if (decisionValue !== null && !WORKSPACE_ITEM_DECISIONS.has(decisionValue)) readFailure();
+  // The synthesis run links research provenance; a row without one cannot
+  // be attributed, so it fails closed instead of silently unattributed.
+  if (typeof row.growth_intelligence_synthesis_run_id !== "string") readFailure();
   return {
     id: String(row.id),
     kind: kind as SynthesizedItemRow["kind"],
     narrative: String(row.narrative),
     fingerprint: String(row.item_fingerprint),
+    synthesisRunId: row.growth_intelligence_synthesis_run_id,
     supportGrade: String(row.support_grade),
     freshness: String(row.freshness),
     urgency: String(row.urgency),
@@ -550,16 +606,25 @@ function mapWorkspaceItem(
         ? String(decision.snoozed_until)
         : null,
     pinned,
+    myFeedback,
   };
 }
 
 const CHANNEL_DECISIONS = new Set(["acknowledged", "dismissed", "planned", "snoozed"]);
+
+function toStringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((entry): entry is string => typeof entry === "string")
+    : [];
+}
 
 function mapChannelRecommendationRecord(
   row: Record<string, unknown>,
   decision: Record<string, unknown> | null,
   pinned: boolean,
   preferenceSnoozedUntil: string | null,
+  myFeedback: boolean | null,
+  citationFindingIds: string[] = [],
 ): ChannelRecommendationRow {
   const label = String(row.label);
   if (label !== "observation" && label !== "recommendation" && label !== "needs_data") {
@@ -577,6 +642,9 @@ function mapChannelRecommendationRecord(
     windowStart: String(row.window_start),
     windowEnd: String(row.window_end),
     generatedAt: String(row.created_at),
+    supportedActions: toStringArray(row.supported_actions),
+    limitations: toStringArray(row.limitations),
+    citationFindingIds,
     decision:
       decisionValue === null
         ? null
@@ -590,6 +658,7 @@ function mapChannelRecommendationRecord(
           },
     pinned,
     preferenceSnoozedUntil,
+    myFeedback,
   };
 }
 

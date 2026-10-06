@@ -142,3 +142,108 @@ export function ownershipChoice(ownership: AssetOwnership): OwnershipChoice {
     }
   );
 }
+
+/**
+ * Creative History's own vocabulary.
+ *
+ * These enums are distinct from the brand-asset ones above even where a word
+ * looks similar — Creative History's rights are `owned | licensed |
+ * permission_confirmed`, never the reference library's `owned | third_party`,
+ * because a client's own past design carries a different question ("do we
+ * have the right to use this again?") than a competitor's poster used as
+ * inspiration ("did we make this?").
+ */
+
+const CREATIVE_TYPE_LABELS: Readonly<Record<string, string>> = {
+  poster: "Poster",
+  flyer: "Flyer",
+  social_post: "Social post",
+  story: "Story",
+  carousel: "Carousel",
+  banner: "Banner",
+};
+
+export function creativeTypeLabel(creativeType: string): string {
+  return CREATIVE_TYPE_LABELS[creativeType] ?? sentenceCase(creativeType);
+}
+
+export type CreativeHistoryRightsChoice = {
+  label: string;
+  help: string;
+};
+
+const CREATIVE_HISTORY_RIGHTS_CHOICES: Readonly<Record<string, CreativeHistoryRightsChoice>> = {
+  owned: {
+    label: "We own this",
+    help: "This design was made for us, or we hold the rights outright.",
+  },
+  licensed: {
+    label: "We hold a licence",
+    help: "We paid for the right to use this, under terms we still hold.",
+  },
+  permission_confirmed: {
+    label: "We confirmed permission",
+    help: "Whoever made this told us directly that we may keep using it.",
+  },
+};
+
+export function creativeHistoryRightsChoice(status: string): CreativeHistoryRightsChoice {
+  return (
+    CREATIVE_HISTORY_RIGHTS_CHOICES[status] ?? {
+      label: sentenceCase(status),
+      help: "How we hold the rights to this design is not recorded.",
+    }
+  );
+}
+
+const CREATIVE_HISTORY_ELIGIBILITY_LABELS: Readonly<Record<string, string>> = {
+  eligible_approved: "Approved for reuse",
+  eligible_rejected: "Kept as what to avoid",
+  archived: "Archived",
+  metadata_unconfirmed: "Needs a confirmed description",
+  unreviewed: "Not reviewed yet",
+};
+
+export function creativeHistoryEligibilityLabel(eligibility: string): string {
+  return CREATIVE_HISTORY_ELIGIBILITY_LABELS[eligibility] ?? sentenceCase(eligibility);
+}
+
+const CREATIVE_HISTORY_UPLOAD_STATE_LABELS: Readonly<Record<string, string>> = {
+  processing: "Processing",
+  reserved: "Uploading",
+  usable: "Uploaded",
+  needs_review: "Needs review",
+  refused: "Refused",
+};
+
+export function creativeHistoryUploadStateLabel(uploadState: string): string {
+  return CREATIVE_HISTORY_UPLOAD_STATE_LABELS[uploadState] ?? sentenceCase(uploadState);
+}
+
+/**
+ * A batch member's own reason for not becoming usable, in words rather than
+ * the twelve-value discriminant `CreativeHistoryCompletionOutcome` carries.
+ * Never collapses a permission or lookup failure into "the file never
+ * arrived" — that exact mislabelling was a Task 2 review finding and stays
+ * fixed here.
+ */
+const CREATIVE_HISTORY_REFUSAL_LABELS: Readonly<Record<string, string>> = {
+  upload_missing: "No file arrived at the upload location. Try uploading it again.",
+  empty_file: "That file is empty.",
+  too_large: "That file is larger than this library allows.",
+  unsupported_format: "Only JPEG, PNG, and WebP images are accepted.",
+  declared_type_mismatch: "The file's contents do not match what it claimed to be.",
+  corrupt_image: "The image could not be read. It may be incomplete or corrupted.",
+  dimensions_out_of_range: "That image's dimensions are outside the allowed range.",
+  storage_failed: "The checked image could not be stored. Try uploading it again.",
+  item_unavailable: "That design is no longer available.",
+  forbidden: "You no longer have permission to finish this upload.",
+  invalid_request: "That upload's request was rejected.",
+  unknown: "That upload could not be finished. Try uploading it again.",
+  changed_bytes:
+    "A different file is now at this upload slot. A finished version is never overwritten — start a new version instead.",
+};
+
+export function creativeHistoryRefusalLabel(reason: string, fallbackMessage?: string): string {
+  return CREATIVE_HISTORY_REFUSAL_LABELS[reason] ?? fallbackMessage ?? sentenceCase(reason);
+}

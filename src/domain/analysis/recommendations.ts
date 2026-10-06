@@ -23,17 +23,67 @@ import { z } from "zod";
  * their own prohibitions as a ban on advising anything, and filed observations
  * that repeated each figure back at the operator. ADR 0039 puts the fence on
  * claims about cause and realized result, never on the advice itself.
+ *
+ * 5: pilot channel context plus curated playbook and web-evidence slots for
+ * the cancellations and availability chapters. The model still has no tools;
+ * the worker widens the fenced folder with stored channel context and
+ * curated guidance, and portal steps are framed as checks rather than claims
+ * about a portal's structure. See the pilot ADR.
+ *
+ * 6: curated playbooks and the pre-fetched web slot are gone (Amendment A).
+ * The worker threads stored channel context only; the narrator grounds
+ * itself with Google Search at generation time, preferring the channel's own
+ * docs, forums, and merchant discussions. It emits no URLs, findings remain
+ * the only cited evidence, portal how-to steps are allowed as grounded
+ * advice, and every action stays human-supervised.
+ *
+ * 7: global rollout plus plain English (Amendment B). Stored channel context
+ * and grounding apply to every run with findings, not just the three pilot
+ * detectors, and a global plain-language block requires short common words,
+ * one idea per sentence, and no idioms. All v6 rules keep their intent.
+ *
+ * 8: coverage plus a higher cap (Amendment C). Every chapter holding
+ * observation findings gets at least one citing item, and the per-run cap
+ * rises to 8 so coverage never competes with honest needs_data notes.
+ * See ADR 0053.
+ *
+ * 9: gap-fill headroom. A March run filed five items with four finding
+ * groups still uncovered, the model filed one item per group, and the fence
+ * refused 5+4>8 on every attempt (prod run run_06g8l0bf99rpqlavml9alnpj01).
+ * Gap-fill rounds now carry the filed count, and when the uncovered groups
+ * outnumber the free slots the prompt binds the exact item budget and
+ * requires multi-group items instead of letting coverage and the cap
+ * disagree.
  */
-export const RECOMMENDATION_PROMPT_VERSION = 4;
+export const RECOMMENDATION_PROMPT_VERSION = 9;
 
-/** Bumped only when the judge prompt's instructions change. */
-export const JUDGE_PROMPT_VERSION = 1;
+/**
+ * Bumped only when the judge prompt's instructions change.
+ *
+ * 2: portal how-to steps are grounding-backed operational advice and allowed;
+ * invented numbers, causes, savings, benchmarks, attribution, and confidence
+ * are still flagged.
+ *
+ * 3: the narrator must write plain English (prompt v7), so the judge names
+ * heavy jargon, unexplained technical terms, and longwinded prose in issues
+ * and reflects them in score. The verdict shape is unchanged: issues and
+ * score already carry it, so no schema or migration was needed.
+ *
+ * 4: the narrator may pin governed Business Memory in its prompt (Spec 023),
+ * so the judge receives the cited shared-context entries with
+ * non-corroboration rules: memory is background, never independent evidence.
+ * The verdict shape is unchanged.
+ */
+export const JUDGE_PROMPT_VERSION = 4;
 
 /**
  * The completion RPC re-checks citations against the findings of the same run,
- * so the narrator may never file more than this many per run.
+ * so the narrator may never file more than this many per run. Eight is six
+ * detector chapters plus two spare slots for needs_data notes (Amendment C,
+ * ADR 0053): coverage must never force a trade-off between a chapter with
+ * data and an honest data gap.
  */
-export const MAX_RECOMMENDATIONS_PER_RUN = 6;
+export const MAX_RECOMMENDATIONS_PER_RUN = 8;
 
 /** How many not-yet-judged recommendations one judge batch may receive. */
 export const MAX_EVALUATION_BATCH = 200;

@@ -139,9 +139,7 @@ const closedScale: OverviewMoneyScale = {
   hasUnprovenBand: false,
 };
 
-function renderReport(
-  overrides: Partial<React.ComponentProps<typeof OverviewReport>> = {},
-) {
+function renderReport(overrides: Partial<React.ComponentProps<typeof OverviewReport>> = {}) {
   return render(
     <OverviewReport
       snapshot={snapshot}
@@ -233,7 +231,8 @@ describe("OverviewReport", () => {
       {
         kind: "foundation",
         title: "Nobody is named as the approver yet",
-        impact: "Nothing this platform suggests can be acted on until a real person has to say yes.",
+        impact:
+          "Nothing this platform suggests can be acted on until a real person has to say yes.",
       },
     ];
     renderReport({ actions });

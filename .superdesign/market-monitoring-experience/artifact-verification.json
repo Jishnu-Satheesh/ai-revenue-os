@@ -1,0 +1,119 @@
+{
+  "verifiedAt": "2026-09-13T18:07:19.867189+00:00",
+  "scope": "Fictional design review only; no live research or application integration",
+  "import": {
+    "draftId": "5e38b367-f8e0-4707-ba46-5b5be3d65822",
+    "title": "Growth Intelligence — Market Watch and reports",
+    "currentVersion": 3,
+    "projectUrl": "https://superdesign.dev/teams/c3d56832-bb79-49b6-910a-6450fc30e0a4/projects/99074e63-8b31-43b3-b3bf-d29ae0583535",
+    "nodeUrl": "https://superdesign.dev/teams/c3d56832-bb79-49b6-910a-6450fc30e0a4/projects/99074e63-8b31-43b3-b3bf-d29ae0583535?node=draft-variant-5e38b367-f8e0-4707-ba46-5b5be3d65822",
+    "previewUrl": "https://p.superdesign.dev/draft/5e38b367-f8e0-4707-ba46-5b5be3d65822"
+  },
+  "html": {
+    "localSha256": "73c7dad4eadea4500912e7b85501a4bc47a0680f2a343bc412edfa9fc2dd4e94",
+    "refetchedRemoteSha256": "73c7dad4eadea4500912e7b85501a4bc47a0680f2a343bc412edfa9fc2dd4e94",
+    "exactMatch": true
+  },
+  "browserSuite": {
+    "passed": 45,
+    "errors": [],
+    "checkedAt": "2026-09-13T12:39:09.521Z"
+  },
+  "sharedPreviewSmoke": {
+    "httpStatus": 200,
+    "title": "Market Watch · Design review",
+    "reader": "Prepare for National Day",
+    "downloadFilename": "Prepare-for-National-Day.pdf",
+    "javascriptErrors": []
+  },
+  "screenshots": [
+    {
+      "file": "01-market-watch-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "9bf2e0ad5d22aa4fc1414abf76a7807d997ddb82188adef65c263e505070c81d"
+    },
+    {
+      "file": "02-new-research-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "5790a207803840e55d854817fc545e27127b0c1a0e8217fcf512e2284af4ff03"
+    },
+    {
+      "file": "03-research-scope-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "410b00a96623803b636fc96e179a20e0a6f1a25ccbaaa30f1b50cc9b77c9f1b9"
+    },
+    {
+      "file": "04-review-brief-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "4c6d7a031ace007b5f0ab3db1f408f2745235426bcccb6f7cfaea0083a9896fe"
+    },
+    {
+      "file": "05-research-progress-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "432e30480e6cf08e37f67f66c4bfec83d445bb740dd8d1acc9c8a72105d4c024"
+    },
+    {
+      "file": "06-report-summary-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "f08edee7278392984f09b74c27ae95cda95a6bf8c152376a1baea8697a56af48"
+    },
+    {
+      "file": "07-report-estimate-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "52036ce1a63c441ef701b24efda6452727c7e781275837dc64f5ad38a88393c6"
+    },
+    {
+      "file": "08-draft-advice-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "3012d61b7730c40a85107f6b301879eca0fb482aa74c09a507f64f965f280122"
+    },
+    {
+      "file": "09-accept-items-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "858f00044bd982738761711a13f5aacbf07fd1ba2e8db6bc4a35e71fdf786577"
+    },
+    {
+      "file": "10-recommendations-handoff-desktop.png",
+      "width": 1440,
+      "height": 1100,
+      "sha256": "f954631fde0d558ec249a27419a4ed44baee01d9e302484bb20571703f56faf3"
+    },
+    {
+      "file": "11-market-watch-mobile.png",
+      "width": 390,
+      "height": 844,
+      "sha256": "9038fcf8fefcfa719b77e5dc3fefdbf09a41e11e97aad051d9266533ae959978"
+    },
+    {
+      "file": "12-new-research-mobile.png",
+      "width": 390,
+      "height": 844,
+      "sha256": "f56e13d7b57f74da549ce1a46500efe64f2bcae12b6c8a7ed0d4e328e66a726c"
+    },
+    {
+      "file": "13-report-mobile.png",
+      "width": 390,
+      "height": 844,
+      "sha256": "ab04061705474c8eab2d909e8ed44847a903f7d8a4bd4fdd04d4b8e7a7f112aa"
+    }
+  ],
+  "pdf": {
+    "file": "sample-research-report.pdf",
+    "sha256": "3dc152c40bc9fec83479923d5ce6af0e34b778a7dc18f413c33073aff5019362",
+    "pages": 3,
+    "format": "A4, PDF 1.4",
+    "textContentChecked": true,
+    "firstPageVisuallyInspected": true,
+    "tagged": false
+  },
+  "auditGapCount": 50
+}

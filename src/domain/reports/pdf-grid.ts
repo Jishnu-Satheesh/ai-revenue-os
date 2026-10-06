@@ -140,8 +140,7 @@ function medianRowPitch(rows: readonly { y: number }[]): number | null {
   for (let index = 1; index < rows.length; index += 1) gaps.push(rows[index - 1].y - rows[index].y);
   gaps.sort((left, right) => left - right);
   const middle = Math.floor(gaps.length / 2);
-  const pitch =
-    gaps.length % 2 === 0 ? (gaps[middle - 1] + gaps[middle]) / 2 : gaps[middle];
+  const pitch = gaps.length % 2 === 0 ? (gaps[middle - 1] + gaps[middle]) / 2 : gaps[middle];
   return pitch > 0 ? pitch : null;
 }
 
