@@ -1,6 +1,73 @@
 export type Database = {
   public: {
     Tables: {
+      agent_turns: {
+        Row: {
+          id: string;
+          organization_id: string;
+          thread_id: string;
+          user_message_id: string;
+          requested_by: string;
+          idempotency_key: string;
+          objective: "business_advice" | "channel_assessment" | "report_intake" | "research" | "other";
+          status: "queued" | "running" | "awaiting_user" | "awaiting_approval" | "completed" | "failed" | "cancelled";
+          pending_challenge: Record<string, unknown> | null;
+          challenge_answers: Record<string, unknown> | null;
+          answered_challenge_kind: "metadata" | "correction" | "scope" | null;
+          pending_approval: Record<string, unknown> | null;
+          lease_token: string | null;
+          lease_expires_at: string | null;
+          attempt: number;
+          next_event_seq: number;
+          final_message_id: string | null;
+          failure_code: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      agent_turn_events: {
+        Row: {
+          id: string;
+          organization_id: string;
+          turn_id: string;
+          seq: number;
+          event_key: string;
+          event_type: string;
+          payload: Record<string, unknown>;
+          occurred_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+      agent_attachments: {
+        Row: {
+          id: string;
+          organization_id: string;
+          turn_id: string;
+          created_by: string;
+          idempotency_key: string;
+          file_name: string;
+          media_type: string;
+          byte_size: number;
+          storage_bucket_id: string;
+          storage_path: string;
+          sha256_digest: string | null;
+          declared_scope: Record<string, unknown> | null;
+          status: "awaiting_upload" | "verified" | "promoted" | "failed" | "expired";
+          package_id: string | null;
+          upload_expires_at: string;
+          staging_deleted_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       /**
        * Universal-agent conversations (Task 1). One row per thread: title,
        * mode, status, safe-id links and history timestamps. Written only
@@ -49,6 +116,7 @@ export type Database = {
           id: string;
           organization_id: string;
           thread_id: string;
+          turn_id: string | null;
           role: "user" | "assistant" | "system_note";
           body: string | null;
           questionnaire_answers: Record<string, unknown> | null;
@@ -3019,6 +3087,34 @@ export type Database = {
     };
     Views: Record<string, never>;
     Functions: {
+      fail_exhausted_agent_turn: {
+        Args: { p_organization_id: string; p_turn_id: string };
+        Returns: Record<string, unknown>;
+      };
+      release_agent_turn_for_retry: {
+        Args: { p_organization_id: string; p_turn_id: string; p_lease_token: string };
+        Returns: Record<string, unknown>;
+      };
+      cancel_revoked_agent_turn: {
+        Args: { p_organization_id: string; p_turn_id: string };
+        Returns: Record<string, unknown>;
+      };
+      keep_existing_agent_report_package: {
+        Args: { p_organization_id: string; p_turn_id: string; p_attachment_id: string; p_lease_token: string; p_package_id: string };
+        Returns: Record<string, unknown>;
+      };
+      mark_agent_attachment_staging_deleted: {
+        Args: { p_attachment_ids: string[] };
+        Returns: { markedAttachments: number };
+      };
+      resolve_agent_attachment_scope: {
+        Args: { p_organization_id: string; p_turn_id: string; p_attachment_id: string; p_lease_token: string; p_scope: Record<string, unknown> };
+        Returns: Record<string, unknown>;
+      };
+      request_agent_report_package_projection: {
+        Args: { p_organization_id: string; p_turn_id: string; p_attachment_id: string; p_lease_token: string };
+        Returns: Record<string, unknown>;
+      };
       enqueue_growth_intelligence_request: {
         Args: {
           p_organization_id: string;

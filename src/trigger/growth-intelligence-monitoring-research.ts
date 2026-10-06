@@ -81,6 +81,7 @@ import {
   shouldWireResearchModelPhase,
 } from "@/trigger/growth-intelligence-research-models";
 import type { ResearchBudgetRepository } from "@/modules/growth-intelligence/infrastructure/research/budget-repository";
+import { isResearchBudgetUncapped } from "@/modules/growth-intelligence/infrastructure/research/budget-policy";
 import {
   createTinyfishAgentClientSeam,
   isTinyfishResearchGateOpen,
@@ -214,11 +215,14 @@ export function createSharedMonitoringUpdateBudget(input: {
   return {
     async ensure() {
       if (ensured) return;
+      // ADR 0077: uncapped runtime policy skips only the day-allowance
+      // comparison inside the governed RPC. Default is capped.
       await input.budget.reserveUpdateBudget({
         organizationId: input.organizationId,
         updateId: input.updateId,
         quoteMicrosUsd: MONITORING_UPDATE_QUOTE_MICROS_USD,
         priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+        ...(isResearchBudgetUncapped() ? { skipAllowance: true as const } : {}),
       });
       ensured = true;
     },
@@ -250,6 +254,7 @@ export function createFencedMonitoringUpdateSearchSpender(input: {
         updateId: input.updateId,
         quoteMicrosUsd: MONITORING_UPDATE_QUOTE_MICROS_USD,
         priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+        ...(isResearchBudgetUncapped() ? { skipAllowance: true as const } : {}),
       });
       reservationEnsured = true;
     });
@@ -302,6 +307,7 @@ export function createFencedMonitoringUpdateModelSpender(input: {
         updateId: input.updateId,
         quoteMicrosUsd: MONITORING_UPDATE_QUOTE_MICROS_USD,
         priceVersion: TINYFISH_RESEARCH_PRICE_VERSION,
+        ...(isResearchBudgetUncapped() ? { skipAllowance: true as const } : {}),
       });
       reservationEnsured = true;
     });

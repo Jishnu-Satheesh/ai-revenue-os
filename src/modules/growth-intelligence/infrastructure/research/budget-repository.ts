@@ -219,18 +219,24 @@ export type ResearchBudgetRepository = {
     pipelineId: string;
     quoteMicrosUsd: number;
     priceVersion: string;
+    /** Service_role-only day-allowance bypass (ADR 0077). Default capped. */
+    skipAllowance?: boolean;
   }): Promise<PipelineBudgetReservation>;
   reserveRequestBudget(input: {
     organizationId: string;
     requestId: string;
     quoteMicrosUsd: number;
     priceVersion: string;
+    /** Service_role-only day-allowance bypass (ADR 0077). Default capped. */
+    skipAllowance?: boolean;
   }): Promise<RequestBudgetReservation>;
   reserveUpdateBudget(input: {
     organizationId: string;
     updateId: string;
     quoteMicrosUsd: number;
     priceVersion: string;
+    /** Service_role-only day-allowance bypass (ADR 0077). Default capped. */
+    skipAllowance?: boolean;
   }): Promise<UpdateBudgetReservation>;
   reserveAttempt(input: {
     organizationId: string;
@@ -286,6 +292,7 @@ export function createResearchBudgetRepository(
           p_pipeline_id: parseOrThrow(identifierSchema, input.pipelineId),
           p_quote_micros_usd: quote.quoteMicrosUsd,
           p_price_version: quote.priceVersion,
+          ...(input.skipAllowance === true ? { p_skip_allowance: true } : {}),
         },
         pipelineReservationResponseSchema,
       );
@@ -304,6 +311,7 @@ export function createResearchBudgetRepository(
           p_request_id: parseOrThrow(identifierSchema, input.requestId),
           p_quote_micros_usd: quote.quoteMicrosUsd,
           p_price_version: quote.priceVersion,
+          ...(input.skipAllowance === true ? { p_skip_allowance: true } : {}),
         },
         requestReservationResponseSchema,
       );
@@ -348,6 +356,7 @@ export function createResearchBudgetRepository(
           p_update_id: parseOrThrow(identifierSchema, input.updateId),
           p_quote_micros_usd: quote.quoteMicrosUsd,
           p_price_version: quote.priceVersion,
+          ...(input.skipAllowance === true ? { p_skip_allowance: true } : {}),
         },
         updateReservationResponseSchema,
       );

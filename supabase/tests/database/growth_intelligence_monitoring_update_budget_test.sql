@@ -10,7 +10,7 @@ select extensions.plan(25);
 
 select extensions.has_function(
   'public', 'reserve_monitoring_update_budget',
-  array['uuid', 'uuid', 'bigint', 'text'],
+  array['uuid', 'uuid', 'bigint', 'text', 'boolean'],
   'update admission reserves its quote against the organization day'
 );
 select extensions.has_function(
@@ -26,7 +26,7 @@ select extensions.has_function(
 select extensions.ok(
   pg_catalog.has_function_privilege(
     'authenticated',
-    'public.reserve_monitoring_update_budget(uuid,uuid,bigint,text)',
+    'public.reserve_monitoring_update_budget(uuid,uuid,bigint,text,boolean)',
     'execute'
   ),
   'signed-in members reserve update budgets through the governed RPC'
@@ -42,7 +42,7 @@ select extensions.ok(
 select extensions.ok(
   not pg_catalog.has_function_privilege(
     'anon',
-    'public.reserve_monitoring_update_budget(uuid,uuid,bigint,text)',
+    'public.reserve_monitoring_update_budget(uuid,uuid,bigint,text,boolean)',
     'execute'
   ),
   'anonymous callers cannot reserve update spend'

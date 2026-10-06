@@ -8,12 +8,12 @@ select extensions.plan(60);
 
 select extensions.has_function(
   'public', 'reserve_research_pipeline_budget',
-  array['uuid', 'uuid', 'bigint', 'text'],
+  array['uuid', 'uuid', 'bigint', 'text', 'boolean'],
   'pipeline admission reserves its quote against the organization day'
 );
 select extensions.has_function(
   'public', 'reserve_research_request_budget',
-  array['uuid', 'uuid', 'bigint', 'text'],
+  array['uuid', 'uuid', 'bigint', 'text', 'boolean'],
   'standalone synthesis and legacy research share the same daily allowance'
 );
 select extensions.has_function(
@@ -38,7 +38,7 @@ select extensions.has_function(
 select extensions.ok(
   pg_catalog.has_function_privilege(
     'authenticated',
-    'public.reserve_research_pipeline_budget(uuid,uuid,bigint,text)',
+    'public.reserve_research_pipeline_budget(uuid,uuid,bigint,text,boolean)',
     'execute'
   ),
   'signed-in members reserve through the governed RPC'
@@ -46,7 +46,7 @@ select extensions.ok(
 select extensions.ok(
   pg_catalog.has_function_privilege(
     'authenticated',
-    'public.reserve_research_request_budget(uuid,uuid,bigint,text)',
+    'public.reserve_research_request_budget(uuid,uuid,bigint,text,boolean)',
     'execute'
   ),
   'signed-in members reserve request budgets through the governed RPC'
@@ -78,7 +78,7 @@ select extensions.ok(
 select extensions.ok(
   not pg_catalog.has_function_privilege(
     'anon',
-    'public.reserve_research_pipeline_budget(uuid,uuid,bigint,text)',
+    'public.reserve_research_pipeline_budget(uuid,uuid,bigint,text,boolean)',
     'execute'
   ),
   'anonymous callers cannot reserve research spend'

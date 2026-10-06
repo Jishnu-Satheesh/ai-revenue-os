@@ -38,6 +38,14 @@ const serverEnvSchema = z.object({
   REDIS_URL: optionalNonEmptyString,
   TRIGGER_SECRET_KEY: optionalNonEmptyString,
   TRIGGER_PROJECT_REF: optionalNonEmptyString,
+  /**
+   * Research day-allowance policy (ADR 0077). `capped` keeps the USD 5
+   * organization-day rule everywhere; `uncapped` lets a worker pass the
+   * service_role-only allowance bypass on reservation RPCs. Default is
+   * capped, so production can never change by accident. Set `uncapped`
+   * only in non-production worker environments.
+   */
+  RESEARCH_BUDGET_POLICY: z.enum(["capped", "uncapped"]).default("capped"),
   INTEGRATION_HUB_V1_ORGANIZATION_IDS: optionalNonEmptyString,
   AGENT_CHAT_V1_ORGANIZATION_IDS: optionalNonEmptyString,
   GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS: optionalNonEmptyString,
@@ -96,6 +104,7 @@ const parsedEnv = serverEnvSchema.safeParse({
   REDIS_URL: process.env.REDIS_URL,
   TRIGGER_SECRET_KEY: process.env.TRIGGER_SECRET_KEY,
   TRIGGER_PROJECT_REF: process.env.TRIGGER_PROJECT_REF,
+  RESEARCH_BUDGET_POLICY: process.env.RESEARCH_BUDGET_POLICY,
   INTEGRATION_HUB_V1_ORGANIZATION_IDS: process.env.INTEGRATION_HUB_V1_ORGANIZATION_IDS,
   AGENT_CHAT_V1_ORGANIZATION_IDS: process.env.AGENT_CHAT_V1_ORGANIZATION_IDS,
   GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS:
