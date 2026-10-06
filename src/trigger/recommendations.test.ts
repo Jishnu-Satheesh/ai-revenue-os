@@ -176,6 +176,53 @@ describe("the judge's unjudged-row shape", () => {
     ]);
   });
 
+  // Staging runs run_06ge1jgoc3k675ntbrpfl2f901, run_06gdd08ut3bduqh67h4qa7rs01,
+  // and run_06gcod3rcad6bdi0fbe3bpfa01 all failed with the same ZodError:
+  // recommendation_id is the contexts table's primary key, so the reverse
+  // embed is to-one and PostgREST sends one object (or null), never an
+  // array. The schema wrongly required an array and rejected every real row.
+  it("parses a null contexts embed as context null, the real PostgREST to-one empty shape", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+      channel_recommendation_contexts: null,
+    };
+
+    const unjudged = toUnjudged(unjudgedRecommendationShape.parse(row));
+
+    expect(unjudged.context).toBeNull();
+  });
+
+  it("parses a contexts embed as a single object, the real PostgREST to-one shape", () => {
+    const row = {
+      ...baseRow,
+      channel_recommendation_citations: [{ finding_id: baseRow.id, channel_findings: finding }],
+      channel_recommendation_contexts: {
+        manifest_id: "00000000-0000-4000-8000-0000000000c1",
+        share_mode: "internal_only" as const,
+        provided_refs: ["ctx-0001", "ctx-0002"],
+        cited_refs: ["ctx-0001"],
+      },
+    };
+
+    const parsed = unjudgedRecommendationShape.parse(row);
+    const unjudged = toUnjudged(parsed, () => ({
+      manifestDigest: "d".repeat(64),
+      entries: [
+        {
+          ref: "ctx-0001",
+          summary: "Operator planned action.",
+          statementKind: "operator_decision",
+        },
+      ],
+    }));
+
+    expect(unjudged.context).toMatchObject({ shareMode: "internal_only" });
+    expect(unjudged.context?.refs).toEqual([
+      { ref: "ctx-0001", summary: "Operator planned action.", statementKind: "operator_decision" },
+    ]);
+  });
+
   it("leaves context null for evidence-only narrations without provenance", () => {
     const row = {
       ...baseRow,

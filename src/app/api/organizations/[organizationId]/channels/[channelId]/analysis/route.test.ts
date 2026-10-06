@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   assertEnabled: vi.fn(),
   getOrganizationContext: vi.fn(),
   requestChannelAnalysis: vi.fn(),
+  requestChannelRecommendations: vi.fn(),
   info: vi.fn(),
 }));
 
@@ -25,11 +26,16 @@ vi.mock("@/lib/api/organization-context", async () => {
 });
 vi.mock("@/modules/analysis/application/dispatch", () => ({
   requestChannelAnalysis: mocks.requestChannelAnalysis,
+  requestChannelRecommendations: mocks.requestChannelRecommendations,
 }));
 
 const repositoryMocks = vi.hoisted(() => ({
   resolveWindowInput: vi.fn(),
   loadRunForWindow: vi.fn(),
+}));
+const currentRunMock = vi.hoisted(() => vi.fn());
+vi.mock("@/modules/analysis/application/current-run", () => ({
+  resolveCurrentChannelRunForRequest: currentRunMock,
 }));
 
 vi.mock("@/modules/analysis/infrastructure/read-repository", () => ({
@@ -77,6 +83,7 @@ describe("POST channel analysis, by window", () => {
   beforeEach(() => {
     rateMocks.consume.mockResolvedValue(true);
     mocks.requestChannelAnalysis.mockResolvedValue(true);
+    mocks.requestChannelRecommendations.mockResolvedValue(true);
     repositoryMocks.resolveWindowInput.mockResolvedValue({
       windowStart: "2026-01-01",
       windowEnd: "2026-01-04",
@@ -84,6 +91,7 @@ describe("POST channel analysis, by window", () => {
       grain: "day",
     });
     repositoryMocks.loadRunForWindow.mockResolvedValue(null);
+    currentRunMock.mockResolvedValue({ kind: "missing" });
   });
 
   it("starts a run for a covered four-day range", async () => {
@@ -106,6 +114,7 @@ describe("POST channel analysis, by window", () => {
   });
 
   it("returns the existing run without spending allowance or dispatching when the window is ready", async () => {
+    currentRunMock.mockResolvedValue({ kind: "ready", analysisRunId: EXISTING_RUN });
     repositoryMocks.loadRunForWindow.mockResolvedValue({
       id: EXISTING_RUN,
       status: "completed",
@@ -127,17 +136,18 @@ describe("POST channel analysis, by window", () => {
       correlationId: expect.any(String),
       cached: true,
     });
-    expect(repositoryMocks.loadRunForWindow).toHaveBeenCalledWith({
+    expect(currentRunMock).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
       organizationId: ORGANIZATION,
       channelId: CHANNEL,
       windowStart: "2026-01-01",
       windowEnd: "2026-01-04",
-    });
+    }));
     expect(rateMocks.consume).not.toHaveBeenCalled();
     expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
   });
 
   it("returns a cached run even when the organization is over its run allowance", async () => {
+    currentRunMock.mockResolvedValue({ kind: "ready", analysisRunId: EXISTING_RUN });
     rateMocks.consume.mockResolvedValue(false);
     repositoryMocks.loadRunForWindow.mockResolvedValue({
       id: EXISTING_RUN,
@@ -153,7 +163,8 @@ describe("POST channel analysis, by window", () => {
     expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
   });
 
-  it("starts a new run while the existing run is still narrating", async () => {
+  it("wakes narration without starting another detector run", async () => {
+    currentRunMock.mockResolvedValue({ kind: "narrating", analysisRunId: EXISTING_RUN });
     // Completed with no recommendations means the narrator has not landed
     // yet — the same rule the status route uses to report `narrating`.
     repositoryMocks.loadRunForWindow.mockResolvedValue({
@@ -167,11 +178,15 @@ describe("POST channel analysis, by window", () => {
     });
 
     expect(response.status).toBe(202);
-    expect(rateMocks.consume).toHaveBeenCalled();
-    expect(mocks.requestChannelAnalysis).toHaveBeenCalled();
+    expect(rateMocks.consume).not.toHaveBeenCalled();
+    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
+    expect(mocks.requestChannelRecommendations).toHaveBeenCalledWith(expect.objectContaining({
+      analysisRunId: EXISTING_RUN,
+    }));
   });
 
   it("starts a new run when the existing run failed", async () => {
+    currentRunMock.mockResolvedValue({ kind: "failed" });
     repositoryMocks.loadRunForWindow.mockResolvedValue({
       id: EXISTING_RUN,
       status: "failed",
@@ -186,7 +201,8 @@ describe("POST channel analysis, by window", () => {
     expect(mocks.requestChannelAnalysis).toHaveBeenCalled();
   });
 
-  it("starts a new run while the existing run is still running", async () => {
+  it("returns the existing running run without starting another", async () => {
+    currentRunMock.mockResolvedValue({ kind: "running" });
     repositoryMocks.loadRunForWindow.mockResolvedValue({
       id: EXISTING_RUN,
       status: "running",
@@ -197,6 +213,15 @@ describe("POST channel analysis, by window", () => {
       params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
     });
 
+    expect(response.status).toBe(202);
+    expect(mocks.requestChannelAnalysis).not.toHaveBeenCalled();
+  });
+
+  it("starts a new run when the completed run has stale evidence", async () => {
+    currentRunMock.mockResolvedValue({ kind: "stale" });
+    const response = await POST(request({ from: "2026-01-01", to: "2026-01-04" }), {
+      params: Promise.resolve({ organizationId: ORGANIZATION, channelId: CHANNEL }),
+    });
     expect(response.status).toBe(202);
     expect(mocks.requestChannelAnalysis).toHaveBeenCalled();
   });

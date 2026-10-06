@@ -461,11 +461,16 @@ export type ChannelAnalysisReadPort = {
   loadRunForWindow(input: {
     organizationId: string;
     channelId: string;
+    branchId?: string | null;
     windowStart: string;
     windowEnd: string;
   }): Promise<{
     id: string;
     status: "running" | "completed" | "failed";
+    cacheKey: string | null;
+    findingCount: number;
+    observationCount?: number;
+    needsDataCount?: number;
     recommendationCount: number;
   } | null>;
 

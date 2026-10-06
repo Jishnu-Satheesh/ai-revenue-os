@@ -1,6 +1,6 @@
 import "server-only";
 
-import { tasks } from "@trigger.dev/sdk";
+import { tasks, idempotencyKeys } from "@trigger.dev/sdk";
 
 import type { AnalysisGrain } from "@/domain/analysis/types";
 import { logger } from "@/lib/logger";
@@ -50,7 +50,7 @@ export async function requestChannelAnalysis(input: {
         correlationId: input.correlationId,
         idempotencyKey,
       },
-      { idempotencyKey },
+      { idempotencyKey:await idempotencyKeys.create(idempotencyKey,{scope:"global"}) },
     );
     return true;
   } catch (error) {
@@ -98,7 +98,7 @@ export async function requestChannelRecommendations(input: {
         analysisRunId: input.analysisRunId,
         correlationId: input.correlationId,
       },
-      { idempotencyKey, idempotencyKeyTTL },
+      { idempotencyKey:await idempotencyKeys.create(idempotencyKey,{scope:"global"}), idempotencyKeyTTL },
     );
     return true;
   } catch (error) {

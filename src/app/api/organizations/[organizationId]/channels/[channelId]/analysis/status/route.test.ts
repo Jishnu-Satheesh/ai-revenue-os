@@ -70,6 +70,7 @@ describe("GET analysis status", () => {
     mocks.loadRunForWindow.mockResolvedValue({
       id: RUN,
       status: "completed",
+      findingCount: 2,
       recommendationCount: 0,
     });
 
@@ -82,11 +83,36 @@ describe("GET analysis status", () => {
     mocks.loadRunForWindow.mockResolvedValue({
       id: RUN,
       status: "completed",
+      findingCount: 2,
       recommendationCount: 6,
     });
 
     const body = await (await GET(new Request(url), { params })).json();
 
+    expect(body).toEqual({ stage: "ready", analysisRunId: RUN });
+  });
+
+  it("keeps an observations-only run narrating until its explanation is filed", async () => {
+    mocks.loadRunForWindow.mockResolvedValue({
+      id: RUN,
+      status: "completed",
+      findingCount: 0,
+      observationCount: 14,
+      needsDataCount: 5,
+      recommendationCount: 0,
+    });
+    const body = await (await GET(new Request(url), { params })).json();
+    expect(body).toEqual({ stage: "narrating", analysisRunId: RUN });
+  });
+
+  it("reports a completed zero-finding run as ready", async () => {
+    mocks.loadRunForWindow.mockResolvedValue({
+      id: RUN,
+      status: "completed",
+      findingCount: 0,
+      recommendationCount: 0,
+    });
+    const body = await (await GET(new Request(url), { params })).json();
     expect(body).toEqual({ stage: "ready", analysisRunId: RUN });
   });
 

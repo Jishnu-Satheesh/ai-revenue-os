@@ -553,6 +553,10 @@ function supabaseStub(dataByTable: Record<string, unknown[]> = {}) {
         filters.push([column, value]);
         return builder;
       },
+      is: (column: string, value: unknown) => {
+        filters.push([column, value]);
+        return builder;
+      },
       not: () => builder,
       in: () => builder,
       order: () => builder,
@@ -1061,13 +1065,38 @@ describe("loadAnalysedWindowKeys", () => {
 });
 
 describe("loadRunForWindow", () => {
+  it("keeps an explicitly requested branch separate from organization-wide runs", async () => {
+    for (const branchId of [null, "branch-1"]) {
+      const supabase = supabaseStub({ channel_analysis_runs: [], channel_recommendations: [] });
+      const repository = createAuthenticatedChannelAnalysisRepository(supabase);
+      await repository.loadRunForWindow({
+        organizationId: ORGANIZATION,
+        channelId: "channel-1",
+        branchId,
+        windowStart: "2026-01-01",
+        windowEnd: "2026-01-04",
+      });
+      expect(
+        supabase.queries.find((query) => query.table === "channel_analysis_runs")?.filters,
+      ).toContainEqual(["branch_id", branchId]);
+    }
+  });
   it("scopes both queries to the organization and to this channel", async () => {
     // The status endpoint the Channel Audit loader polls every second reads
     // through this method. A run or recommendation count belonging to
     // another organization -- or another channel in this same organization
     // -- must never surface through it.
     const supabase = supabaseStub({
-      channel_analysis_runs: [{ id: "run-1", status: "completed" }],
+      channel_analysis_runs: [
+        {
+          id: "run-1",
+          status: "completed",
+          cache_key: "digest-1",
+          finding_count: 0,
+          observation_count: 14,
+          needs_data_count: 5,
+        },
+      ],
       channel_recommendations: [{ id: "rec-1" }],
     });
     const repository = createAuthenticatedChannelAnalysisRepository(supabase);
@@ -1093,7 +1122,15 @@ describe("loadRunForWindow", () => {
     expect(recommendationsQuery?.filters).toContainEqual(["organization_id", ORGANIZATION]);
     expect(recommendationsQuery?.filters).toContainEqual(["analysis_run_id", "run-1"]);
 
-    expect(result).toEqual({ id: "run-1", status: "completed", recommendationCount: 1 });
+    expect(result).toEqual({
+      id: "run-1",
+      status: "completed",
+      cacheKey: "digest-1",
+      findingCount: 0,
+      observationCount: 14,
+      needsDataCount: 5,
+      recommendationCount: 1,
+    });
   });
 });
 
@@ -1555,7 +1592,9 @@ function aggregateStub(input: {
         }
         for (const [column, value] of log.is) {
           rows = rows.filter((row) =>
-            value === null ? row[column] === null || row[column] === undefined : row[column] === value,
+            value === null
+              ? row[column] === null || row[column] === undefined
+              : row[column] === value,
           );
         }
         for (const [column, operator] of log.not) {
@@ -1650,9 +1689,10 @@ describe("loadDailyMetricAggregates", () => {
       ],
     });
 
-    const aggregates = await createAuthenticatedChannelAnalysisRepository(
-      supabase,
-    ).loadDailyMetricAggregates(AGGREGATE_INPUT);
+    const aggregates =
+      await createAuthenticatedChannelAnalysisRepository(supabase).loadDailyMetricAggregates(
+        AGGREGATE_INPUT,
+      );
 
     expect(aggregates).toEqual([
       {
@@ -1753,9 +1793,10 @@ describe("loadDailyMetricAggregates", () => {
       ],
     });
 
-    const aggregates = await createAuthenticatedChannelAnalysisRepository(
-      supabase,
-    ).loadDailyMetricAggregates(AGGREGATE_INPUT);
+    const aggregates =
+      await createAuthenticatedChannelAnalysisRepository(supabase).loadDailyMetricAggregates(
+        AGGREGATE_INPUT,
+      );
 
     expect(aggregates).toEqual([
       {
@@ -1800,9 +1841,7 @@ describe("loadDailyMetricAggregates", () => {
       },
     ]);
 
-    const spansQuery = queries.find(
-      (query) => query.table === "exact_range_metric_observations",
-    );
+    const spansQuery = queries.find((query) => query.table === "exact_range_metric_observations");
     expect(spansQuery?.eq).toContainEqual(["organization_id", ORGANIZATION]);
     expect(spansQuery?.eq).toContainEqual(["reconciliation_state", "current"]);
   });

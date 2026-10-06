@@ -91,7 +91,8 @@ export async function GET(
           ? "failed"
           : run.status === "running"
             ? "running"
-            : run.recommendationCount > 0
+            : run.findingCount + (run.observationCount ?? 0) + (run.needsDataCount ?? 0) === 0 ||
+                run.recommendationCount > 0
               ? "ready"
               : "narrating";
 

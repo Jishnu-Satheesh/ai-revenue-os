@@ -8,7 +8,8 @@ import { localDaysBetween } from "@/domain/analysis/calendar";
 import { MAX_ANALYSIS_WINDOW_DAYS } from "@/domain/analysis/window-selection";
 import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
-import { requestChannelAnalysis } from "@/modules/analysis/application/dispatch";
+import { requestChannelAnalysis, requestChannelRecommendations } from "@/modules/analysis/application/dispatch";
+import { resolveCurrentChannelRunForRequest } from "@/modules/analysis/application/current-run";
 import { createAuthenticatedChannelAnalysisRepository } from "@/modules/analysis/infrastructure/read-repository";
 import { assertGovernedChannelAnalysisEnabled } from "@/modules/integrations/application/feature-access";
 import type { OrganizationRole } from "@/domain/organizations/types";
@@ -118,17 +119,41 @@ export async function POST(
     // An already-analysed range opens instantly: the same ready rule the
     // status route reports (`completed` with recommendations landed) returns
     // the existing run without spending allowance or starting new work.
-    const existing = await repository.loadRunForWindow({
+    const existing = await resolveCurrentChannelRunForRequest(context.supabase, {
       organizationId: routeParams.organizationId,
       channelId: routeParams.channelId,
+      branchId: null,
       windowStart: resolved.windowStart,
       windowEnd: resolved.windowEnd,
+      grain: resolved.grain,
+      timeZone: resolved.timeZone,
     });
-    if (existing !== null && existing.status === "completed" && existing.recommendationCount > 0) {
+    if (existing.kind === "ready") {
       return NextResponse.json(
-        { analysisRunId: existing.id, correlationId, cached: true },
+        { analysisRunId: existing.analysisRunId, correlationId, cached: true },
         { status: 200 },
       );
+    }
+    if (existing.kind === "narrating") {
+      const dispatched = await requestChannelRecommendations({
+        organizationId: routeParams.organizationId,
+        channelId: routeParams.channelId,
+        analysisRunId: existing.analysisRunId,
+        correlationId,
+      });
+      if (!dispatched) throw new DomainError("INTEGRATION_ERROR", "The analysis narration could not be resumed.");
+      return NextResponse.json({ analysisRunId: existing.analysisRunId, correlationId, narrating: true }, { status: 202 });
+    }
+    if (existing.kind === "running") {
+      // A run already in progress remains the one to observe; a second press
+      // should not spend another allowance or create another run.
+      const run = await repository.loadRunForWindow({
+        organizationId: routeParams.organizationId,
+        channelId: routeParams.channelId,
+        windowStart: resolved.windowStart,
+        windowEnd: resolved.windowEnd,
+      });
+      if (run) return NextResponse.json({ analysisRunId: run.id, correlationId, running: true }, { status: 202 });
     }
 
     // After coverage, never before: a mistyped date must not cost the

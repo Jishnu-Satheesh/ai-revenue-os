@@ -16,6 +16,7 @@ import { ChannelAnalysisError } from "@/domain/analysis/errors";
 import { getOrganization } from "@/domain/organizations/repository";
 import { getOrganizationContext } from "@/lib/api/organization-context";
 import { buildChannelWorkspaceView } from "@/modules/analysis/application/read-model";
+import { resolveAuditSelection } from "@/modules/analysis/application/audit-selection";
 import type { ChannelRecommendationRecord } from "@/modules/analysis/application/ports";
 import { readCachedRunPayload } from "@/modules/analysis/application/view-cache";
 import {
@@ -53,7 +54,7 @@ export default async function ChannelDetailPage({
   searchParams,
 }: {
   params: Promise<{ organizationId: string; channelId: string }>;
-  searchParams?: Promise<{ from?: string; to?: string; month?: string }>;
+  searchParams?: Promise<{ from?: string; to?: string; month?: string; runId?: string }>;
 }) {
   const { channelId } = await params;
   const context = await getOrganizationContext(params);
@@ -120,27 +121,26 @@ export default async function ChannelDetailPage({
       if (!(error instanceof ChannelAnalysisError)) throw error;
       coveredRequested = null;
     }
-    const selectedWindow =
+    const defaultWindow =
       coveredRequested ??
       defaultAnalysisWindow({
         today: todayInZone(organization.default_timezone),
         windows: coverageWindows,
       });
 
-    // Unchanged in spirit from the month version: findings are read for the
-    // one run the page is about to display, so every figure on the page was
-    // computed for the window the page names. A window with no completed run
-    // shows the workspace in its not-analysed state, never another window's
-    // run.
-    const displayedRun =
-      selectedWindow === null
-        ? null
-        : (runs.find(
-            (run) =>
-              run.status === "completed" &&
-              run.windowStart === selectedWindow.from &&
-              run.windowEnd === selectedWindow.to,
-          ) ?? null);
+    // A durable agent receipt names one exact run, which may be older than the
+    // ten shown by the ordinary page list. The scoped reader verifies it by
+    // organization and channel before it can override the default window.
+    const auditSelection = await resolveAuditSelection({
+      organizationId: context.organizationId,
+      channelId,
+      requestedRunId: query?.runId,
+      runs,
+      defaultWindow,
+      loadRun: (input) => analysis.loadRun(input),
+    });
+    const selectedWindow = auditSelection.window;
+    const displayedRun = auditSelection.displayedRun;
 
     // The findings and the evidence for a completed run are immutable; the
     // recommendation text grows at most once afterwards, when a gap-fill
@@ -229,7 +229,7 @@ export default async function ChannelDetailPage({
     }
 
     const view = buildChannelWorkspaceView({
-      runs,
+      runs: auditSelection.runs,
       findings: cached?.findings ?? [],
       evidence: cached?.evidence ?? [],
       recommendations,

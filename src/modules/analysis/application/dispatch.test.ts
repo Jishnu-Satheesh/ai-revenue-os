@@ -2,8 +2,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-const { trigger } = vi.hoisted(() => ({ trigger: vi.fn(async () => ({ id: "run_test" })) }));
-vi.mock("@trigger.dev/sdk", () => ({ tasks: { trigger } }));
+const { trigger, createKey } = vi.hoisted(() => ({
+  trigger: vi.fn(async () => ({ id: "run_test" })),
+  createKey: vi.fn(async (key: string) => key),
+}));
+vi.mock("@trigger.dev/sdk", () => ({
+  tasks: { trigger },
+  idempotencyKeys: {
+    create: (...args: unknown[]) => (createKey as (...a: unknown[]) => Promise<unknown>)(...args),
+  },
+}));
 vi.mock("@/modules/integrations/application/feature-access", () => ({
   isGovernedChannelAnalysisEnabled: () => true,
 }));

@@ -134,7 +134,46 @@ export function distinct<Value>(
   return [...new Set(points.map(select))];
 }
 
-/** Sums integer figures. Money never leaves minor units, so nothing rounds. */
+/** Money stays in minor units. Decimal quantities keep the supplied precision
+ * without binary addition tails that the finding contract cannot accept. */
 export function sumNumerators(points: readonly AnalysisSeriesPoint[]): number {
-  return points.reduce((total, point) => total + point.numerator, 0);
+  if (points.every((point) => Number.isInteger(point.numerator)))
+    return points.reduce((total, point) => total + point.numerator, 0);
+  const decimals = points.map((point) => {
+    let text = String(point.numerator);
+    // The finding contract admits twelve decimal places. Normalize only a
+    // binary representation tail within one numeric unit of precision;
+    // preserve actual higher-precision inputs so they can cancel exactly.
+    if ((text.split(".")[1]?.length ?? 0) > 12) {
+      const canonical = point.numerator.toFixed(12);
+      if (
+        Math.abs(Number(canonical) - point.numerator) <=
+        Number.EPSILON * Math.abs(point.numerator)
+      )
+        text = canonical;
+    }
+    const match = /^(-?)(\d+)(?:\.(\d+))?(?:e([+-]?\d+))?$/.exec(text);
+    if (!match) return null;
+    const fraction = match[3] ?? "";
+    const scale = fraction.length - Number(match[4] ?? 0);
+    return {
+      negative: match[1] === "-",
+      digits: `${match[2]}${fraction}${scale < 0 ? "0".repeat(-scale) : ""}`,
+      scale: Math.max(0, scale),
+    };
+  });
+  if (decimals.some((value) => value === null)) return NaN;
+  const scale = Math.max(...decimals.map((value) => value!.scale));
+  const total = decimals.reduce(
+    (sum, value) =>
+      sum +
+      BigInt(
+        `${value!.negative ? "-" : ""}${value!.digits.padEnd(value!.digits.length + scale - value!.scale, "0")}`,
+      ),
+    BigInt(0),
+  );
+  const digits = (total < BigInt(0) ? -total : total).toString().padStart(scale + 1, "0");
+  return Number(
+    `${total < BigInt(0) ? "-" : ""}${scale ? `${digits.slice(0, -scale)}.${digits.slice(-scale)}` : digits}`,
+  );
 }

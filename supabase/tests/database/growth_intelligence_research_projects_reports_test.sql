@@ -134,9 +134,20 @@ select extensions.ok(
 select extensions.ok(
   not pg_catalog.has_table_privilege(
     'authenticated', 'public.growth_intelligence_research_projects',
-    'insert,update,delete'
+    'insert,delete'
+  )
+  and pg_catalog.has_table_privilege(
+    'authenticated', 'public.growth_intelligence_research_projects', 'update'
+  )
+  and exists (
+    select 1 from pg_catalog.pg_policies
+    where schemaname = 'public'
+      and tablename = 'growth_intelligence_research_projects'
+      and cmd = 'UPDATE'
+      and qual like '%growth_intelligence.manage%'
+      and with_check like '%growth_intelligence.manage%'
   ),
-  'authenticated sessions cannot write projects directly'
+  'source project create/delete stay governed and updates require manage permission'
 );
 select extensions.ok(
   not pg_catalog.has_table_privilege(
@@ -1393,11 +1404,15 @@ select extensions.throws_ok(
   '42501', null,
   'viewers cannot insert projects outside the governed RPC'
 );
-select extensions.throws_ok(
-  $$ update public.growth_intelligence_research_projects
-     set title = 'Sneaky rename'
-     where organization_id = 'd6000000-0000-4000-8000-000000000201'::uuid $$,
-  '42501', null,
+with changed as (
+  update public.growth_intelligence_research_projects
+  set title = 'Sneaky rename'
+  where organization_id = 'd6000000-0000-4000-8000-000000000201'::uuid
+  returning id
+)
+select extensions.is(
+  (select count(*)::bigint from changed),
+  0::bigint,
   'viewers cannot rename projects outside the governed RPC'
 );
 

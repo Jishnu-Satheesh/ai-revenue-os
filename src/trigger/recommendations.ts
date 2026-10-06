@@ -81,20 +81,24 @@ const unjudgedRecommendationShape = z.object({
     }),
   ),
   // Reverse embed over the provenance primary key (organization_id,
-  // recommendation_id): zero rows when the narration ran evidence-only,
-  // exactly one when it pinned a manifest. An array in PostgREST shape,
-  // like the evaluations anti-join above. Default [] keeps older fixtures
-  // (evidence-only by construction) parsing as context null.
-  channel_recommendation_contexts: z
-    .array(
+  // recommendation_id): to-one, so PostgREST sends one object when the
+  // narration pinned a manifest and null when it ran evidence-only — never
+  // an array. Normalized here so the judge below keeps reading a list:
+  // null and a missing key become [], one object becomes [object].
+  channel_recommendation_contexts: z.preprocess(
+    (value) => {
+      if (value === null || value === undefined) return [];
+      return Array.isArray(value) ? value : [value];
+    },
+    z.array(
       z.object({
         manifest_id: z.string().uuid(),
         share_mode: z.enum(["internal_only", "grounded_share"]),
         provided_refs: z.array(z.string()),
         cited_refs: z.array(z.string()),
       }),
-    )
-    .default([]),
+    ),
+  ),
 });
 
 export type ContextLookup = {

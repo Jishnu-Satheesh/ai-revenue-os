@@ -1070,18 +1070,25 @@ export function createAuthenticatedChannelAnalysisRepository(
       return { ...bounds, timeZone, grain };
     },
 
-    async loadRunForWindow({ organizationId, channelId, windowStart, windowEnd }) {
+    async loadRunForWindow({ organizationId, channelId, branchId, windowStart, windowEnd }) {
       // Exactly this window, via the same `(organization_id, channel_id,
       // window_start desc, created_at desc)` index `loadRuns` uses -- an
       // equality match on its leading columns, newest first if re-analysis
       // ever produced more than one run for the same declared range.
-      const { data: run, error: runError } = await supabase
+      const base = supabase
         .from("channel_analysis_runs")
-        .select("id, status")
+        .select("id, status, cache_key, finding_count, observation_count, needs_data_count")
         .eq("organization_id", organizationId)
         .eq("channel_id", channelId)
         .eq("window_start", windowStart)
-        .eq("window_end", windowEnd)
+        .eq("window_end", windowEnd);
+      const scoped =
+        branchId === undefined
+          ? base
+          : branchId === null
+            ? base.is("branch_id", null)
+            : base.eq("branch_id", branchId);
+      const { data: run, error: runError } = await scoped
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -1098,7 +1105,15 @@ export function createAuthenticatedChannelAnalysisRepository(
         .eq("analysis_run_id", run.id);
       if (countError) throw new ChannelAnalysisReadError(countError.code ?? "unknown");
 
-      return { id: run.id, status: run.status, recommendationCount: count ?? 0 };
+      return {
+        id: run.id,
+        status: run.status,
+        cacheKey: run.cache_key,
+        findingCount: run.finding_count,
+        observationCount: run.observation_count ?? 0,
+        needsDataCount: run.needs_data_count ?? 0,
+        recommendationCount: count ?? 0,
+      };
     },
 
     async loadCompletedRunCountSince({ organizationId, since, windowStartMin, windowEndMax }) {
@@ -1150,8 +1165,7 @@ export function createAuthenticatedChannelAnalysisRepository(
         Date.parse(`${from}T00:00:00Z`) - DAILY_AGGREGATE_FETCH_WIDENING_DAYS * MS_PER_DAY,
       );
       const fetchEndExclusive = new Date(
-        Date.parse(`${to}T00:00:00Z`) +
-          (DAILY_AGGREGATE_FETCH_WIDENING_DAYS + 1) * MS_PER_DAY,
+        Date.parse(`${to}T00:00:00Z`) + (DAILY_AGGREGATE_FETCH_WIDENING_DAYS + 1) * MS_PER_DAY,
       );
 
       // Day, week, and month period rows. A row is never split across the
@@ -1244,7 +1258,11 @@ export function createAuthenticatedChannelAnalysisRepository(
         const metricKey = keyByDefinitionId.get(row.metric_definition_id);
         const channelId = row.channel_id;
         if (!metricKey || typeof channelId !== "string") continue;
-        if (row.period_grain !== "day" && row.period_grain !== "week" && row.period_grain !== "month")
+        if (
+          row.period_grain !== "day" &&
+          row.period_grain !== "week" &&
+          row.period_grain !== "month"
+        )
           continue;
         // `period_end` is the exclusive next local midnight, so the last day
         // inside the period is the instant a millisecond before it -- the same
@@ -1300,7 +1318,7 @@ export function createAuthenticatedChannelAnalysisRepository(
         // builder states no combined total rather than one in a lucky currency.
         currency:
           !bucket.hasNullCurrency && bucket.currencies.size === 1
-            ? [...bucket.currencies][0] ?? null
+            ? ([...bucket.currencies][0] ?? null)
             : null,
       }));
       aggregates.sort((left, right) =>

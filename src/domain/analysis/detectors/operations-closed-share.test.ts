@@ -17,6 +17,53 @@ function closedDayPoint(periodStart: string, days: number, reasonCode: string) {
 }
 
 describe("operations.closed_share", () => {
+  it("preserves higher-precision source components that cancel to an exact total", () => {
+    const [outcome] = operationsClosedShareDetector.run(
+      evidence({
+        points: [
+          minutePoint("operations.closed_minutes", "2026-01-01", 1.0000000000001),
+          minutePoint("operations.closed_minutes", "2026-01-02", 1.9999999999999),
+          minutePoint("operations.scheduled_minutes", "2026-01-01", 10),
+        ],
+      }),
+    );
+    expect(outcome.kind === "observation" && outcome.measurement?.numerator).toBe(3);
+  });
+  it("does not round a genuinely finer source quantity to fit the finding boundary", () => {
+    const [outcome] = operationsClosedShareDetector.run(
+      evidence({
+        points: [
+          minutePoint("operations.closed_minutes", "2026-01-01", 1e-13),
+          minutePoint("operations.scheduled_minutes", "2026-01-01", 10),
+        ],
+      }),
+    );
+    expect(outcome.kind === "observation" && outcome.measurement?.numerator).toBe(1e-13);
+  });
+  it("removes representation noise within a numeric unit of precision while preserving real decimals", () => {
+    const [outcome] = operationsClosedShareDetector.run(
+      evidence({
+        points: [
+          minutePoint("operations.closed_minutes", "2026-01-01", 0.1 + 0.2),
+          minutePoint("operations.closed_minutes", "2026-01-02", 1.1),
+          minutePoint("operations.scheduled_minutes", "2026-01-01", 10),
+        ],
+      }),
+    );
+    expect(outcome.kind === "observation" && outcome.measurement?.numerator).toBe(1.4);
+  });
+  it("keeps decimal minute totals free of floating-point tails rejected by the database", () => {
+    const [outcome] = operationsClosedShareDetector.run(
+      evidence({
+        points: [
+          minutePoint("operations.closed_minutes", "2026-01-01", 1.1),
+          minutePoint("operations.closed_minutes", "2026-01-02", 2.2),
+          minutePoint("operations.scheduled_minutes", "2026-01-01", 10),
+        ],
+      }),
+    );
+    expect(outcome.kind === "observation" && outcome.measurement?.numerator).toBe(3.3);
+  });
   it("computes the share from the summed minutes exactly as the provider wrote them", () => {
     // The real export's window totals: 34,216.93 closed of 70,799 scheduled
     // minutes. The decimals are the provider's own per-day rounding, kept
