@@ -10,7 +10,7 @@
 # - PRODUCTION_DATABASE_URL: session-mode pooler URL of the production
 #   Supabase project (port 5432).
 # - TRIGGER_ACCESS_TOKEN: Trigger.dev personal access token.
-# - TRIGGER_PROJECT_REF_PROD: ref of the production Trigger project.
+# - TRIGGER_PROJECT_REF: ref of the production Trigger project.
 #
 # Strongly recommended in repository Settings -> Environments -> production:
 # add a required reviewer so every production deploy waits for a human tap.
@@ -34,7 +34,7 @@ jobs:
   migrate:
     name: Push migrations to production
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     environment: production
     env:
       DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
@@ -70,12 +70,12 @@ jobs:
   trigger:
     name: Deploy workers to Trigger production
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     environment: production
     needs: migrate
     env:
       TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
-      TRIGGER_PROJECT_REF: ${{ secrets.TRIGGER_PROJECT_REF_PROD }}
+      TRIGGER_PROJECT_REF: ${{ secrets.TRIGGER_PROJECT_REF }}
     steps:
       - name: Check out code
         uses: actions/checkout@v4
@@ -91,6 +91,15 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      # Fail fast with a clear message instead of the CLI's 404 on
+      # /api/v1/projects//prod when the project ref secret is empty.
+      - name: Verify Trigger project ref is set
+        run: |
+          if [ -z "$TRIGGER_PROJECT_REF" ]; then
+            echo "::error::TRIGGER_PROJECT_REF is empty. Check the production environment secret name."
+            exit 1
+          fi
 
       # Same version-matching rule as deploy-staging.yml (see the comment
       # there). No --env flag: production is the default target.
