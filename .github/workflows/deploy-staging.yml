@@ -128,9 +128,12 @@ jobs:
       # SDK instead of using the repo install or @latest. The version is read
       # from package.json at runtime, so bumping the SDK can never silently
       # reintroduce the mismatch. --external-id tags the deployment with its
-      # commit for traceability.
+      # commit for traceability. No --env flag: both Trigger projects only
+      # have Development (local runs) and Production environments (free plan
+      # allows no custom staging env), so deploys always target each
+      # project's Production environment — here, the staging project's.
       - name: Deploy Trigger.dev workers
         run: |
           SDK_VERSION=$(node -p "require('./package.json').dependencies['@trigger.dev/sdk']")
           echo "Deploying with trigger.dev CLI $SDK_VERSION to match the SDK"
-          pnpm dlx trigger.dev@$SDK_VERSION deploy --env staging --external-id ${{ github.sha }}
+          pnpm dlx trigger.dev@$SDK_VERSION deploy --external-id ${{ github.sha }}
