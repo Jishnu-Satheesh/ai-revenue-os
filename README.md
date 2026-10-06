@@ -71,6 +71,12 @@ All project commands use **pnpm**. The committed `pnpm-lock.yaml` is the depende
 
 All user-facing controls and surface primitives must use shadcn/ui components or compositions of them. This is a critical design-system and accessibility rule; add missing primitives with the pnpm shadcn CLI rather than introducing bare HTML controls.
 
+## Universal AI Agent governed workflows
+
+The organization drawer can give a one-month improvement plan from source evidence, run missing channel analysis, and accept one CSV/XLSX report through governed intake. Empty recent coverage can use an earlier comparable period, with a dated separator marker in the thread. Reports reuse exact verified duplicates, ask only unresolved metadata through a persisted Questionnaire, and retain existing approval requirements. Background work, action markers, and one final answer survive reopening and retries.
+
+The approved contract is [Universal Agent design §21](docs/superpowers/specs/2026-09-24-universal-ai-agent-design.md#21-approved-governed-workflows-amendment-2026-10-01), with source boundaries in [ADR 0075](adrs/0075-durable-agent-turns-and-source-owned-capabilities.md). [Staging verification](docs/verification/universal-agent-governed-workflows/2026-10-04.md) records automated checks, real Trigger development-worker receipts, and authenticated browser/replay evidence. Trigger production worker release `20261004.1` is deployed and [verified against staging data](docs/verification/universal-agent-governed-workflows/production-worker-2026-10-04.md); hosted web deployment and broader enablement remain pending.
+
 ## Local setup
 
 1. Install Node.js 22+ and pnpm, then copy `.env.example` to `.env.local`.
@@ -86,6 +92,20 @@ pnpm lint
 pnpm test
 pnpm build
 ```
+
+### Dev login bypass
+
+`pnpm dev` only — this route 404s anywhere else. Sign the browser in as a test
+persona (provisioned on first use) by opening:
+
+```text
+http://localhost:3000/api/dev/login-as?org=2dda45b8-82db-4f5f-b17d-611b9bbb7846&role=viewer&next=/organizations/2dda45b8-82db-4f5f-b17d-611b9bbb7846/settings
+```
+
+`role` is one of `owner`, `admin`, `operator`, `viewer`; `next` is an
+optional same-origin path (default `/`). Personas are namespaced
+`dev.<role>@lunes.test` users with exactly that role's membership — reusing
+them never multiplies rows.
 
 ## Database workflow
 
