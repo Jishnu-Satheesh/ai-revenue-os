@@ -2,15 +2,20 @@
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TeamMembers } from "@/components/organizations/team-members";
+import { MemoryIntegrationSettingsPanel } from "@/components/memory/integration-settings-panel";
 
 /**
  * The tab registry. Settings grows by appending an entry here -- each tab owns
- * its content component, and nothing else in the shell changes. Team Members
- * is the first and only entry; future tabs (Growth Intelligence and others)
- * arrive as their own slices.
+ * its content component, and nothing else in the shell changes. Future tabs
+ * (Growth Intelligence and others) arrive as their own slices.
  */
 const SETTINGS_TABS = [
   { id: "team", label: "Team Members", description: "Who can open this client, and as what." },
+  {
+    id: "memory",
+    label: "Memory",
+    description: "What the platform remembers, and who may recall it.",
+  },
 ] as const;
 
 export function OrganizationSettings({
@@ -39,7 +44,11 @@ export function OrganizationSettings({
         {SETTINGS_TABS.map((tab) => (
           <TabsContent key={tab.id} value={tab.id} className="mt-6">
             <p className="mb-4 text-sm text-muted-foreground">{tab.description}</p>
-            {tab.id === "team" ? <TeamMembers organizationId={organizationId} /> : null}
+            {tab.id === "team" ? (
+              <TeamMembers organizationId={organizationId} />
+            ) : tab.id === "memory" ? (
+              <MemoryIntegrationSettingsPanel organizationId={organizationId} />
+            ) : null}
           </TabsContent>
         ))}
       </Tabs>

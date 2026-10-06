@@ -18,6 +18,10 @@ import type {
   MemoryProposalRejection,
   MemoryTransactionPort,
 } from "@/modules/memory/application/service";
+import { scoreFactAgainstQuery } from "@/modules/memory/application/fact-projection";
+
+/** Bound read-through fact search independently from its returned result limit. */
+export const MAX_FACT_SEARCH_CANDIDATES = 200;
 
 /**
  * `embedding` and `search_vector` are deliberately absent from every column
@@ -313,15 +317,20 @@ export function createSupabaseMemoryPersistence(
         .map((term) => term.replace(/[%,()]/g, "").trim())
         .filter((term) => term.length > 2)
         .slice(0, 5);
-      if (terms.length > 0) {
-        request = request.or(
-          terms.map((term) => `fact_key.ilike.%${term}%,value::text.ilike.%${term}%`).join(","),
-        );
-      }
-      return rows<BusinessFactRow>(
-        request.order("updated_at", { ascending: false }).limit(limit),
+      // PostgREST supports casts in projections, but rejects value::text in
+      // horizontal filters. Match the same keys/JSON values in deterministic
+      // code after a tenant/branch-scoped recent candidate read. This remains
+      // a bounded context search, not an exhaustive search of older facts.
+      const candidates = await rows<BusinessFactRow>(
+        request
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(MAX_FACT_SEARCH_CANDIDATES),
         "Business facts could not be loaded for retrieval.",
       );
+      return candidates
+        .filter((fact) => terms.length === 0 || scoreFactAgainstQuery(fact, terms.join(" ")) > 0)
+        .slice(0, limit);
     },
 
     async projectGoogleBusinessProfileRecord(input) {

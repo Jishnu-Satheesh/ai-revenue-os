@@ -61,9 +61,9 @@ export function projectBusinessFact(input: {
 
 /**
  * A deliberately simple lexical score for projected facts. Postgres ranks
- * memory rows with `ts_rank_cd`; facts are matched with an `ilike` filter that
- * returns no score, so overlap of query terms against the key and the rendered
- * value stands in. It is bounded to [0, 1] so it blends on the same scale.
+ * memory rows with `ts_rank_cd`; facts are matched within a bounded recent
+ * tenant/branch candidate read, using query overlap against the key and the
+ * rendered JSON value. It is bounded to [0, 1] so it blends on the same scale.
  */
 export function scoreFactAgainstQuery(fact: BusinessFactRow, query: string): number {
   const terms = query

@@ -261,6 +261,127 @@ describe("createMemoryRepository", () => {
 });
 
 describe("createSupabaseMemoryPersistence", () => {
+  it("matches scoped fact keys and JSON values without a PostgREST cast filter", async () => {
+    const calls: { filters: [string, unknown][]; limit: number; orFilters: string[] } = {
+      filters: [],
+      limit: Infinity,
+      orFilters: [],
+    };
+    const facts = [
+      {
+        id: "key",
+        organization_id: "org-1",
+        branch_id: "branch-1",
+        fact_key: "kitchen.capacity",
+        value: 120,
+        updated_at: "2026-10-04",
+      },
+      {
+        id: "value",
+        organization_id: "org-1",
+        branch_id: "branch-1",
+        fact_key: "operations.constraint",
+        value: { detail: "Kitchen staffing needs training" },
+        updated_at: "2026-10-03",
+      },
+      {
+        id: "number",
+        organization_id: "org-1",
+        branch_id: "branch-1",
+        fact_key: "capacity.limit",
+        value: 120,
+        updated_at: "2026-10-02",
+      },
+      {
+        id: "other-org",
+        organization_id: "org-2",
+        branch_id: "branch-1",
+        fact_key: "kitchen.secret",
+        value: 120,
+        updated_at: "2026-10-04",
+      },
+      {
+        id: "other-branch",
+        organization_id: "org-1",
+        branch_id: "branch-2",
+        fact_key: "kitchen.secret",
+        value: 120,
+        updated_at: "2026-10-04",
+      },
+    ];
+    const builder = {
+      select: () => builder,
+      eq: (column: string, value: unknown) => {
+        calls.filters.push([column, value]);
+        return builder;
+      },
+      or: (filter: string) => {
+        calls.orFilters.push(filter);
+        return builder;
+      },
+      order: () => builder,
+      limit: (limit: number) => {
+        calls.limit = limit;
+        return builder;
+      },
+      then: (resolve: (result: { data: unknown[] | null; error: unknown }) => unknown) =>
+        resolve({
+          data: calls.orFilters.some((filter) => filter.includes("::"))
+            ? null
+            : facts
+                .filter((fact) =>
+                  calls.filters.every(
+                    ([column, value]) => fact[column as keyof typeof fact] === value,
+                  ),
+                )
+                .slice(0, calls.limit),
+          error: calls.orFilters.some((filter) => filter.includes("::"))
+            ? { code: "PGRST100" }
+            : null,
+        }),
+    };
+    const { createSupabaseMemoryPersistence } = await import(
+      "@/modules/memory/infrastructure/persistence"
+    );
+    const persistence = createSupabaseMemoryPersistence({ from: () => builder } as never);
+    const result = await persistence.searchFacts({
+      organizationId: "org-1",
+      branchId: "branch-1",
+      query: "kitchen 120",
+      limit: 10,
+    });
+    expect(result.map((fact) => fact.id)).toEqual(["key", "value", "number"]);
+    expect(calls.filters).toEqual([
+      ["organization_id", "org-1"],
+      ["branch_id", "branch-1"],
+    ]);
+    expect(calls.limit).toBe(200);
+    expect(calls.orFilters).toEqual([]);
+  });
+
+  it("propagates denied fact reads instead of returning an empty search", async () => {
+    const builder = {
+      eq: () => builder,
+      or: () => builder,
+      order: () => builder,
+      limit: () => builder,
+      then: (resolve: (result: { data: null; error: unknown }) => unknown) =>
+        resolve({ data: null, error: { code: "42501" } }),
+    };
+    const { createSupabaseMemoryPersistence } = await import(
+      "@/modules/memory/infrastructure/persistence"
+    );
+    await expect(
+      createSupabaseMemoryPersistence({
+        from: () => ({ select: () => builder }),
+      } as never).searchFacts({
+        organizationId: "org-1",
+        query: "kitchen",
+        limit: 10,
+      }),
+    ).rejects.toMatchObject({ code: "CONFLICT" });
+  });
+
   it("calls the authenticated promotion RPC with only scoped identifiers and flags", async () => {
     vi.resetModules();
     const rpc = vi.fn(

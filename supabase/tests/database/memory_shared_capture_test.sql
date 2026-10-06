@@ -2,7 +2,7 @@ begin;
 
 create extension if not exists pgtap with schema extensions;
 
-select extensions.plan(31);
+select extensions.plan(34);
 
 -- Spec 023 Task 02 storage: settings, revisions, events, dependencies and the
 -- item link. Flags default off and queues start empty, so nothing about
@@ -83,6 +83,16 @@ select extensions.is(
   (select count(*)::integer from public.audit_events
    where organization_id = 'fb340000-0000-4000-8000-000000000201' and event_name = 'memory.integration_changed'),
   1, 'the settings change is audited');
+
+-- Settings read ----------------------------------------------------------------------
+
+set local request.jwt.claim.sub = 'fb340000-0000-4000-8000-000000000004';
+
+select extensions.ok(pg_catalog.has_table_privilege('authenticated', 'public.memory_integration_settings', 'select'), 'members hold settings read');
+select extensions.ok(not pg_catalog.has_table_privilege('anon', 'public.memory_integration_settings', 'select'), 'anonymous callers hold no settings read');
+select extensions.is(
+  (select count(*)::integer from public.memory_integration_settings where organization_id = 'fb340000-0000-4000-8000-000000000201'),
+  1, 'an operator reads the own settings row');
 
 -- Allocator --------------------------------------------------------------------------
 --

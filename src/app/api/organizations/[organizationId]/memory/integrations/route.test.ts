@@ -21,7 +21,10 @@ vi.mock("@/modules/memory/application/api", async (importOriginal) => {
   return { ...actual, createMemoryWorkspaceApi: mocks.createMemoryWorkspaceApi };
 });
 
-import { PATCH as patchIntegrations } from "@/app/api/organizations/[organizationId]/memory/integrations/route";
+import {
+  GET as getIntegrations,
+  PATCH as patchIntegrations,
+} from "@/app/api/organizations/[organizationId]/memory/integrations/route";
 
 const organizationId = "11111111-1111-4111-8111-111111111111";
 
@@ -120,5 +123,82 @@ describe("memory integrations route", () => {
     const response = await patchIntegrations(jsonRequest(explicitBody), organizationParams());
 
     expect(response.status).toBe(403);
+  });
+});
+
+describe("memory integrations route GET", () => {
+  function selectChain(result: { data: unknown; error: unknown }) {
+    const maybeSingle = vi.fn(async () => result);
+    const eq = vi.fn(() => ({ maybeSingle }));
+    const select = vi.fn(() => ({ eq }));
+    const from = vi.fn(() => ({ select }));
+    return { from, select, eq, maybeSingle };
+  }
+
+  function getRequest() {
+    return new Request("http://localhost/memory/integrations", { method: "GET" });
+  }
+
+  function memberSession(chain: ReturnType<typeof selectChain>, role = "operator") {
+    mocks.getOrganizationContext.mockResolvedValue({
+      organizationId,
+      user: { id: "member-1" },
+      membership: { role },
+      supabase: { rpc: mocks.rpc, from: chain.from },
+    });
+  }
+
+  it("returns every flag when a settings row exists", async () => {
+    const chain = selectChain({
+      data: {
+        organization_id: organizationId,
+        capture_enabled: true,
+        channel_context_enabled: true,
+        growth_context_enabled: false,
+        campaign_context_enabled: false,
+        subject_context_enabled: false,
+        legacy_corpus_qualified: false,
+        context_policy_version: "shared-context-v1",
+      },
+      error: null,
+    });
+    memberSession(chain);
+
+    const response = await getIntegrations(getRequest(), organizationParams());
+    const body = (await response.json()) as { settings: unknown };
+
+    expect(response.status).toBe(200);
+    expect(chain.from).toHaveBeenCalledWith("memory_integration_settings");
+    expect(chain.eq).toHaveBeenCalledWith("organization_id", organizationId);
+    expect(body.settings).toEqual({
+      organizationId,
+      captureEnabled: true,
+      channelContextEnabled: true,
+      growthContextEnabled: false,
+      campaignContextEnabled: false,
+      subjectContextEnabled: false,
+      legacyCorpusQualified: false,
+      contextPolicyVersion: "shared-context-v1",
+    });
+  });
+
+  it("returns null settings when the organization never configured memory", async () => {
+    const chain = selectChain({ data: null, error: null });
+    memberSession(chain);
+
+    const response = await getIntegrations(getRequest(), organizationParams());
+    const body = (await response.json()) as { settings: unknown };
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ settings: null });
+  });
+
+  it("refuses to read an unreadable row as unset", async () => {
+    const chain = selectChain({ data: null, error: { code: "PGRST000", message: "unreadable" } });
+    memberSession(chain);
+
+    const response = await getIntegrations(getRequest(), organizationParams());
+
+    expect(response.status).toBe(500);
   });
 });

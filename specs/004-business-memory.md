@@ -262,6 +262,8 @@ Rules:
 
 Structured facts participate in lexical ranking over `fact_key` and the text content of `value`. They are not embedded in V1; their semantic score is zero and their trust rank carries them.
 
+Read-through fact candidates are bounded to the most recently updated 200 rows in the authorized organization/branch scope, ordered by `updated_at` and `id`. Deterministic matching preserves substring and numeric JSON-value matches; the caller's result limit is applied after matching. Facts older than this candidate window are outside retrieval recall. A denied or failed source read remains unavailable, never an empty search result.
+
 ## 8. Database and tenancy requirements
 
 - Use an imperative Supabase migration created with `supabase migration new business_memory`; do not invent a migration timestamp.
