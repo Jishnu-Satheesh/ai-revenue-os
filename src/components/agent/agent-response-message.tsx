@@ -7,6 +7,7 @@ import {
   parseAnswerBody,
   type AnswerCitation,
 } from "@/modules/agent-chat/application/answer-writer";
+import { AnswerLinkMarkers, PeriodSwitchMarker } from "@/components/agent/agent-turn-markers";
 import type { ThreadMessageView } from "@/modules/agent-chat/infrastructure/thread-repository";
 
 export type AgentResponseMessageProps = {
@@ -142,6 +143,7 @@ export function AgentResponseMessage({
     <TooltipProvider>
       <div className="flex justify-start">
         <div className="flex max-w-[90%] flex-col gap-2">
+          {parsed.periodSwitch ? <PeriodSwitchMarker period={parsed.periodSwitch} /> : null}
           <Card>
             <CardContent className="flex flex-col gap-3 text-sm">
               {rawParagraphs.map((paragraph, index) => (
@@ -155,6 +157,7 @@ export function AgentResponseMessage({
             </CardContent>
           </Card>
           <SourcesLine citations={parsed.citations} />
+          <AnswerLinkMarkers links={parsed.links} />
           {parsed.estimates.length > 0 ? (
             <div className="flex flex-col gap-1.5 px-1">
               <p className="text-xs font-medium text-muted-foreground">Estimates</p>

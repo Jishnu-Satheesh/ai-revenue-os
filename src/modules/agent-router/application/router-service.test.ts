@@ -79,6 +79,74 @@ describe("router", () => {
     expect(out.reasonCodes).toContain("CAMPAIGN_REQUIRES_CREATE");
   });
 
+  it("routes business_advice directly for a reader holding channel.read", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "what should we improve in the next month",
+      role: "viewer",
+      permissions: ["channel.read"],
+      model: { kind: "stub", intent: "business_advice", confidence: "high", missing: [] },
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.reasonCodes).toContain("VIEWER_RESTRICTED");
+  });
+
+  it("routes business_advice directly for an operator holding channel.read", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "what should we improve in the next month",
+      permissions: ["channel.read"],
+      model: { kind: "stub", intent: "business_advice", confidence: "high", missing: [] },
+    });
+    expect(out.intent).toBe("business_advice");
+    expect(out.questionnaire).toBeNull();
+    expect(out.reasonCodes).toContain("MODEL_PROPOSAL_ACCEPTED");
+  });
+
+  it("routes channel_assessment directly for an operator holding channel.read", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "assess our Talabat performance",
+      permissions: ["channel.read"],
+      model: { kind: "stub", intent: "channel_assessment", confidence: "high", missing: [] },
+    });
+    expect(out.intent).toBe("channel_assessment");
+    expect(out.questionnaire).toBeNull();
+  });
+
+  it("routes report_intake directly for an operator holding report.upload", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "here is our monthly report",
+      permissions: ["report.upload"],
+      model: { kind: "stub", intent: "report_intake", confidence: "high", missing: [] },
+    });
+    expect(out.intent).toBe("report_intake");
+    expect(out.questionnaire).toBeNull();
+  });
+
+  it("gates report_intake behind report.upload", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "here is our monthly report",
+      permissions: ["channel.read"],
+      model: { kind: "stub", intent: "report_intake", confidence: "high", missing: [] },
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.reasonCodes).toContain("REPORT_REQUIRES_UPLOAD");
+  });
+
+  it("asks for clarification on low-confidence channel assessment instead of guessing", () => {
+    const out = routeAgentMessage({
+      ...baseInput,
+      text: "hmm that channel thing",
+      permissions: ["channel.read"],
+      model: { kind: "stub", intent: "channel_assessment", confidence: "low", missing: [] },
+    });
+    expect(out.intent).toBe("answer_memory");
+    expect(out.questionnaire?.kind).toBe("clarify");
+  });
+
   it("fails closed to a memory answer with no questionnaire when the resolver returns garbage", () => {
     const out = routeAgentMessage(
       { ...baseInput, text: "keep watching competitors", model: { kind: "live" } },

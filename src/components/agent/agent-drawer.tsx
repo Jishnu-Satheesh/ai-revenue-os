@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
 import {
@@ -35,6 +41,19 @@ import type {
 } from "@/modules/agent-chat/application/campaign-advise";
 import type { WatchTapOutcome } from "@/modules/agent-chat/application/executors";
 import { AgentThreadSteps, type AgentStepPhase } from "@/components/agent/agent-thread-steps";
+import { AgentTurnPanel } from "@/components/agent/agent-turn-markers";
+import {
+  agentTurnIsTerminal,
+  governedStartSchema,
+  mergeAgentTurnBundles,
+  parseAgentTurnBundles,
+  type AgentTurnBundle,
+} from "@/components/agent/agent-governed-client";
+import {
+  uploadAgentReport,
+  type AgentReportUploadSession,
+} from "@/components/agent/agent-attachment-upload";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -66,6 +85,10 @@ import {
   type AgentDrawerGeometry,
 } from "@/components/agent/agent-placement";
 import type { AgentIntent } from "@/domain/agent-router/intents";
+import {
+  parseQuestionnaireState,
+  pendingQuestionnaireFromMessages,
+} from "@/modules/agent-chat/application/questionnaire-state";
 import type { RouterRole, QuestionnaireSpec } from "@/domain/agent-router/contracts";
 import {
   buildDispatchPayload,
@@ -79,7 +102,7 @@ import type {
 
 export type AgentDrawerView = "history" | "thread";
 
-export type PendingPrompt = { text: string; nonce: number };
+export type PendingPrompt = { text: string; nonce: number; file?: File };
 
 export type AgentRouteResult = {
   intent: AgentIntent;
@@ -271,8 +294,7 @@ const agentStreamEndSchema = z.object({
 });
 
 /** Honest note kept beside a dropped stream's partial text. */
-export const AGENT_STREAM_DROP_NOTE =
-  "The live answer stopped here — showing what arrived so far.";
+export const AGENT_STREAM_DROP_NOTE = "The live answer stopped here — showing what arrived so far.";
 
 /** Honest copy when the live answer stream never opens (G1). */
 export const AGENT_STREAM_OPEN_ERROR =
@@ -434,10 +456,7 @@ function isAnswersRowMessage(message: ThreadMessageView): boolean {
  * header text.
  */
 function summarizeAnswersBody(message: ThreadMessageView): string {
-  if (
-    typeof message.questionnaireAnswers === "object" &&
-    message.questionnaireAnswers !== null
-  ) {
+  if (typeof message.questionnaireAnswers === "object" && message.questionnaireAnswers !== null) {
     return formatAnswers(message.questionnaireAnswers as Record<string, unknown>);
   }
   const lines = (message.body ?? "").split("\n");
@@ -738,10 +757,7 @@ function WatchOneTapCard({
 
 function watchMarketLink(href: string) {
   return (
-    <a
-      className="font-medium text-primary underline-offset-4 hover:underline"
-      href={href}
-    >
+    <a className="font-medium text-primary underline-offset-4 hover:underline" href={href}>
       Open Market Intelligence
     </a>
   );
@@ -806,11 +822,13 @@ function watchReceipt(choice: AgentWatchChoice) {
       return (
         <>
           <p className="text-sm text-muted-foreground">
-            This change widens the watch scope, so it needs a Market Profile proposal first.
-            Nothing was changed.
+            This change widens the watch scope, so it needs a Market Profile proposal first. Nothing
+            was changed.
           </p>
           {additions.length > 0 ? (
-            <p className="text-xs text-muted-foreground">Proposed additions: {additions.join(", ")}.</p>
+            <p className="text-xs text-muted-foreground">
+              Proposed additions: {additions.join(", ")}.
+            </p>
           ) : null}
         </>
       );
@@ -862,8 +880,9 @@ export function AgentDrawer({
    * reload resets to the CSS defaults. Controlled when the shell passes
    * geometry + onGeometryChange, uncontrolled fallback otherwise.
    */
-  const [fallbackGeometry, setFallbackGeometry] =
-    useState<AgentDrawerGeometry>(AGENT_DRAWER_DEFAULT_GEOMETRY);
+  const [fallbackGeometry, setFallbackGeometry] = useState<AgentDrawerGeometry>(
+    AGENT_DRAWER_DEFAULT_GEOMETRY,
+  );
   const geometry = geometryProp ?? fallbackGeometry;
   // Pointer handlers resolve geometry through this mirror so a drag
   // spanning several moves never acts on a stale closure. Synced in an
@@ -890,10 +909,7 @@ export function AgentDrawer({
     };
   }, []);
 
-  function trackPointer(
-    onMove: (event: PointerEvent) => void,
-    onUp?: () => void,
-  ): void {
+  function trackPointer(onMove: (event: PointerEvent) => void, onUp?: () => void): void {
     dragCleanupRef.current?.();
     const handleMove = (event: PointerEvent): void => onMove(event);
     const handleUp = (): void => {
@@ -955,12 +971,7 @@ export function AgentDrawer({
     const viewportWidth = window.innerWidth;
     const widthLimited = clampDrawerWidth(startWidth - edgeDx, viewportWidth);
     const widthDx = startWidth - widthLimited;
-    const offset = clampDrawerOffset(
-      baseX + widthDx,
-      current.y,
-      viewportWidth,
-      window.innerHeight,
-    );
+    const offset = clampDrawerOffset(baseX + widthDx, current.y, viewportWidth, window.innerHeight);
     const appliedDx = offset.x - baseX;
     return { x: offset.x, width: clampDrawerWidth(startWidth - appliedDx, viewportWidth) };
   }
@@ -1071,6 +1082,13 @@ export function AgentDrawer({
   const [thread, setThread] = useState<ThreadSummary | null>(null);
   const [routeResult, setRouteResult] = useState<AgentRouteResult | null>(null);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [governedTurnActive, setGovernedTurnActive] = useState(false);
+  const uploadSessions = useRef(
+    new Map<string, { file: File; session: AgentReportUploadSession }>(),
+  );
+  const [uploads, setUploads] = useState<
+    Record<string, { percent: number; error: string | null; pending: boolean }>
+  >({});
   const [submittedAnswers, setSubmittedAnswers] = useState<Record<string, QuestionnaireAnswers>>(
     {},
   );
@@ -1115,6 +1133,94 @@ export function AgentDrawer({
   const canManageWatch = role !== "viewer" && permissions.includes("growth_intelligence.manage");
   const isViewer = role === "viewer";
 
+  const turnsKey = ["agent-turns", organizationId, threadId];
+  const turnPoll = useQuery({
+    queryKey: turnsKey,
+    queryFn: async () => {
+      const incoming = parseAgentTurnBundles(
+        await agentGetJson(`${base}/${threadId}/turns`, correlationId),
+      );
+      const previous = queryClient.getQueryData<AgentTurnBundle[]>(turnsKey) ?? [];
+      return mergeAgentTurnBundles(previous, incoming);
+    },
+    enabled: threadId !== null,
+    refetchOnWindowFocus: false,
+    retry: false,
+    refetchInterval: (query) =>
+      query.state.data?.some((bundle) => !agentTurnIsTerminal(bundle.turn))
+        ? AGENT_THREAD_POLL_MS
+        : false,
+  });
+  const turnBundles = turnPoll.data ?? [];
+  const refreshedFinals = useRef(new Set<string>());
+  const hydratedThread = useRef<string | null>(null);
+  const reportUpload = useMutation({
+    mutationFn: async ({ turnId }: { turnId: string }) => {
+      const entry = uploadSessions.current.get(turnId);
+      if (!entry) throw new Error("Select the same report again to continue uploading.");
+      return uploadAgentReport({
+        organizationId,
+        turnId,
+        file: entry.file,
+        session: entry.session,
+        idempotencyKey: `agent-attachment-intent:${turnId}`,
+        post: (path, body) => agentPostJson(path, body, correlationId),
+        onProgress: (percent) =>
+          setUploads((previous) => ({
+            ...previous,
+            [turnId]: { percent, error: null, pending: true },
+          })),
+      });
+    },
+    onMutate: ({ turnId }) =>
+      setUploads((previous) => ({
+        ...previous,
+        [turnId]: { percent: previous[turnId]?.percent ?? 0, error: null, pending: true },
+      })),
+    onSuccess: (_, { turnId }) => {
+      setUploads((previous) => ({
+        ...previous,
+        [turnId]: { percent: 100, error: null, pending: false },
+      }));
+      void turnPoll.refetch();
+      setAnnouncement("Report uploaded. Governed checks are running.");
+    },
+    onError: (error, { turnId }) => {
+      setUploads((previous) => ({
+        ...previous,
+        [turnId]: {
+          percent: previous[turnId]?.percent ?? 0,
+          error:
+            error instanceof Error ? error.message : "Report upload failed. Retry to continue.",
+          pending: false,
+        },
+      }));
+      setAnnouncement("Report upload stopped. The file is retained for retry.");
+    },
+  });
+
+  const challengeAnswers = useMutation({
+    mutationFn: async (input: {
+      turnId: string;
+      challengeId: string;
+      answers: QuestionnaireAnswers;
+    }) => {
+      await agentPostJson(
+        `${base}/${threadId}/turns/${input.turnId}/challenge-answers`,
+        {
+          challengeId: input.challengeId,
+          answers: input.answers,
+          idempotencyKey: `agent-challenge:${input.challengeId}`,
+        },
+        correlationId,
+      );
+    },
+    onSuccess: () => {
+      void turnPoll.refetch();
+      setAnnouncement("Your details were saved. The agent is continuing.");
+    },
+  });
+
   /**
    * Durable-read refresh (Slice A): the route/answers re-route persists the
    * assistant row server-side, but the POST responses carry no message
@@ -1127,11 +1233,25 @@ export function AgentDrawer({
    */
   async function refreshMessages(refreshThreadId: string): Promise<void> {
     try {
-      const body = (await agentGetJson(
-        `${base}/${refreshThreadId}/messages?limit=50`,
-        correlationId,
-      )) as MessagesResponse;
-      const fetched = body.messages ?? [];
+      // Follow message pagination to the end: the route replays
+      // oldest-first pages, so a single first page would strand newer
+      // turns on long threads. Forward cursors stay stable under
+      // appends; the page cap bounds reopen cost on pathological
+      // threads while keeping every reachable page merged by id.
+      const fetched: MessagesResponse["messages"] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 10; page += 1) {
+        const query = cursor
+          ? `messages?limit=50&cursor=${encodeURIComponent(cursor)}`
+          : "messages?limit=50";
+        const body = (await agentGetJson(
+          `${base}/${refreshThreadId}/${query}`,
+          correlationId,
+        )) as MessagesResponse;
+        fetched.push(...(body.messages ?? []));
+        cursor = body.nextCursor ?? null;
+        if (!cursor) break;
+      }
       setMessages((previous) => {
         const seen = new Map(previous.map((message) => [message.id, message]));
         for (const message of fetched) {
@@ -1157,6 +1277,26 @@ export function AgentDrawer({
   }
 
   useEffect(() => {
+    if (!threadId || hydratedThread.current === threadId) return;
+    hydratedThread.current = threadId;
+    void refreshMessages(threadId);
+    // Loading stored messages also restores a drawer reopened directly.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId]);
+  useEffect(() => {
+    if (!threadId) return;
+    const missing = turnBundles.filter(
+      (bundle) =>
+        bundle.turn.finalMessageId && !refreshedFinals.current.has(bundle.turn.finalMessageId),
+    );
+    if (missing.length === 0) return;
+    for (const bundle of missing) refreshedFinals.current.add(bundle.turn.finalMessageId!);
+    void refreshMessages(threadId);
+    // The durable final ids are the refresh trigger, not local message changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [turnPoll.data, threadId]);
+
+  useEffect(() => {
     headingRef.current?.focus();
   }, []);
 
@@ -1166,6 +1306,7 @@ export function AgentDrawer({
   // current key may touch state, so an aborted stream's late frames land
   // nowhere. Unmount, reopen, new chat, and a newer send all abort.
   const streamKeyRef = useRef(0);
+  const streamTextRef = useRef("");
   const streamAbortRef = useRef<AbortController | null>(null);
   const [liveStream, setLiveStream] = useState<AgentLiveStream | null>(null);
   // Settle guarantee: state (not a ref) so the flag flip itself renders.
@@ -1183,7 +1324,10 @@ export function AgentDrawer({
     };
   }, []);
 
-  async function openAnswerStream(args: { threadId: string; userMessageId: string }): Promise<void> {
+  async function openAnswerStream(args: {
+    threadId: string;
+    userMessageId: string;
+  }): Promise<void> {
     abortLiveStream();
     const key = streamKeyRef.current + 1;
     streamKeyRef.current = key;
@@ -1191,6 +1335,7 @@ export function AgentDrawer({
     streamAbortRef.current = controller;
     const alive = (): boolean => streamKeyRef.current === key && !controller.signal.aborted;
     setLiveStream({ key, phase: "connecting", text: "" });
+    streamTextRef.current = "";
     try {
       const response = await fetch(
         `${base}/${args.threadId}/stream?messageId=${args.userMessageId}&page=${page}`,
@@ -1207,6 +1352,7 @@ export function AgentDrawer({
       await readAgentStream(response.body, controller.signal, {
         onToken: (text) => {
           if (!alive()) return;
+          streamTextRef.current += text;
           setLiveStream((previous) =>
             previous && previous.key === key
               ? { key, phase: "live", text: `${previous.text}${text}` }
@@ -1276,13 +1422,12 @@ export function AgentDrawer({
           if (!alive()) return;
           // Announce the stop only when partial text actually rendered —
           // an empty drop stays silent everywhere, like the visual.
-          let hadText = false;
+          const hadText = streamTextRef.current !== "";
           setLiveStream((previous) => {
             if (!previous || previous.key !== key) return previous;
             // Nothing arrived: fall back to the durable read silently —
             // the routed turn's row renders when it lands.
             if (previous.text === "") return null;
-            hadText = true;
             return { ...previous, phase: "dropped" };
           });
           if (hadText) {
@@ -1314,6 +1459,7 @@ export function AgentDrawer({
       threadMode: ThreadMode;
       threadId: string | null;
       nonce: number;
+      file?: File;
     }) => {
       // Slice C M8: keys derive from the prompt nonce, not from a fresh
       // uuid per attempt — a retried send replays instead of minting a
@@ -1340,6 +1486,35 @@ export function AgentDrawer({
         },
         correlationId,
       )) as { message: ThreadMessageView };
+      setMessages((previous) => {
+        const confirmed = previous.filter((message) => message.id !== `optimistic:${vars.nonce}`);
+        return confirmed.some((message) => message.id === appended.message.id)
+          ? confirmed
+          : [...confirmed, appended.message];
+      });
+      const governed = governedStartSchema.parse(
+        await agentPostJson(
+          `${base}/${tid}/turns`,
+          {
+            messageId: appended.message.id,
+            idempotencyKey: `${correlationId}:${vars.nonce}:turn`,
+            ...(vars.file ? { hasAttachment: true } : {}),
+          },
+          correlationId,
+        ),
+      );
+      if (governed.handled) {
+        return {
+          thread: governed.thread as ThreadSummary,
+          userMessage: appended.message,
+          result: null,
+          turn: governed.turn,
+        };
+      }
+      if (vars.file)
+        throw new Error(
+          "Report attachments are unavailable for this conversation. Your message was saved.",
+        );
       const routed = (await agentPostJson(
         `${base}/${tid}/route?page=${page}`,
         {
@@ -1354,6 +1529,7 @@ export function AgentDrawer({
         thread: ThreadSummary;
       };
       return {
+        turn: null,
         thread: routed.thread,
         userMessage: appended.message,
         result: {
@@ -1368,6 +1544,7 @@ export function AgentDrawer({
       // Settle guarantee: a new send starts a clean turn — the previous
       // turn's end-received flag must not stick the next turn done.
       setEndReceived(false);
+      setGovernedTurnActive(false);
       // G1 honest send: the user's bubble renders on mutate, before the
       // server round-trip lands. The optimistic row carries the nonce client
       // key, so the confirm below replaces exactly one row, never doubling.
@@ -1391,7 +1568,7 @@ export function AgentDrawer({
       onViewChange("thread");
       return { optimisticId };
     },
-    onSuccess: ({ thread: row, userMessage, result }, vars, context) => {
+    onSuccess: ({ thread: row, userMessage, result, turn: governedTurn }, vars, context) => {
       setThread(row);
       // Reconcile by the nonce client key: the optimistic row is replaced
       // by the durable row, and a durable row already present (e.g. landed
@@ -1411,13 +1588,33 @@ export function AgentDrawer({
       setWatchChoice(null);
       setDispatchOutcome(null);
       setDispatchError(null);
-      setWatchTurn(result.intent === "watch");
+      setWatchTurn(result?.intent === "watch");
       onViewChange("thread");
-      setAnnouncement(`Routed to ${result.intent}.`);
-      // The answer streams live from here: tokens render into the thread
-      // bubble and the `end` marker swaps to the durable row. The stream
-      // opens once per send — never on reconnect or reopen.
-      void openAnswerStream({ threadId: row.id, userMessageId: userMessage.id });
+      if (governedTurn) {
+        setGovernedTurnActive(true);
+        queryClient.setQueryData<AgentTurnBundle[]>(
+          ["agent-turns", organizationId, row.id],
+          (previous) =>
+            mergeAgentTurnBundles(previous ?? [], [
+              { turn: governedTurn as AgentTurnBundle["turn"], events: [], attachments: [] },
+            ]),
+        );
+        void queryClient.invalidateQueries({ queryKey: ["agent-turns", organizationId, row.id] });
+        if (vars.file) {
+          uploadSessions.current.set(governedTurn.id, {
+            file: vars.file,
+            session: { uploaded: false },
+          });
+          reportUpload.mutate({ turnId: governedTurn.id });
+        }
+        setAnnouncement("The agent is working on your request.");
+      } else {
+        setAnnouncement(`Routed to ${result?.intent}.`);
+        // The answer streams live from here: tokens render into the thread
+        // bubble and the `end` marker swaps to the durable row. The stream
+        // opens once per send — never on reconnect or reopen.
+        void openAnswerStream({ threadId: row.id, userMessageId: userMessage.id });
+      }
       void queryClient.invalidateQueries({ queryKey: ["agent-threads", organizationId] });
     },
     onError: (error) => {
@@ -1576,7 +1773,14 @@ export function AgentDrawer({
     }
     if (!sendPending) {
       const next = queueRef.current.shift();
-      if (next) send.mutate({ text: next.text, threadMode: mode, threadId, nonce: next.nonce });
+      if (next)
+        send.mutate({
+          text: next.text,
+          threadMode: mode,
+          threadId,
+          nonce: next.nonce,
+          file: next.file,
+        });
     }
     // The pump reads the latest render values through its deps; callbacks
     // are intentionally not deps (they are stable enough per render and the
@@ -1626,11 +1830,24 @@ export function AgentDrawer({
 
   const reopen = useMutation({
     mutationFn: async (target: ThreadSummary) => {
-      const body = (await agentGetJson(
-        `${base}/${target.id}/messages?limit=50`,
-        correlationId,
-      )) as MessagesResponse;
-      return { target, messages: body.messages };
+      // Same oldest-first paging as the refresh path: follow cursors so
+      // reopening a long thread restores every turn instead of stranding
+      // newer messages past the first page.
+      const messages: MessagesResponse["messages"] = [];
+      let cursor: string | null = null;
+      for (let page = 0; page < 10; page += 1) {
+        const query = cursor
+          ? `messages?limit=50&cursor=${encodeURIComponent(cursor)}`
+          : "messages?limit=50";
+        const body = (await agentGetJson(
+          `${base}/${target.id}/${query}`,
+          correlationId,
+        )) as MessagesResponse;
+        messages.push(...(body.messages ?? []));
+        cursor = body.nextCursor ?? null;
+        if (!cursor) break;
+      }
+      return { target, messages };
     },
     onMutate: () => {
       // Navigate first, load second: the thread view opens immediately with
@@ -1638,6 +1855,7 @@ export function AgentDrawer({
       // Reopens never resume a stream — any live one dies here. The reloaded
       // turn starts clean: a leaked end flag must not stick it done.
       setEndReceived(false);
+      setGovernedTurnActive(false);
       abortLiveStream();
       setLiveStream(null);
       onViewChange("thread");
@@ -1650,7 +1868,10 @@ export function AgentDrawer({
       onThreadChange(target.id);
       setThread(target);
       setMessages(reopened);
-      setRouteResult(null);
+      const pending = pendingQuestionnaireFromMessages(reopened);
+      setRouteResult(pending && pending.organizationId === organizationId && pending.threadId === target.id
+        ? { intent: pending.intent, confidence: "high", reasonCodes: [], questionnaire: pending.spec }
+        : null);
       setSendError(null);
       setSubmittedAnswers({});
       setDismissedCards([]);
@@ -1659,7 +1880,7 @@ export function AgentDrawer({
       setWatchChoice(null);
       setDispatchOutcome(null);
       setDispatchError(null);
-      setWatchTurn(false);
+      setWatchTurn(pending?.intent === "watch");
       onViewChange("thread");
       setAnnouncement(`Reopened ${target.title}.`);
     },
@@ -1673,6 +1894,7 @@ export function AgentDrawer({
     onThreadChange(null);
     // A fresh conversation starts clean: no leaked end flag.
     setEndReceived(false);
+    setGovernedTurnActive(false);
     abortLiveStream();
     setLiveStream(null);
     setMessages([]);
@@ -1700,7 +1922,17 @@ export function AgentDrawer({
   // green tick). Failure outranks routing so no turn sticks on Thinking and
   // every spinner stops.
   const pollError = threadPoll.isError ? AGENT_REFRESH_ERROR : null;
-  const turnFailure = sendError ?? pollError;
+  const currentGovernedTurn = turnBundles.find(
+    (bundle) =>
+      bundle.turn.userMessageId ===
+      [...messages].reverse().find((message) => message.role === "user")?.id,
+  )?.turn;
+  const turnFailure =
+    sendError ??
+    pollError ??
+    (currentGovernedTurn?.status === "failed"
+      ? "This request stopped. Your conversation and actions are saved."
+      : null);
   // The durable swap stays the finish line: once an assistant row exists
   // the final bubble has landed, so steps go terminal even while the poll
   // still reads `running`; a `running` thread with no assistant row yet is
@@ -1712,11 +1944,13 @@ export function AgentDrawer({
   // Gated on routeResult/liveThread so a leaked flag can never prematurely
   // settle an unrouted turn; resets on send/reopen/new-chat keep next turns
   // clean. Failures still error first; pre-end streaming still routes.
-  const endReceivedForTurn =
-    endReceived && (routeResult !== null || liveThread !== null);
-  const phase: AgentStepPhase =
-    turnFailure
-      ? "error"
+  const endReceivedForTurn = endReceived && (routeResult !== null || liveThread !== null);
+  const phase: AgentStepPhase = turnFailure
+    ? "error"
+    : currentGovernedTurn
+      ? agentTurnIsTerminal(currentGovernedTurn)
+        ? "done"
+        : "routing"
       : endReceivedForTurn
         ? "done"
         : send.isPending || streamActive
@@ -1724,8 +1958,8 @@ export function AgentDrawer({
           : routeResult || liveThread
             ? liveThread?.status === "running" && !turnSettled
               ? "routing"
-            : "done"
-          : "idle";
+              : "done"
+            : "idle";
 
   // A converged duplicate envelope carries the live card: it replaces the
   // re-route's questionnaire (fresh resume key, so it is not hidden as
@@ -1759,11 +1993,7 @@ export function AgentDrawer({
     watchChoice?.outcome === "view_existing";
   const cardAnswerable = cardVisible && !sendError;
   const showWatchFallback =
-    watchTurn &&
-    threadId !== null &&
-    canManageWatch &&
-    !oneTapSucceeded &&
-    !cardAnswerable;
+    watchTurn && threadId !== null && canManageWatch && !oneTapSucceeded && !cardAnswerable;
 
   // Duplicate-watch gating (spec section 12). Viewing the existing
   // watch and cancelling stay free for every member; Update-fields needs
@@ -1838,11 +2068,7 @@ export function AgentDrawer({
               // stranded it half off-screen). mb-2 keeps the attached-but-
               // not gap; flow follows the bar height on its own.
               "dark mb-2 flex w-full justify-center"
-            : cn(
-                "dark fixed right-0 flex justify-center px-4",
-                bottomOffset,
-                sidebarOffset,
-              )
+            : cn("dark fixed right-0 flex justify-center px-4", bottomOffset, sidebarOffset)
         }
       >
         <div
@@ -1960,7 +2186,7 @@ export function AgentDrawer({
                 </div>
               ) : null}
               {messages.map((message) =>
-                isAnswersRowMessage(message) ? (
+                message.role === "system_note" && parseQuestionnaireState(message.body) ? null : isAnswersRowMessage(message) ? (
                   <Marker key={message.id}>
                     <MarkerIcon aria-label="Answers saved">
                       <CheckIcon aria-hidden="true" />
@@ -1976,32 +2202,69 @@ export function AgentDrawer({
                 ) : message.role === "assistant" ? (
                   <AgentResponseMessage key={message.id} message={message} />
                 ) : (
-                  <div
-                    key={message.id}
-                    className={cn(
-                      "flex",
-                      message.role === "user" ? "justify-end" : "justify-start",
-                    )}
-                  >
-                    <Card
+                  <div key={message.id} className="flex flex-col gap-3">
+                    <div
                       className={cn(
-                        "max-w-[90%]",
-                        message.role === "user" ? "border-white/10 bg-white/10 text-zinc-100" : "",
+                        "flex",
+                        message.role === "user" ? "justify-end" : "justify-start",
                       )}
                     >
-                      <CardContent className="text-sm break-words whitespace-pre-wrap">
-                        {message.body ?? "(empty message)"}
-                      </CardContent>
-                    </Card>
+                      <Card
+                        className={cn(
+                          "max-w-[90%]",
+                          message.role === "user"
+                            ? "border-white/10 bg-white/10 text-zinc-100"
+                            : "",
+                        )}
+                      >
+                        <CardContent className="text-sm break-words whitespace-pre-wrap">
+                          {message.body ?? "(empty message)"}
+                        </CardContent>
+                      </Card>
+                    </div>
+                    {turnBundles
+                      .filter((bundle) => bundle.turn.userMessageId === message.id)
+                      .map((bundle) => (
+                        <AgentTurnPanel
+                          key={bundle.turn.id}
+                          organizationId={organizationId}
+                          bundle={bundle}
+                          viewer={isViewer}
+                          upload={uploads[bundle.turn.id]}
+                          challengePending={
+                            challengeAnswers.isPending &&
+                            challengeAnswers.variables?.turnId === bundle.turn.id
+                          }
+                          challengeError={
+                            challengeAnswers.isError &&
+                            challengeAnswers.variables?.turnId === bundle.turn.id
+                              ? challengeAnswers.error instanceof Error
+                                ? challengeAnswers.error.message
+                                : "These details could not be saved. Retry to continue."
+                              : null
+                          }
+                          onAnswers={(challengeId, answers) =>
+                            challengeAnswers.mutate({
+                              turnId: bundle.turn.id,
+                              challengeId,
+                              answers,
+                            })
+                          }
+                          onRetry={() => reportUpload.mutate({ turnId: bundle.turn.id })}
+                          onReselect={(file) => {
+                            uploadSessions.current.set(bundle.turn.id, {
+                              file,
+                              session: { uploaded: false },
+                            });
+                            reportUpload.mutate({ turnId: bundle.turn.id });
+                          }}
+                        />
+                      ))}
                   </div>
                 ),
               )}
               {liveStream?.phase === "connecting" ? (
-                <div
-                  role="status"
-                  aria-label="Loading live answer"
-                  className="flex flex-col gap-2"
-                >
+                <div role="status" aria-label="Loading live answer" className="flex flex-col gap-2">
                   <Skeleton className="h-4 w-full" />
                   <Skeleton className="h-4 w-11/12" />
                   <Skeleton className="h-4 w-3/5" />
@@ -2015,7 +2278,28 @@ export function AgentDrawer({
                   liveNote={liveStream.phase === "dropped" ? AGENT_STREAM_DROP_NOTE : null}
                 />
               ) : null}
+              {turnPoll.isError ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    Could not refresh the agent actions. Your conversation is retained.
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void turnPoll.refetch()}
+                    >
+                      Retry action refresh
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              ) : null}
               {!reopen.isPending &&
+              !governedTurnActive &&
+              !turnBundles.some(
+                (bundle) =>
+                  bundle.turn.userMessageId ===
+                  [...messages].reverse().find((message) => message.role === "user")?.id,
+              ) &&
               (send.isPending || streamActive || routeResult || liveThread || turnFailure) ? (
                 <AgentThreadSteps
                   phase={phase}
@@ -2084,12 +2368,10 @@ export function AgentDrawer({
               ) : null}
               {showWatchFallback ? (
                 <div className="flex flex-col gap-1">
-                  <p className="text-xs font-medium text-muted-foreground">
-                    Manual watch fallback
-                  </p>
+                  <p className="text-xs font-medium text-muted-foreground">Manual watch fallback</p>
                   <p className="text-xs text-muted-foreground">
-                    One-tap didn&apos;t finish this watch — the form below posts directly
-                    to dispatch.
+                    One-tap didn&apos;t finish this watch — the form below posts directly to
+                    dispatch.
                   </p>
                   <WatchDispatchForms
                     defaultProjectId={liveThread?.linkedResearchProjectId ?? null}

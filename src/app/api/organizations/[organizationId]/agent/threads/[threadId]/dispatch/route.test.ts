@@ -30,7 +30,7 @@ vi.mock("@/modules/agent-chat/infrastructure/thread-repository", async (importOr
   return { ...actual, createThreadRepository: mocks.createRepo };
 });
 vi.mock("@/modules/agent-chat/application/api", () => ({
-  createAgentContextReaders: () => ({ getMarketProfile: mocks.getMarketProfile }),
+  createAgentResearchProfileResolver: () => mocks.getMarketProfile,
 }));
 vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: mocks.publish }),

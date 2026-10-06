@@ -75,11 +75,11 @@ export function parseAgentChatOrganizationIds(value: string | undefined): Set<st
 /**
  * Whether this organization sees the universal agent shell and its routes.
  *
- * Unset means off for everyone (default off). Rollback is removing an ID
- * from this list: classification writes nothing durable beyond threads and
- * messages, and research/watch/campaign lanes keep their own fences, so
- * turning the flag off leaves no run to unwind — in-flight drawer polls
- * simply start failing closed until the flag returns.
+ * Unset means off for everyone (default off). Removing an ID stops new
+ * requests and worker admission after the environment change is deployed.
+ * Durable turns already in progress must be drained or reconciled under
+ * their source permissions and lease fences; disabling the flag does not
+ * cancel them. Retention continues to preserve content-free audit history.
  */
 export function isAgentChatEnabled(
   organizationId: string,

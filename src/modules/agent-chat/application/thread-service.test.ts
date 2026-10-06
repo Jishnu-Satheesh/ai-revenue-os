@@ -1,8 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("server-only", () => ({}));
+import { signQuestionnaire, verifyQuestionnaire } from "@/modules/agent-chat/infrastructure/questionnaire-signature";
+import { encodeQuestionnaireState } from "@/modules/agent-chat/application/questionnaire-state";
+beforeEach(() => vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "server-test-secret"));
+afterEach(() => vi.unstubAllEnvs());
 
 import {
   createResearchAutoSeams,
-  createThreadService,
+  createThreadService as createUnwiredThreadService,
   findTurnAssistantRow,
   mintResearchAutoAttestation,
   permissionsForRole,
@@ -51,7 +56,7 @@ function mockThreads(overrides: Partial<Record<string, ReturnType<typeof vi.fn>>
 }
 
 describe("thread service", () => {
-  it("refuses thread creation for viewers before touching persistence", async () => {
+  it("refuses deepthink creation for viewers before touching persistence", async () => {
     const threads = mockThreads();
     const service = createThreadService({ threads });
     await expect(
@@ -60,7 +65,7 @@ describe("thread service", () => {
         actorId: "u",
         role: "viewer",
         idempotencyKey: "k-1234567890123456",
-        mode: "quick",
+        mode: "deepthink",
       }),
     ).rejects.toMatchObject({ code: "AUTHORIZATION_ERROR" });
     expect(threads.createThreadKeyed).not.toHaveBeenCalled();
@@ -210,12 +215,94 @@ describe("thread service", () => {
   });
 
   it("derives permissions from the role, never from client claims", () => {
-    expect(permissionsForRole("viewer")).toEqual([]);
+    expect(permissionsForRole("viewer")).toEqual(["channel.read"]);
     expect(permissionsForRole("operator")).toEqual([
       "growth_intelligence.manage",
       "campaign.create",
+      "channel.read",
+      "report.upload",
     ]);
-    expect(permissionsForRole("owner")).toEqual(["growth_intelligence.manage", "campaign.create"]);
+    expect(permissionsForRole("owner")).toEqual([
+      "growth_intelligence.manage",
+      "campaign.create",
+      "channel.read",
+      "report.upload",
+    ]);
+  });
+
+  it("folds a ready channel assessment into advice with the exact audit link", async () => {
+    const threads = mockThreads();
+    const assessChannel = vi.fn(async () => ({
+      status: "ready" as const,
+      channelId: "11111111-1111-4111-8111-111111111111",
+      channelName: "Talabat",
+      runId: "run-1",
+      auditHref: "/organizations/o/channels/11111111-1111-4111-8111-111111111111?runId=run-1",
+      summary: "2 findings. recommendation: Fix photos. Detail. First step: reshoot top items.",
+      evidenceRefs: ["f1"],
+      period: { start: "2026-08-01", end: "2026-08-31" },
+      periodSwitch: null,
+    }));
+    const service = createThreadService({
+      threads,
+      proposeRouter: async () => ({ intent: "channel_assessment", confidence: "high", missing: [] }),
+      loadAdviceContext: async () => ({ entries: [], limitations: [], periodSwitch: null }),
+      assessChannel,
+      synthesizeAnswer: async () => ({
+        body: "Assessment answer.",
+        citations: [],
+        limitations: [],
+        estimates: [],
+      }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+    expect(out.intent).toBe("channel_assessment");
+    expect(assessChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ organizationId: "o", question: expect.any(String) }),
+    );
+    expect(out.reasonCodes).toContain("CHANNEL_ANALYSIS_REUSED");
+    expect(out.answer?.draft.links).toEqual([
+      {
+        label: "Open exact channel audit",
+        href: "/organizations/o/channels/11111111-1111-4111-8111-111111111111?runId=run-1",
+      },
+    ]);
+  });
+
+  it("degrades honestly when channel assessment fails instead of failing the route", async () => {
+    const threads = mockThreads();
+    const service = createThreadService({
+      threads,
+      proposeRouter: async () => ({ intent: "channel_assessment", confidence: "high", missing: [] }),
+      loadAdviceContext: async () => ({ entries: [], limitations: [], periodSwitch: null }),
+      assessChannel: async () => {
+        throw new Error("reader down");
+      },
+      synthesizeAnswer: async () => ({
+        body: "General answer.",
+        citations: [],
+        limitations: [],
+        estimates: [],
+      }),
+    });
+    const out = await service.routeLatest({
+      organizationId: "o",
+      actorId: "u",
+      role: "operator",
+      threadId: "t1",
+      page: "overview",
+    });
+    expect(out.intent).toBe("channel_assessment");
+    // No pack readers are bound in this unit scope, so the writer takes
+    // its honest null-pack fallback — the point is the route survives a
+    // dead assessment reader with an answer instead of an error.
+    expect(out.answer?.draft.body.length).toBeGreaterThan(0);
   });
 
   it("mints a stable opaque digest per message", () => {
@@ -281,6 +368,54 @@ describe("thread service", () => {
     expect(publish).toHaveBeenCalledTimes(1);
   });
 
+  it("binds the answer pack to the exact persisted question's resolved branch", async () => {
+    const branchId = "20000000-0000-4000-8000-000000000002";
+    const resolveContextScope = vi.fn(async () => ({ kind: "branch" as const, branchId }));
+    const getMarketProfile = vi.fn(async (scope: { branchId?: string }) => scope.branchId === branchId
+      ? { status: "current", versionId: "version", digest: "profile-digest", branchId }
+      : { status: "missing", reasonCode: "PROFILE_NOT_CONFIRMED" });
+    const resolveBranchTimezone = vi.fn(async () => "Asia/Dubai");
+    const synthesizeIdeas = vi.fn(async () => ({ ideas: [
+      { title: "A", description: "A", sourceIds: ["version"] },
+      { title: "B", description: "B", sourceIds: ["version"] },
+      { title: "C", description: "C", sourceIds: ["version"] },
+    ], recommendedIndex: 0 }));
+    const service = createThreadService({ threads: mockThreads(), resolveContextScope,
+      contextReaders: { getMarketProfile, resolveBranchTimezone }, synthesizeIdeas,
+      proposeRouter: async () => ({ intent: "campaign_advice", confidence: "high", missing: [] }) });
+    const result = await service.routeLatest({ organizationId: "o", actorId: "u", role: "operator", threadId: "t1" });
+    expect(resolveContextScope).toHaveBeenCalledWith({ organizationId: "o", question: MESSAGE.body });
+    expect(getMarketProfile).toHaveBeenCalledWith({ organizationId: "o", branchId });
+    expect(resolveBranchTimezone).toHaveBeenCalledWith({ organizationId: "o", branchId });
+    expect(synthesizeIdeas).toHaveBeenCalledWith(expect.objectContaining({
+      sourceIds: ["version"],
+      prompt: expect.not.stringContaining("not confirmed"),
+    }));
+    expect(result.questionnaire?.kind).toBe("campaign_ideas");
+  });
+
+  it.each(["ambiguous", "unavailable", "throw"] as const)(
+    "does not bind an organization profile after %s branch resolution",
+    async (kind) => {
+      const getMarketProfile = vi.fn(async () => ({ status: "current", versionId: "wrong-profile", digest: "digest" }));
+      const synthesizeIdeas = vi.fn(async () => ({ ideas: [], recommendedIndex: 0 }));
+      const service = createThreadService({ threads: mockThreads(),
+        resolveContextScope: async () => {
+          if (kind === "throw") throw new Error("scope transport failed");
+          return { kind };
+        },
+        contextReaders: { getMarketProfile }, synthesizeIdeas,
+        proposeRouter: async () => ({ intent: "campaign_advice", confidence: "high", missing: [] }) });
+      await service.routeLatest({ organizationId: "o", actorId: "u", role: "operator", threadId: "t1" });
+      expect(getMarketProfile).not.toHaveBeenCalled();
+      expect(synthesizeIdeas).toHaveBeenCalledWith(expect.objectContaining({
+        sourceIds: [],
+        prompt: expect.stringContaining(kind === "ambiguous"
+          ? "does not match the requested branch" : "Market Profile unavailable"),
+      }));
+    },
+  );
+
   it("persists questionnaire answers server-side and re-routes (F2)", async () => {
     const publish = vi.fn(async () => {});
     const threads = mockThreads();
@@ -306,6 +441,12 @@ describe("thread service", () => {
         },
       ],
     };
+    vi.mocked(threads.listMessages).mockResolvedValue({ messages: [MESSAGE, {
+      ...MESSAGE, id: "card-1", role: "system_note", body: encodeQuestionnaireState(signQuestionnaire({
+        organizationId: "o", threadId: "t1", sourceMessageId: MESSAGE.id, intent: "answer_memory",
+        issuedAt: new Date().toISOString(), spec,
+      })),
+    }], nextCursor: null });
     const out = await service.submitAnswers({
       organizationId: "o",
       actorId: "u",
@@ -320,7 +461,6 @@ describe("thread service", () => {
       expect.objectContaining({
         role: "user",
         body: "[answers missing_fields]\nfrequency: weekly",
-        idempotencyKey: "answers-key-0000000000000001",
       }),
     );
     expect(out.answers).toEqual({ frequency: "weekly" });
@@ -964,6 +1104,18 @@ describe("zero-click auto-run research (B3)", () => {
 });
 
 describe("research auto seams (B3)", () => {
+  it("retains an explicitly resolved branch through the transport projection", async () => {
+    const branchId = "b0000000-0000-4000-8000-000000000000";
+    const resolveProfile = vi.fn(async () => ({ status: "current", versionId: "mp-v9", digest: "digest-9", branchId }));
+    const triggerResearchRun = vi.fn(async () => ({ runId: "run_branch" }));
+    const seams = createResearchAutoSeams({ triggerResearchRun, readers: {}, resolveProfile });
+    expect(await seams.resolveProfilePointer?.({ organizationId: "o", question: "Research Jumeirah" }))
+      .toEqual({ versionId: "mp-v9", digest: "digest-9", branchId });
+    expect(resolveProfile).toHaveBeenCalledWith({ organizationId: "o", question: "Research Jumeirah" });
+    await seams.triggerResearchOnce?.({ organizationId: "o", actorId: "u", threadId: "t1", messageDigest: "digest",
+      profileVersionId: "mp-v9", profileDigest: "digest-9", branchId, correlationId: "c", idempotencyKey: "long-enough-key-0001" });
+    expect(triggerResearchRun).toHaveBeenCalledWith(expect.objectContaining({ branchId }));
+  });
   it("maps the trigger payload and resolves the bound pointer", async () => {
     const triggerResearchRun = vi.fn(async () => ({ runId: "run_seam_1" }));
     const seams = createResearchAutoSeams({
@@ -1051,3 +1203,7 @@ describe("findTurnAssistantRow (G3 turn scope)", () => {
     );
   });
 });
+
+function createThreadService(deps: Parameters<typeof createUnwiredThreadService>[0]) {
+  return createUnwiredThreadService({ questionnaireAuthority: { sign: signQuestionnaire, verify: verifyQuestionnaire }, ...deps });
+}

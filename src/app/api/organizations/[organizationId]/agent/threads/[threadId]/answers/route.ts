@@ -1,7 +1,8 @@
 import { tasks } from "@trigger.dev/sdk";
 import { z } from "zod";
 
-import { questionnaireSpecSchema } from "@/domain/agent-router/contracts";
+import { questionnaireSpecSchema, type QuestionnaireItem } from "@/domain/agent-router/contracts";
+import { IdempotencyConflictError } from "@/domain/agent-chat/errors";
 import { hasOrganizationPermission } from "@/domain/access/permissions";
 import { briefRevisionSchema } from "@/domain/growth-intelligence/brief";
 import { researchProjectScheduleSchema } from "@/domain/growth-intelligence/project";
@@ -12,7 +13,12 @@ import { createEventPublisher } from "@/domain/events/publisher";
 import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { createLightModelProvider } from "@/modules/agent-router/infrastructure/light-model-provider";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
-import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
+import { createAgentContextReaders, createAgentQuestionnaireAuthority, createAgentResearchProfileResolver, createAgentWatchProjectSeams, resolveAgentContextScope } from "@/modules/agent-chat/application/api";
+import { bindQuestionnaireToMessage, watchContinuationAnswersSchema } from "@/modules/agent-chat/application/questionnaire-state";
+import { resolveResearchBranchScope } from "@/modules/agent-chat/application/research-scope";
+import { loadAgentAdviceContext } from "@/modules/agent-chat/application/advice-context-reader";
+import { encodeAnswerBody } from "@/modules/agent-chat/application/answer-writer";
+import { assessChannelForAgentRequest } from "@/modules/agent-chat/application/channel-assessment-adapter";
 import {
   createResearchAutoSeams,
   createThreadService,
@@ -364,6 +370,9 @@ export async function POST(
 
     const body = submitAnswersBodySchema.parse(await request.json().catch(() => ({})));
     const spec = questionnaireSpecSchema.parse(body.spec);
+    if (body.resumeKey !== spec.resumeKey) {
+      throw new DomainError("VALIDATION_ERROR", "This action card does not match the submitted request.");
+    }
     // Watch dispatch fence (spec section 12): answers that drive watch
     // create/update carry the duplicate_watch card, and creating or
     // changing a watch needs growth_intelligence.manage. Checked by grant
@@ -386,6 +395,7 @@ export async function POST(
 
     const threadsRepo = createThreadRepository(agentPersistenceFor(context.supabase));
     const service = createThreadService({
+      questionnaireAuthority: createAgentQuestionnaireAuthority(),
       threads: threadsRepo,
       events: createEventPublisher(),
       proposeRouter: async (args) => createLightModelProvider().propose({ ...args, correlationId }),
@@ -393,10 +403,33 @@ export async function POST(
       // like the classify-only route does — no more placeholder digest
       // with its context-unavailable limitation on this path.
       contextReaders: createAgentContextReaders(context.supabase),
+      resolveContextScope: (input) => resolveAgentContextScope(context.supabase, input),
+      loadAdviceContext: (input) => loadAgentAdviceContext({
+        supabase: context.supabase,
+        organizationId: input.organizationId,
+        actorId: input.actorId,
+        role: input.role,
+        question: input.question,
+        correlationId,
+      }),
+      // Same governed assessment as the send path; re-routes replay the
+      // kept answer (service skips assessment on reuse) instead of
+      // spending a second analysis allowance.
+      assessChannel: (input) =>
+        assessChannelForAgentRequest({
+          supabase: context.supabase,
+          organizationId: input.organizationId,
+          actorId: input.actorId,
+          role: input.role,
+          question: input.question,
+          correlationId: input.correlationId,
+          allowDispatch: true,
+        }),
       // Task B3: the answers re-route auto-enqueues like a send, so it
       // carries the same research seams (Trigger transport plus the
       // authenticated readers).
       dispatchSeams: createResearchAutoSeams({
+        resolveProfile: createAgentResearchProfileResolver(context.supabase),
         triggerResearchRun: async (payload) => {
           const handle = await tasks.trigger<typeof agentResearchOnceTask>(
             "agent-chat.research-once",
@@ -405,6 +438,7 @@ export async function POST(
               actorId: payload.actorId,
               threadId: payload.threadId,
               messageDigest: payload.messageDigest,
+              ...(payload.branchId ? { branchId: payload.branchId } : {}),
               profileVersionId: payload.profileVersionId,
               profileDigest: payload.profileDigest,
               correlationId: payload.correlationId,
@@ -418,7 +452,8 @@ export async function POST(
       }),
       correlationId,
     });
-    const { message, replayed, answers, intent, confidence, reasonCodes, questionnaire, research } =
+    const { message, replayed, answers, intent, confidence, reasonCodes, questionnaire: routedQuestionnaire, research, sourceQuestion,
+      continuationAnswers } =
       await service.submitAnswers({
         organizationId,
         actorId: context.user.id,
@@ -429,6 +464,7 @@ export async function POST(
         idempotencyKey: body.idempotencyKey,
         ...(page ? { page } : {}),
       });
+    let questionnaire = routedQuestionnaire;
     logger.info("agent_thread.answers_submitted", {
       organizationId,
       threadId: rawParams.threadId,
@@ -466,7 +502,7 @@ export async function POST(
           organizationId,
           actorId: context.user.id,
           threadId: rawParams.threadId,
-          resumeKey: body.resumeKey,
+          resumeKey: spec.resumeKey,
           permissions: permissionsForRole(context.membership.role),
           opportunity:
             resolution.outcome === "bound"
@@ -524,6 +560,41 @@ export async function POST(
           },
         },
       );
+      if (ideaDraft.outcome === "brief_prefilled") {
+        const reasons = ideaDraft.reasonCodes.map((reason) => {
+          if (reason === "ADVICE_NO_OPPORTUNITY") return "There is no eligible opportunity for a governed draft.";
+          if (reason === "ADVICE_OPPORTUNITY_AMBIGUOUS") return "Several eligible opportunities are available; choose one before creating a governed draft.";
+          if (reason === "CAMPAIGN_REQUIRES_CREATE") return "Creating a governed draft requires campaign creation permission.";
+          return "A governed draft is unavailable for this idea right now.";
+        });
+        const title = ideaDraft.idea.title.replace(/\s+/g, " ");
+        const description = ideaDraft.idea.description.replace(/\s+/g, " ");
+        try {
+          await threadsRepo.appendMessageKeyed({
+            organizationId,
+            actorId: context.user.id,
+            threadId: rawParams.threadId,
+            role: "assistant",
+            body: encodeAnswerBody({
+              body: `${title} is available as an editable campaign brief.\n\n${description}\n\n${reasons.join(" ")} Open the brief to review and edit it.`,
+              citations: [], limitations: [], estimates: [],
+              links: [{ label: "Open editable campaign brief", href: ideaDraft.briefUrl }],
+            }),
+            idempotencyKey: buildThreadIdempotencyKey(rawParams.threadId, `${messageDigestFor({
+              threadId: rawParams.threadId, messageId: message.id, body: spec.resumeKey,
+            })}:editable-brief`),
+          });
+        } catch (error) {
+          // This saved link is historical information, never execution
+          // authority. Keep its first bytes if a retry's current source
+          // eligibility changes; every other persistence failure remains
+          // visible and retryable through the already-consumed card.
+          if (!(error instanceof IdempotencyConflictError)) throw error;
+          logger.info("agent_thread.brief_handoff_preserved", {
+            organizationId, threadId: rawParams.threadId, messageId: message.id, correlationId,
+          });
+        }
+      }
       logger.info("agent_thread.idea_draft_resolved", {
         organizationId,
         threadId: rawParams.threadId,
@@ -543,6 +614,7 @@ export async function POST(
     // and resumes the watch — nothing half-created.
     let watchChoice: WatchTapOutcome | null = null;
     if (spec.kind === "duplicate_watch" || (spec.kind === "missing_fields" && intent === "watch")) {
+      const watchAnswers = { ...continuationAnswers, ...answers };
       const rawChoice = spec.kind === "duplicate_watch" ? answers["choice"] : "create";
       if (
         rawChoice !== "view_existing" &&
@@ -557,20 +629,10 @@ export async function POST(
         watchChoice = { outcome: "cancelled" };
       } else {
         const projects = createAuthenticatedResearchProjectRepository(context.supabase);
-        const listed = await threadsRepo.listMessages({
-          organizationId,
-          threadId: rawParams.threadId,
-          limit: 20,
-        });
-        const ask = [...listed.messages]
-          .reverse()
-          .find(
-            (entry) =>
-              entry.role === "user" &&
-              (entry.body ?? "").trim().length > 0 &&
-              !(entry.body ?? "").startsWith("[answers "),
-          );
-        const question = ask?.body?.trim() || null;
+        const initializedWatch = createAgentWatchProjectSeams(context.supabase, projects);
+        // The verified card fixes the source position; an oldest-page read
+        // must never substitute an earlier question in a longer thread.
+        const question = watchAnswers["question"] || sourceQuestion;
         const { thread } = await service.getThread({
           organizationId,
           threadId: rawParams.threadId,
@@ -579,7 +641,7 @@ export async function POST(
         // Matching runs on the raw rows (they carry branchId); the mapped
         // candidates feed the executor's twin check, which needs less.
         const siblings = mapWatchSiblings(siblingRows);
-        const branchAnswer = answers["branch"]?.trim() ? answers["branch"].trim() : undefined;
+        let branchAnswer = watchAnswers["branch"]?.trim() || undefined;
         // Fresh and missing-fields creates always need the branch rows
         // (uuid check plus single-branch auto-bind); view and update only
         // resolve a branch when the card named one.
@@ -587,6 +649,10 @@ export async function POST(
         const branchRows = needBranches
           ? await readWatchBranchRows(context.supabase, organizationId)
           : [];
+        if (!branchAnswer && question) {
+          const namedBranch = resolveResearchBranchScope(question, branchRows);
+          if (namedBranch.kind === "branch") branchAnswer = namedBranch.branchId;
+        }
         const branchRes = branchAnswer
           ? resolveWatchBranchId(branchRows, branchAnswer)
           : null;
@@ -639,18 +705,18 @@ export async function POST(
               // a forged value fails the executor's Zod contract (400),
               // never a silent mis-dispatch.
               cardEdits: {
-                ...(answers["frequency"] ? { frequency: answers["frequency"] } : {}),
-                ...(answers["end_date"] ? { endDate: answers["end_date"] } : {}),
+                ...(watchAnswers["frequency"] ? { frequency: watchAnswers["frequency"] } : {}),
+                ...(watchAnswers["end_date"] ? { endDate: watchAnswers["end_date"] } : {}),
                 ...(branchRes && branchRes.ok ? { branchId: branchRes.branchId } : {}),
-                ...(answers["research_area"] ? { researchArea: answers["research_area"] } : {}),
-                ...(answers["competitors"] ? { competitorName: answers["competitors"] } : {}),
+                ...(watchAnswers["research_area"] ? { researchArea: watchAnswers["research_area"] } : {}),
+                ...(watchAnswers["competitors"] ? { competitorName: watchAnswers["competitors"] } : {}),
               } as WatchCardEdits,
               existingLinks,
             },
             {
               watchProjects: {
                 listActive: async () => siblings,
-                createKeyed: (input) => projects.createProject(input),
+                ...initializedWatch,
                 readProject: (readInput) => readWatchProjectRow(context.supabase, readInput),
                 readBrief: (readInput) => readWatchBriefDocument(context.supabase, readInput),
                 updateWatch: (input) => projects.updateProjectSchedule(input),
@@ -692,19 +758,38 @@ export async function POST(
           const prepared = prepareWatchCreate(
             {
               ...(question ? { question } : {}),
-              ...(answers["frequency"] ? { cadence: answers["frequency"] } : {}),
+              ...(watchAnswers["frequency"] ? { cadence: watchAnswers["frequency"] } : {}),
               ...(branchAnswer ? { branch: branchAnswer } : {}),
-              ...(answers["research_area"] ? { researchArea: answers["research_area"] } : {}),
-              ...(answers["competitors"] ? { competitorName: answers["competitors"] } : {}),
-              ...(answers["end_date"] ? { endDate: answers["end_date"] } : {}),
+              ...(watchAnswers["research_area"] ? { researchArea: watchAnswers["research_area"] } : {}),
+              ...(watchAnswers["competitors"] ? { competitorName: watchAnswers["competitors"] } : {}),
+              ...(watchAnswers["end_date"] ? { endDate: watchAnswers["end_date"] } : {}),
             },
             { branchRows, pack },
           );
           if (!prepared.ok) {
+            const items: QuestionnaireItem[] = [];
+            if (prepared.missing.includes("question")) items.push({ key: "question", label: "What should this watch investigate?", kind: "text", required: true });
+            if (prepared.missing.includes("branch")) items.push({ key: "branch", label: "Which branch is this watch for?",
+              kind: branchRows.length > 0 && branchRows.length <= 12 ? "single_select" : "text", required: true,
+              ...(branchRows.length > 0 && branchRows.length <= 12 ? { options: branchRows.map((branch) => ({ value: branch.id, label: branch.name.slice(0, 120) })) } : {}) });
+            if (prepared.missing.includes("researchArea")) items.push({ key: "research_area", label: "What area should the watch focus on?", kind: "text", required: true,
+              helpText: "Name the location or topic to monitor." });
+            if (!watchAnswers["end_date"]) items.push({ key: "end_date", label: "When should monitoring stop?",
+              kind: "date", required: false, helpText: "Optional. Leave empty to keep monitoring." });
+            items.push({ key: "confirm_watch", label: "Create this watch with these details?", kind: "confirm", required: true,
+              helpText: "Your earlier validated choices are kept. Confirm to create the watch." });
+            questionnaire = bindQuestionnaireToMessage({ kind: "missing_fields", title: "Complete this watch",
+              resumeKey: `router:watch:overview:${answerDigest}:scope`, items }, message.id);
+            const retained = watchContinuationAnswersSchema.parse(Object.fromEntries(
+              (Object.keys(watchContinuationAnswersSchema.shape) as Array<keyof z.infer<typeof watchContinuationAnswersSchema>>).flatMap((key) =>
+                watchAnswers[key] ? [[key, watchAnswers[key]]] : []),
+            ));
+            await service.saveQuestionnaire({ organizationId, actorId: context.user.id, threadId: rawParams.threadId,
+              sourceMessage: message, intent: "watch", spec: questionnaire, continuationAnswers: retained });
             watchChoice = {
               outcome: "needs_input",
               missing: prepared.missing,
-              copy: prepared.copy,
+              copy: "Complete the missing fields below, then confirm this watch.",
             };
           } else {
             const watchKey = buildThreadIdempotencyKey(
@@ -714,17 +799,7 @@ export async function POST(
             const createSeams = {
               watchProjects: {
                 listActive: async () => siblings,
-                createKeyed: (input: {
-                  organizationId: string;
-                  branchId: string;
-                  title: string;
-                  question: string;
-                  mode: "one-time" | "recurring";
-                  schedule?: z.infer<typeof researchProjectScheduleSchema>;
-                  actorId: string;
-                  idempotencyKey: string;
-                  scopeFingerprint: string;
-                }) => projects.createProject(input),
+                ...initializedWatch,
               },
               links: {
                 setThreadLinks: (linkInput: {
@@ -806,6 +881,15 @@ export async function POST(
         threadId: rawParams.threadId,
         correlationId,
       });
+      if (watchChoice?.outcome === "duplicate") {
+        watchChoice.card = bindQuestionnaireToMessage(watchChoice.card, message.id);
+        await service.saveQuestionnaire({ organizationId, actorId: context.user.id,
+          threadId: rawParams.threadId, sourceMessage: message, intent: "watch", spec: watchChoice.card,
+          continuationAnswers: watchContinuationAnswersSchema.parse(Object.fromEntries(
+            (Object.keys(watchContinuationAnswersSchema.shape) as Array<keyof z.infer<typeof watchContinuationAnswersSchema>>).flatMap((key) =>
+              watchAnswers[key] ? [[key, watchAnswers[key]]] : []),
+          )) });
+      }
     }
 
     return agentJsonResponse(
@@ -813,7 +897,7 @@ export async function POST(
         message,
         replayed,
         answers,
-        resumeKey: body.resumeKey,
+        resumeKey: spec.resumeKey,
         intent,
         // Slice C F2/M6: the re-route's fresh confidence + reason codes
         // travel in this response, so the drawer never renders the

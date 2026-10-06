@@ -5,6 +5,7 @@ import type { OrganizationRole } from "@/domain/organizations/types";
 import { z } from "zod";
 import {
   routerProposalSchema,
+  questionnaireSpecSchema,
   type QuestionnaireSpec,
   type RouterProposal,
 } from "@/domain/agent-router/contracts";
@@ -12,6 +13,9 @@ import { routeAgentMessage } from "@/modules/agent-router/application/router-ser
 import { DomainError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import type { ContextPack, ContextPackReaders } from "@/modules/agent-chat/application/context-pack";
+import { bindAgentContextScope, type AgentContextScope } from "./research-scope";
+import type { AgentAdviceContext } from "@/modules/agent-chat/application/advice-context";
+import type { ChannelAssessmentOutcome } from "@/modules/agent-chat/application/channel-assessment";
 import type {
   DispatchAction,
   DispatchCampaignAdvice,
@@ -48,6 +52,13 @@ import type {
   ThreadRepository,
   ThreadSummary,
 } from "@/modules/agent-chat/infrastructure/thread-repository";
+import {
+  encodeQuestionnaireState,
+  bindQuestionnaireToMessage,
+  parseQuestionnaireState,
+  type QuestionnairePayload,
+  type QuestionnaireState,
+} from "@/modules/agent-chat/application/questionnaire-state";
 
 /**
  * Agent thread service (spec sections 7-8).
@@ -73,6 +84,10 @@ export type RouterProposer = (args: {
 
 export type ThreadServiceDeps = {
   threads: ThreadRepository;
+  questionnaireAuthority?: {
+    sign: (payload: QuestionnairePayload) => QuestionnaireState;
+    verify: (state: QuestionnaireState, organizationId: string, threadId: string) => boolean;
+  };
   events?: EventPublisher;
   proposeRouter?: RouterProposer;
   correlationId?: string;
@@ -84,6 +99,33 @@ export type ThreadServiceDeps = {
    * absent, routing keeps the stable per-message placeholder.
    */
   contextReaders?: ContextPackReaders;
+  /** Exact persisted question resolves branch identity through tenant-bound source reads. */
+  resolveContextScope?: (input: {
+    organizationId: string;
+    question: string;
+  }) => Promise<AgentContextScope>;
+  /** Reads bounded source-owned advice under the current actor's grant. */
+  loadAdviceContext?: (input: {
+    organizationId: string;
+    actorId: string;
+    role: OrganizationRole;
+    question: string;
+    page: string;
+  }) => Promise<AgentAdviceContext>;
+  /**
+   * Channel assessment for `channel_assessment` routes (session-bound,
+   * permission-checked inside). Absent, the route answers from the advice
+   * context alone and names the missing assessment honestly. Never throws
+   * for assessment behavior: a failed read degrades to limitations, exactly
+   * like the advice seam above.
+   */
+  assessChannel?: (input: {
+    organizationId: string;
+    actorId: string;
+    role: OrganizationRole;
+    question: string;
+    correlationId: string;
+  }) => Promise<ChannelAssessmentOutcome>;
   /**
    * Answer synthesis seam (Slice A). Injected in tests; otherwise the
    * writer's env-gated default applies (deterministic internal-only draft
@@ -213,7 +255,8 @@ export type AgentDispatchSeams = {
   triggerWatchUpdate?: AgentDispatchTrigger;
   resolveProfilePointer?: (input: {
     organizationId: string;
-  }) => Promise<{ versionId: string; digest: string } | null>;
+    question?: string;
+  }) => Promise<{ versionId: string; digest: string; branchId?: string } | null>;
   resolveOpportunity?: (input: {
     organizationId: string;
     opportunityId: string;
@@ -306,6 +349,7 @@ const profilePointerSchema = z
     status: z.literal("current"),
     versionId: z.string().trim().min(1).max(200),
     digest: z.string().trim().min(1).max(256),
+    branchId: z.string().uuid().optional(),
   })
   .passthrough();
 
@@ -323,12 +367,14 @@ export function createResearchAutoSeams(input: {
     actorId: string;
     threadId: string;
     messageDigest: string;
+    branchId?: string;
     profileVersionId: string;
     profileDigest: string;
     correlationId: string;
     idempotencyKey: string;
   }) => Promise<{ runId: string }>;
   readers: { getMarketProfile?: (input: { organizationId: string }) => Promise<unknown> };
+  resolveProfile?: (input: { organizationId: string; question?: string }) => Promise<unknown>;
 }): Pick<AgentDispatchSeams, "triggerResearchOnce" | "resolveProfilePointer"> {
   return {
     triggerResearchOnce: async (payload) =>
@@ -337,21 +383,25 @@ export function createResearchAutoSeams(input: {
         actorId: payload.actorId as string,
         threadId: payload.threadId as string,
         messageDigest: payload.messageDigest as string,
+        ...(typeof payload.branchId === "string" ? { branchId: payload.branchId } : {}),
         profileVersionId: payload.profileVersionId as string,
         profileDigest: payload.profileDigest as string,
         correlationId: payload.correlationId,
         idempotencyKey: payload.idempotencyKey,
       }),
-    resolveProfilePointer: async ({ organizationId }) => {
+    resolveProfilePointer: async ({ organizationId, question }) => {
       let pointer: unknown = null;
       try {
-        pointer = await input.readers.getMarketProfile?.({ organizationId });
+        pointer = input.resolveProfile
+          ? await input.resolveProfile({ organizationId, question })
+          : await input.readers.getMarketProfile?.({ organizationId });
       } catch {
         pointer = null;
       }
       const parsed = profilePointerSchema.safeParse(pointer);
       return parsed.success
-        ? { versionId: parsed.data.versionId, digest: parsed.data.digest }
+        ? { versionId: parsed.data.versionId, digest: parsed.data.digest,
+            ...(parsed.data.branchId ? { branchId: parsed.data.branchId } : {}) }
         : null;
     },
   };
@@ -500,6 +550,12 @@ export function permissionsForRole(role: OrganizationRole): string[] {
   if (hasOrganizationPermission(role, "campaign.create")) {
     permissions.push("campaign.create");
   }
+  if (hasOrganizationPermission(role, "channel.read")) {
+    permissions.push("channel.read");
+  }
+  if (hasOrganizationPermission(role, "report.upload")) {
+    permissions.push("report.upload");
+  }
   return permissions;
 }
 
@@ -577,6 +633,122 @@ async function resolveProposal(
   return parsed.success ? parsed.data : null;
 }
 
+const CHANNEL_NOT_AVAILABLE_COPY: Record<string, string> = {
+  channel_not_found: "The named channel was not found in this organization.",
+  no_governed_report:
+    "No usable governed report covers this channel and period, so there is nothing to assess yet.",
+  analysis_permission_required:
+    "Starting analysis needs an operator role; this answer uses readable results only.",
+  analysis_not_started:
+    "No current analysis exists yet; an operator can start one from the channel audit page.",
+  rate_limited: "Analysis starts are rate-limited right now; try again shortly.",
+  dispatch_failed: "The analysis could not be started; try again shortly.",
+  feature_disabled: "Channel analysis is not enabled for this organization.",
+  invalid_period: "The requested period is not a valid analysis window.",
+  read_permission_required: "Reading channel results needs channel access.",
+};
+
+/**
+ * Merges a channel-assessment outcome into the advice context the answer
+ * writer synthesizes. Pure: deterministic copy only, no reads, no writes.
+ * Ready findings become citable entries with the exact audit href (which
+ * the writer turns into a link marker); every other outcome becomes an
+ * honest limitation so gaps are voiced, never zero-filled.
+ */
+export function mergeChannelAssessmentIntoAdvice(
+  advice: AgentAdviceContext | undefined,
+  outcome: ChannelAssessmentOutcome,
+): { advice: AgentAdviceContext; reasonCode: string } {
+  const base: AgentAdviceContext = advice ?? { entries: [], limitations: [], periodSwitch: null };
+  if (outcome.status === "ready") {
+    return {
+      advice: {
+        entries: [
+          {
+            sourceId: outcome.runId,
+            kind: "insight" as const,
+            title: `Channel audit: ${outcome.channelName}`,
+            detail: outcome.summary,
+            href: outcome.auditHref,
+            sourceWindowStart: outcome.period.start,
+            sourceWindowEnd: outcome.period.end,
+            channelIds: [outcome.channelId],
+            branchIds: [],
+            evidenceRefs: [...outcome.evidenceRefs],
+          },
+          ...base.entries,
+        ].slice(0, 40),
+        limitations: [...base.limitations],
+        periodSwitch: outcome.periodSwitch ?? base.periodSwitch,
+      },
+      reasonCode: "CHANNEL_ANALYSIS_REUSED",
+    };
+  }
+  if (outcome.status === "in_progress") {
+    const stageCopy =
+      outcome.stage === "running"
+        ? "The governed analysis is still running."
+        : outcome.stage === "narrating"
+          ? "Detection finished and recommendations are being written."
+          : "The governed analysis has started.";
+    return {
+      advice: {
+        entries: [
+          ...(outcome.runId && outcome.auditHref
+            ? [
+                {
+                  sourceId: outcome.runId,
+                  kind: "insight" as const,
+                  title: `Channel analysis ${outcome.stage}: ${outcome.channelName}`,
+                  detail: `${stageCopy} Track the exact run rather than re-asking: findings will be citable once it completes.`,
+                  href: outcome.auditHref,
+                  sourceWindowStart: outcome.period.start,
+                  sourceWindowEnd: outcome.period.end,
+                  channelIds: [outcome.channelId],
+                  branchIds: [],
+                  evidenceRefs: [] as string[],
+                },
+              ]
+            : []),
+          ...base.entries,
+        ].slice(0, 40),
+        limitations: [
+          ...base.limitations,
+          `${stageCopy} Ask again after it completes, or follow the exact audit link.`,
+        ].slice(0, 30),
+        periodSwitch: outcome.periodSwitch ?? base.periodSwitch,
+      },
+      reasonCode: "CHANNEL_ANALYSIS_IN_PROGRESS",
+    };
+  }
+  if (outcome.status === "needs_scope") {
+    return {
+      advice: {
+        entries: [...base.entries],
+        limitations: [
+          ...base.limitations,
+          outcome.field === "channel"
+            ? "The channel name matched nothing uniquely; say which channel to assess."
+            : "The requested period is incomplete; say which report period to use.",
+        ].slice(0, 30),
+        periodSwitch: base.periodSwitch,
+      },
+      reasonCode: "CHANNEL_SCOPE_NEEDED",
+    };
+  }
+  return {
+    advice: {
+      entries: [...base.entries],
+      limitations: [
+        ...base.limitations,
+        CHANNEL_NOT_AVAILABLE_COPY[outcome.reason] ?? "Channel analysis is unavailable.",
+      ].slice(0, 30),
+      periodSwitch: base.periodSwitch,
+    },
+    reasonCode: "CHANNEL_ASSESSMENT_BLOCKED",
+  };
+}
+
 async function synthesizeAssistantAnswer(
   deps: ThreadServiceDeps,
   args: {
@@ -586,11 +758,19 @@ async function synthesizeAssistantAnswer(
     thread: ThreadSummary;
     message: ThreadMessageView;
     pack: ContextPack | null;
+    advice?: AgentAdviceContext;
     routingNote: string;
   },
 ): Promise<RouteAnswer> {
   const draft = await writeAnswer(
-    { pack: args.pack, routingNote: args.routingNote, threadId: args.thread.id, mode: args.thread.mode },
+    {
+      pack: args.pack,
+      routingNote: args.routingNote,
+      threadId: args.thread.id,
+      mode: args.thread.mode,
+      ...(args.message.body ? { question: args.message.body } : {}),
+      ...(args.advice ? { advice: args.advice } : {}),
+    },
     {
       ...(deps.synthesizeAnswer !== undefined ? { synthesize: deps.synthesizeAnswer } : {}),
       ...(deps.correlationId ? { correlationId: deps.correlationId } : {}),
@@ -751,6 +931,14 @@ async function questionnaireForRoute(
     latestBody: string;
   },
 ): Promise<QuestionnaireSpec | null> {
+  if (args.intent === "watch" && args.questionnaire === null && !args.latestBody.startsWith("[answers ")) {
+    return questionnaireSpecSchema.parse({
+      kind: "missing_fields", title: "Keep monitoring",
+      resumeKey: `router:watch:${args.page.replace(/[^a-z0-9]/gi, "x").toLowerCase().slice(0, 60)}:${args.contextDigest.slice(0, 16)}`,
+      items: [{ key: "confirm_watch", label: "Create this recurring watch?", kind: "confirm", required: true,
+        helpText: "Uses weekly checks by default. Approval and research gates still apply." }],
+    });
+  }
   if (args.intent !== "campaign_advice" || args.questionnaire !== null || !args.pack) {
     return args.questionnaire;
   }
@@ -774,8 +962,54 @@ async function questionnaireForRoute(
   return ideas ?? args.questionnaire;
 }
 
+async function readQuestionnaireHistory(threads: ThreadRepository, input: {
+  organizationId: string; threadId: string;
+}): Promise<ThreadMessageView[]> {
+  const messages: ThreadMessageView[] = [];
+  let cursor: string | undefined;
+  for (let page = 0; page < 10; page += 1) {
+    const batch = await threads.listMessages({ organizationId: input.organizationId,
+      threadId: input.threadId, limit: 50, ...(cursor ? { cursor } : {}) });
+    messages.push(...batch.messages);
+    if (!batch.nextCursor) return messages;
+    cursor = batch.nextCursor;
+  }
+  throw new DomainError("VALIDATION_ERROR", "This conversation is too long for an action card. Start a new chat.");
+}
+
 export function createThreadService(deps: ThreadServiceDeps) {
   return {
+    async saveQuestionnaire(input: {
+      organizationId: string; actorId: string; threadId: string;
+      sourceMessage: ThreadMessageView; intent: AgentIntent; spec: QuestionnaireSpec;
+      continuationAnswers?: QuestionnairePayload["continuationAnswers"];
+    }): Promise<void> {
+      if (!deps.questionnaireAuthority) {
+        throw new DomainError("INTEGRATION_ERROR", "This action card is temporarily unavailable.");
+      }
+      const state = deps.questionnaireAuthority.sign({
+        organizationId: input.organizationId, threadId: input.threadId,
+        sourceMessageId: input.sourceMessage.id, intent: input.intent,
+        issuedAt: input.sourceMessage.createdAt, spec: input.spec,
+        ...(input.continuationAnswers ? { continuationAnswers: input.continuationAnswers } : {}),
+      });
+      const digest = messageDigestFor({ threadId: input.threadId, messageId: input.sourceMessage.id,
+        body: JSON.stringify({ spec: input.spec, ...(input.continuationAnswers ? { continuationAnswers: input.continuationAnswers } : {}) }) });
+      // Read the kept note before generating a new timestamp on replay.
+      const history = await readQuestionnaireHistory(deps.threads, input);
+      if (history.some((entry) => {
+        const prior = entry.role === "system_note" ? parseQuestionnaireState(entry.body) : null;
+        return prior && !prior.answerReceipt && prior.sourceMessageId === state.sourceMessageId &&
+          JSON.stringify(prior.spec) === JSON.stringify(state.spec) &&
+          JSON.stringify(prior.continuationAnswers) === JSON.stringify(state.continuationAnswers) &&
+          deps.questionnaireAuthority?.verify(prior, input.organizationId, input.threadId);
+      })) return;
+      await deps.threads.appendMessageKeyed({
+        organizationId: input.organizationId, actorId: input.actorId, threadId: input.threadId,
+        role: "system_note", body: encodeQuestionnaireState(state),
+        idempotencyKey: buildThreadIdempotencyKey(input.threadId, `${digest}:questionnaire`),
+      });
+    },
     async listThreads(input: {
       organizationId: string;
       limit?: number;
@@ -811,7 +1045,9 @@ export function createThreadService(deps: ThreadServiceDeps) {
       title?: string;
       mode?: ThreadMode;
     }): Promise<{ thread: ThreadSummary; replayed: boolean }> {
-      requireOperatorPlus(input.role);
+      if (input.role === "viewer" && input.mode === "deepthink") {
+        throw new DomainError("AUTHORIZATION_ERROR", "DeepThink actions require an operator role.");
+      }
       const created = await deps.threads.createThreadKeyed({
         organizationId: input.organizationId,
         actorId: input.actorId,
@@ -869,7 +1105,6 @@ export function createThreadService(deps: ThreadServiceDeps) {
       idempotencyKey: string;
       body: string;
     }): Promise<{ message: ThreadMessageView; replayed: boolean }> {
-      requireOperatorPlus(input.role);
       const thread = await deps.threads.getThread({
         organizationId: input.organizationId,
         threadId: input.threadId,
@@ -950,6 +1185,8 @@ export function createThreadService(deps: ThreadServiceDeps) {
         * exactly once as today. Direct routes never pass this.
         */
       reuseAnswer?: ThreadMessageView | null;
+      /** Internal continuation from an exact verified server card; never a route body field. */
+      questionnaireIntent?: AgentIntent;
     }): Promise<{
       intent: AgentIntent;
       confidence: "high" | "medium" | "low";
@@ -995,12 +1232,24 @@ export function createThreadService(deps: ThreadServiceDeps) {
       let pack: ContextPack | null = null;
       let contextDigest: string;
       if (deps.contextReaders) {
+        let scope: AgentContextScope = { kind: "organization" };
+        if (deps.resolveContextScope) {
+          try {
+            scope = await deps.resolveContextScope({
+              organizationId: input.organizationId,
+              question: message.body,
+            });
+          } catch {
+            scope = { kind: "unavailable" };
+          }
+        }
+        const scopedReaders = bindAgentContextScope(scope, deps.contextReaders);
         const resolved = await resolvePackContextDigest({
           organizationId: input.organizationId,
           userId: input.actorId,
           windowDays: 30,
           page,
-          readers: deps.contextReaders,
+          ...scopedReaders,
         });
         pack = resolved.pack;
         contextDigest = resolved.digest;
@@ -1011,7 +1260,28 @@ export function createThreadService(deps: ThreadServiceDeps) {
           messageId: message.id,
         });
       }
-      const proposal = await resolveProposal(deps, { text: message.body, page, contextDigest });
+      const proposal = input.questionnaireIntent
+        ? { intent: input.questionnaireIntent, confidence: "high" as const, missing: [] }
+        : await resolveProposal(deps, { text: message.body, page, contextDigest });
+      let advice: AgentAdviceContext | undefined;
+      if (deps.loadAdviceContext) {
+        try {
+          advice = await deps.loadAdviceContext({
+            organizationId: input.organizationId,
+            actorId: input.actorId,
+            role: input.role,
+            question: message.body,
+            page,
+          });
+        } catch (error) {
+          logger.warn("agent_thread.advice_read_degraded", {
+            organizationId: input.organizationId,
+            threadId: thread.id,
+            ...(deps.correlationId ? { correlationId: deps.correlationId } : {}),
+            errorCode: error instanceof Error ? error.name : "unknown",
+          });
+        }
+      }
       const output = routeAgentMessage({
         text: message.body,
         page,
@@ -1030,6 +1300,42 @@ export function createThreadService(deps: ThreadServiceDeps) {
                 missing: proposal.missing,
               },
       });
+      // Channel assessment (governed §21.2): a direct `channel_assessment`
+      // route resolves the named channel against organization-owned
+      // identity and folds source-owned findings into the advice the
+      // writer synthesizes, with the exact audit href carried through to
+      // a link marker. Missing analysis dispatches through the existing
+      // permission-checked, rate-limited service when this is a fresh
+      // ask — re-routes replay the kept answer instead of spending a
+      // second allowance. A failed read degrades to limitations; the
+      // route never fails for assessment behavior.
+      let channelReasonCode: string | null = null;
+      if (
+        output.intent === "channel_assessment" &&
+        output.questionnaire === null &&
+        deps.assessChannel &&
+        !input.reuseAnswer
+      ) {
+        try {
+          const outcome = await deps.assessChannel({
+            organizationId: input.organizationId,
+            actorId: input.actorId,
+            role: input.role,
+            question: message.body,
+            correlationId: deps.correlationId ?? "agent-thread",
+          });
+          const merged = mergeChannelAssessmentIntoAdvice(advice, outcome);
+          advice = merged.advice;
+          channelReasonCode = merged.reasonCode;
+        } catch (error) {
+          logger.warn("agent_thread.channel_assessment_degraded", {
+            organizationId: input.organizationId,
+            threadId: thread.id,
+            ...(deps.correlationId ? { correlationId: deps.correlationId } : {}),
+            errorCode: error instanceof Error ? error.name : "unknown",
+          });
+        }
+      }
       // Zero-click auto-escalation (Task B2, ADR 0074): the router signals
       // a holder escalation with DEEPTHINK_AUTO_ESCALATED, and the service
       // applies the server-owned mode flip to the returned thread when the
@@ -1059,6 +1365,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
       });
       let routingNote = output.routingNote;
       const reasonCodes = [...output.reasonCodes];
+      if (channelReasonCode) reasonCodes.push(channelReasonCode);
       let research: ResearchAutoOutcome | null = null;
       if (autoTurn) {
         // Medium auto turns beyond the escalate path state the same inline
@@ -1133,9 +1440,15 @@ export function createThreadService(deps: ThreadServiceDeps) {
               thread: routedThread,
               message,
               pack,
+              ...(advice ? { advice } : {}),
               routingNote,
             }),
       };
+      if (routed.questionnaire && input.role !== "viewer") {
+        routed.questionnaire = bindQuestionnaireToMessage(routed.questionnaire, message.id);
+        await this.saveQuestionnaire({ organizationId: input.organizationId, actorId: input.actorId,
+          threadId: thread.id, sourceMessage: message, intent: routed.intent, spec: routed.questionnaire });
+      }
       if (dedupKey) {
         dedup.set(dedupKey, {
           ...routed,
@@ -1168,6 +1481,10 @@ export function createThreadService(deps: ThreadServiceDeps) {
       message: ThreadMessageView;
       replayed: boolean;
       answers: Record<string, string>;
+      /** Internal continuation input from the verified card's source position. */
+      sourceQuestion: string | null;
+      /** Server-signed prior watch inputs; never part of the public submitted answers. */
+      continuationAnswers: QuestionnairePayload["continuationAnswers"];
       intent: AgentIntent;
       confidence: "high" | "medium" | "low";
       reasonCodes: string[];
@@ -1176,7 +1493,6 @@ export function createThreadService(deps: ThreadServiceDeps) {
       research: ResearchAutoOutcome | null;
     }> {
       requireOperatorPlus(input.role);
-      const normalized = validateQuestionnaireAnswers(input.spec, input.answers);
       const thread = await deps.threads.getThread({
         organizationId: input.organizationId,
         threadId: input.threadId,
@@ -1187,6 +1503,55 @@ export function createThreadService(deps: ThreadServiceDeps) {
           "This chat was not found in your organization.",
         );
       }
+      const history = await readQuestionnaireHistory(deps.threads, input);
+      const submittedSpec = questionnaireSpecSchema.parse(input.spec);
+      // Text prefixes cannot prove that a user row came from this endpoint.
+      // Only an exact server-signed receipt identifies generated answers.
+      const verifiedAnswerIds = new Set<string>();
+      for (let index = 0; index < history.length; index += 1) {
+        const entry = history[index]!;
+        const receipt = entry.role === "system_note" ? parseQuestionnaireState(entry.body) : null;
+        if (!receipt?.answerReceipt || !deps.questionnaireAuthority?.verify(receipt, input.organizationId, input.threadId)) continue;
+        const receiptSourceIndex = history.findIndex((row) => row.id === receipt.sourceMessageId && row.role === "user");
+        const answerIndex = history.findIndex((row) => row.id === receipt.answerReceipt!.messageId && row.role === "user");
+        const answer = history[answerIndex];
+        if (receiptSourceIndex >= 0 && answerIndex > receiptSourceIndex && answerIndex < index && answer?.body &&
+            receipt.answerReceipt.bodyDigest === messageDigestFor({ threadId: input.threadId, messageId: answer.id, body: answer.body })) {
+          verifiedAnswerIds.add(answer.id);
+        }
+      }
+      let saved: QuestionnaireState | null = null;
+      let savedIndex = -1;
+      for (let index = history.length - 1; index >= 0; index -= 1) {
+        const entry = history[index]!;
+        const candidate = entry.role === "system_note" ? parseQuestionnaireState(entry.body) : null;
+        if (candidate && !candidate.answerReceipt && candidate.spec.resumeKey === submittedSpec.resumeKey &&
+            deps.questionnaireAuthority?.verify(candidate, input.organizationId, input.threadId)) {
+          saved = candidate; savedIndex = index; break;
+        }
+      }
+      const sourceIndex = saved ? history.findIndex((entry) => entry.id === saved.sourceMessageId && entry.role === "user") : -1;
+      if (!saved || sourceIndex < 0 || sourceIndex >= savedIndex ||
+          JSON.stringify(saved.spec) !== JSON.stringify(submittedSpec) ||
+          history.slice(savedIndex + 1).some((entry) => {
+            if (entry.role === "user" && !verifiedAnswerIds.has(entry.id)) return true;
+            const newer = entry.role === "system_note" ? parseQuestionnaireState(entry.body) : null;
+            return newer && !newer.answerReceipt && deps.questionnaireAuthority?.verify(newer, input.organizationId, input.threadId) &&
+              JSON.stringify(newer.spec) !== JSON.stringify(saved.spec);
+          })) {
+        throw new DomainError("VALIDATION_ERROR", "This action card is no longer current. Send the request again.");
+      }
+      const normalized = validateQuestionnaireAnswers(saved.spec, input.answers);
+      const continuationAnswers = saved.continuationAnswers;
+      const sourceQuestion = [...history.slice(0, sourceIndex + 1)].reverse().find((entry) =>
+        entry.role === "user" && !!entry.body?.trim() && !verifiedAnswerIds.has(entry.id))?.body?.trim() ?? null;
+      if (saved.intent === "watch" && normalized.confirm_watch !== undefined && normalized.confirm_watch !== "yes") {
+        throw new DomainError("VALIDATION_ERROR", "Confirm this watch before creating it.");
+      }
+      const fixedTap = saved.intent === "watch" || (saved.intent === "campaign_advice" && saved.spec.kind === "campaign_ideas");
+      if (fixedTap && !hasOrganizationPermission(input.role, saved.intent === "watch" ? "growth_intelligence.manage" : "campaign.create")) {
+        throw new DomainError("AUTHORIZATION_ERROR", "You no longer have permission to create this action.");
+      }
       // G3 honest skip: read the turn before appending, so the re-route
       // below reuses the turn's existing assistant row (when the initial
       // route already synthesized one) instead of appending a second.
@@ -1195,12 +1560,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
       // reusable row", and the re-route synthesizes once as before.
       let keptTurnRow: ThreadMessageView | null = null;
       try {
-        const history = await deps.threads.listMessages({
-          organizationId: input.organizationId,
-          threadId: input.threadId,
-          limit: 50,
-        });
-        keptTurnRow = findTurnAssistantRow(history.messages);
+        keptTurnRow = findTurnAssistantRow(history);
       } catch (error) {
         logger.warn("agent_thread.turn_read_degraded", {
           organizationId: input.organizationId,
@@ -1216,7 +1576,12 @@ export function createThreadService(deps: ThreadServiceDeps) {
         threadId: input.threadId,
         role: "user",
         body: encodeQuestionnaireAnswerBody(input.spec, normalized),
-        idempotencyKey: input.idempotencyKey,
+        // One consumed answer per exact server card, independent of a
+        // client's retry token. A changed answer conflicts rather than
+        // authorizing a second creation from the same card.
+        idempotencyKey: buildThreadIdempotencyKey(thread.id, `${messageDigestFor({
+          threadId: thread.id, messageId: saved.sourceMessageId, body: JSON.stringify(saved.spec),
+        })}:questionnaire-answer`),
       });
       const message = await deps.threads.getMessage({
         organizationId: input.organizationId,
@@ -1225,6 +1590,17 @@ export function createThreadService(deps: ThreadServiceDeps) {
       if (!message) {
         throw new DomainError("DOMAIN_ERROR", "This message could not be saved.");
       }
+      if (!deps.questionnaireAuthority || !message.body) {
+        throw new DomainError("INTEGRATION_ERROR", "This action card is temporarily unavailable.");
+      }
+      const answerDigest = messageDigestFor({ threadId: thread.id, messageId: message.id, body: message.body });
+      const receipt = deps.questionnaireAuthority.sign({ organizationId: saved.organizationId, threadId: saved.threadId,
+        sourceMessageId: saved.sourceMessageId, intent: saved.intent, spec: saved.spec,
+        ...(saved.continuationAnswers ? { continuationAnswers: saved.continuationAnswers } : {}), issuedAt: message.createdAt,
+        answerReceipt: { messageId: message.id, bodyDigest: answerDigest } });
+      await deps.threads.appendMessageKeyed({ organizationId: input.organizationId, actorId: input.actorId,
+        threadId: thread.id, role: "system_note", body: encodeQuestionnaireState(receipt),
+        idempotencyKey: buildThreadIdempotencyKey(thread.id, `${answerDigest}:questionnaire-answer-receipt`) });
       if (!appended.replayed) {
         await publishAgentEvent(deps, {
           organizationId: input.organizationId,
@@ -1232,6 +1608,74 @@ export function createThreadService(deps: ThreadServiceDeps) {
           eventName: "agent_message.appended",
           payload: { threadId: thread.id, messageId: message.id },
         });
+      }
+      if (fixedTap) {
+        // A submitted server card already fixes the action. Encoded form
+        // values are data, never a new classification or research request.
+        const routed = routeAgentMessage({ text: message.body!, page: input.page ?? "overview",
+          role: input.role, permissions: permissionsForRole(input.role),
+          contextDigest: routingContextDigest({ organizationId: input.organizationId, threadId: thread.id, messageId: message.id }),
+          activeWatches: [], threadMode: thread.mode,
+          model: { kind: "stub", intent: saved.intent, confidence: "high", missing: [] } });
+        return { message, replayed: appended.replayed, answers: normalized,
+          intent: routed.intent, confidence: routed.confidence, reasonCodes: routed.reasonCodes,
+          questionnaire: null, answer: keptTurnRow ? reuseTurnAnswer(keptTurnRow) : null, research: null, sourceQuestion, continuationAnswers };
+      }
+      if (input.spec.kind === "duplicate_watch" && normalized.choice === "cancel") {
+        // Terminal cancel: the persisted answers row above is the whole
+        // effect, so the turn ends here with a classify-only routing —
+        // real router values over the answers text, zero enrichment reads
+        // (pack, advice, assessment), no second synthesis, no dispatch.
+        // Anything else (view/update/fresh, missing fields, ideas) still
+        // takes the full re-route below.
+        const cancelPage = (input.page ?? "overview").trim();
+        if (cancelPage.length < 1 || cancelPage.length > 120) {
+          throw new DomainError("VALIDATION_ERROR", "Please check the submitted fields.");
+        }
+        if (!message.body) {
+          throw new DomainError("DOMAIN_ERROR", "This chat has no readable message to route.");
+        }
+        const cancelDigest = routingContextDigest({
+          organizationId: input.organizationId,
+          threadId: thread.id,
+          messageId: message.id,
+        });
+        const cancelProposal = await resolveProposal(deps, {
+          text: message.body,
+          page: cancelPage,
+          contextDigest: cancelDigest,
+        });
+        const cancelled = routeAgentMessage({
+          text: message.body,
+          page: cancelPage,
+          role: input.role,
+          permissions: permissionsForRole(input.role),
+          contextDigest: cancelDigest,
+          activeWatches: [],
+          threadMode: thread.mode,
+          model:
+            cancelProposal === null
+              ? { kind: "live" }
+              : {
+                  kind: "stub",
+                  intent: cancelProposal.intent,
+                  confidence: cancelProposal.confidence,
+                  missing: cancelProposal.missing,
+                },
+        });
+        return {
+          message,
+          replayed: appended.replayed,
+          answers: normalized,
+          intent: cancelled.intent,
+          confidence: cancelled.confidence,
+          reasonCodes: cancelled.reasonCodes,
+          questionnaire: cancelled.questionnaire,
+          answer: keptTurnRow ? reuseTurnAnswer(keptTurnRow) : null,
+          research: null,
+          sourceQuestion,
+          continuationAnswers,
+        };
       }
       const routed = await this.routeLatest({
         organizationId: input.organizationId,
@@ -1241,11 +1685,14 @@ export function createThreadService(deps: ThreadServiceDeps) {
         ...(input.page ? { page: input.page } : {}),
         idempotencyKey: `${input.idempotencyKey}:reroute`,
         ...(keptTurnRow ? { reuseAnswer: keptTurnRow } : {}),
+        ...(saved.intent === "campaign_advice" ? { questionnaireIntent: saved.intent } : {}),
       });
       return {
         message,
         replayed: appended.replayed,
         answers: normalized,
+        sourceQuestion,
+        continuationAnswers,
         intent: routed.intent,
         // Slice C F2/M6: the re-route's fresh codes travel with the
         // answers response, so the drawer renders this turn's codes
@@ -1353,6 +1800,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
           }
           const pointer = await seams.resolveProfilePointer({
             organizationId: input.organizationId,
+            question: message.body ?? "",
           });
           if (!pointer) {
             throw new DomainError(
@@ -1366,6 +1814,7 @@ export function createThreadService(deps: ThreadServiceDeps) {
             actorId: input.actorId,
             threadId: thread.id,
             messageDigest: digest,
+            ...(pointer.branchId ? { branchId: pointer.branchId } : {}),
             profileVersionId: pointer.versionId,
             profileDigest: pointer.digest,
             correlationId,

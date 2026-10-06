@@ -67,7 +67,7 @@ describe("report upload intent route", () => {
     });
 
     expect(result.body.upload).toEqual({
-      endpoint: "https://example.supabase.co/storage/v1/upload/resumable/sign",
+      endpoint: "https://example.supabase.co/storage/v1/upload/resumable",
       token: "signed-token",
       apiKey: "public-key",
       chunkSize: 6 * 1024 * 1024,

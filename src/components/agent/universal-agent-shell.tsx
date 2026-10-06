@@ -10,6 +10,8 @@ import {
   HistoryIcon,
   PlusIcon,
   SendIcon,
+  FileSpreadsheetIcon,
+  XIcon,
   ZapIcon,
 } from "lucide-react";
 
@@ -29,6 +31,22 @@ import type {
 } from "@/components/agent/agent-campaign-advice";
 import type { AdviseCampaignSeams } from "@/modules/agent-chat/application/campaign-advise";
 import { Button } from "@/components/ui/button";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Input } from "@/components/ui/input";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
+import {
+  AGENT_REPORT_ACCEPT,
+  agentReportMediaType,
+} from "@/components/agent/agent-attachment-upload";
+import { hasReportPermission } from "@/domain/reports/permissions";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -139,8 +157,11 @@ export function UniversalAgentShell({
   const sidebarOffset = useAgentSidebarOffset();
   const inputId = useId();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [input, setInput] = useState("");
+  const [file, setFile] = useState<File | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
   const [mode, setMode] = useState<ThreadMode>("quick");
   const [expanded, setExpanded] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -160,7 +181,8 @@ export function UniversalAgentShell({
 
   const canManage = permissions.includes("growth_intelligence.manage");
   const isViewer = role === "viewer";
-  const canSend = input.trim().length > 0 && !isViewer;
+  const canAttach = hasReportPermission(role, "report.upload");
+  const canSend = input.trim().length > 0;
   const chipsVisible = expanded && !drawerOpen && input.trim() === "";
   // The control row (mode, send, history) stays open whenever the drawer is
   // open so the user can keep chatting without refocusing; the bare
@@ -169,13 +191,14 @@ export function UniversalAgentShell({
   const motionMs = reduceMotion ? 0 : 220;
 
   function handleSend() {
-    if (isViewer) return;
     const body = input.trim();
     if (!body) return;
     const next = nonce + 1;
     setNonce(next);
-    setPendingPrompt({ text: body, nonce: next });
+    setPendingPrompt({ text: body, nonce: next, ...(file ? { file } : {}) });
     setInput("");
+    setFile(null);
+    setFileError(null);
     setExpanded(false);
     setCollapsed(false);
     setView("thread");
@@ -237,7 +260,7 @@ export function UniversalAgentShell({
               page={page}
               threadId={threadId}
               pendingPrompt={pendingPrompt}
-              mode={mode}
+              mode={isViewer ? "quick" : mode}
               role={role}
               permissions={permissions}
               actorId={actorId}
@@ -269,6 +292,57 @@ export function UniversalAgentShell({
           >
             <div className="rounded-[calc(1.75rem-2px)] bg-zinc-950 text-zinc-50 shadow-2xl">
               <div className="flex flex-col gap-1 p-2">
+                <Input
+                  ref={fileInputRef}
+                  type="file"
+                  className="sr-only"
+                  accept={AGENT_REPORT_ACCEPT}
+                  aria-label="Choose report attachment"
+                  disabled={!canAttach}
+                  onChange={(event) => {
+                    const selected = event.target.files?.[0];
+                    event.target.value = "";
+                    if (!selected) return;
+                    try {
+                      agentReportMediaType(selected);
+                      setFile(selected);
+                      setFileError(null);
+                    } catch (error) {
+                      setFileError(
+                        error instanceof Error ? error.message : "Choose a CSV or XLSX report.",
+                      );
+                    }
+                  }}
+                />
+                {file ? (
+                  <Attachment state="idle" size="sm">
+                    <AttachmentMedia>
+                      <FileSpreadsheetIcon aria-hidden="true" />
+                    </AttachmentMedia>
+                    <AttachmentContent>
+                      <AttachmentTitle>{file.name}</AttachmentTitle>
+                      <AttachmentDescription>
+                        CSV/XLSX report · ready to attach
+                      </AttachmentDescription>
+                    </AttachmentContent>
+                    <AttachmentActions>
+                      <AttachmentAction
+                        aria-label="Remove report attachment"
+                        onClick={() => {
+                          setFile(null);
+                          setFileError(null);
+                        }}
+                      >
+                        <XIcon aria-hidden="true" />
+                      </AttachmentAction>
+                    </AttachmentActions>
+                  </Attachment>
+                ) : null}
+                {fileError ? (
+                  <Alert variant="destructive">
+                    <AlertDescription>{fileError}</AlertDescription>
+                  </Alert>
+                ) : null}
                 <label htmlFor={inputId} className="sr-only">
                   Ask anything
                 </label>
@@ -307,16 +381,29 @@ export function UniversalAgentShell({
                                 type="button"
                                 variant="outline"
                                 size="icon-sm"
-                                disabled
-                                aria-label="Add attachments (coming soon)"
-                                title="Attachments coming soon"
+                                disabled={!canAttach}
+                                aria-label={
+                                  canAttach
+                                    ? "Add report attachment"
+                                    : "Report attachments require upload permission"
+                                }
+                                title={
+                                  canAttach
+                                    ? "Attach one CSV or XLSX report"
+                                    : "Report upload requires an operator"
+                                }
+                                onClick={() => fileInputRef.current?.click()}
                                 className="rounded-full border-white/10 bg-white/5 text-zinc-400 hover:bg-white/10 hover:text-zinc-100"
                               >
                                 <PlusIcon aria-hidden="true" />
                               </Button>
                             </span>
                           </TooltipTrigger>
-                          <TooltipContent>Attachments coming soon</TooltipContent>
+                          <TooltipContent>
+                            {canAttach
+                              ? "Attach one CSV or XLSX report"
+                              : "Report upload requires an operator"}
+                          </TooltipContent>
                         </Tooltip>
 
                         <DropdownMenu>
@@ -416,11 +503,7 @@ export function UniversalAgentShell({
                           onClick={handleSend}
                           disabled={!canSend}
                           aria-label="Send message"
-                          title={
-                            isViewer
-                              ? "Viewers cannot change this chat — ask an operator to send."
-                              : "Send"
-                          }
+                          title={"Send"}
                           className="size-10 rounded-full bg-gradient-to-br from-fuchsia-500 via-purple-500 to-orange-400 text-white hover:opacity-90"
                         >
                           <SendIcon aria-hidden="true" />
@@ -431,7 +514,7 @@ export function UniversalAgentShell({
                 </AnimatePresence>
                 {isViewer ? (
                   <p className="px-1 text-sm text-zinc-400">
-                    Viewers cannot change this chat — ask an operator to send.
+                    Ask for advice. Reports and business actions require an operator.
                   </p>
                 ) : null}
               </div>

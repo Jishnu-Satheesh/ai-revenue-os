@@ -110,10 +110,17 @@ function renderClient(options: { fetchNeverResolves?: boolean } = {}) {
   );
 }
 
+it("opens the report package tab from an agent review link", () => {
+  mocks.params = new URLSearchParams("tab=data-sources&package=33333333-3333-4333-8333-333333333333");
+  renderClient();
+  expect(screen.getByRole("tab", {name:"Data sources"})).toHaveAttribute("aria-selected","true");
+});
+
 beforeEach(() => {
   // reset, not clear: a rejection stubbed by one case must not leak into the
   // next one's authorized happy path.
   vi.resetAllMocks();
+  mocks.params = new URLSearchParams();
   mocks.pathname = `/organizations/${organizationId}/integrations`;
   mocks.getOrganizationContext.mockResolvedValue({
     organizationId,

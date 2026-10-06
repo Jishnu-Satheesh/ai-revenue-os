@@ -7,7 +7,9 @@ import { createEventPublisher } from "@/domain/events/publisher";
 import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { createLightModelProvider } from "@/modules/agent-router/infrastructure/light-model-provider";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
-import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
+import { createAgentContextReaders, createAgentQuestionnaireAuthority, createAgentResearchProfileResolver, resolveAgentContextScope } from "@/modules/agent-chat/application/api";
+import { loadAgentAdviceContext } from "@/modules/agent-chat/application/advice-context-reader";
+import { assessChannelForAgentRequest } from "@/modules/agent-chat/application/channel-assessment-adapter";
 import {
   createResearchAutoSeams,
   createThreadService,
@@ -61,16 +63,40 @@ export async function POST(
     const page = url.searchParams.get("page") ?? undefined;
 
     const service = createThreadService({
+      questionnaireAuthority: createAgentQuestionnaireAuthority(),
       threads: createThreadRepository(agentPersistenceFor(context.supabase)),
       events: createEventPublisher(),
       proposeRouter: async (args) => createLightModelProvider().propose({ ...args, correlationId }),
       // Task 6 swap: route digests the real HEAVY pack. Digest shape is
       // unchanged; values shift because the digest now means something.
       contextReaders: createAgentContextReaders(context.supabase),
+      resolveContextScope: (input) => resolveAgentContextScope(context.supabase, input),
+      loadAdviceContext: (input) => loadAgentAdviceContext({
+        supabase: context.supabase,
+        organizationId: input.organizationId,
+        actorId: input.actorId,
+        role: input.role,
+        question: input.question,
+        correlationId,
+      }),
+      // Governed §21.2: channel questions resolve against
+      // organization-owned identity and reuse or dispatch the
+      // source-owned analysis on the caller's session grants.
+      assessChannel: (input) =>
+        assessChannelForAgentRequest({
+          supabase: context.supabase,
+          organizationId: input.organizationId,
+          actorId: input.actorId,
+          role: input.role,
+          question: input.question,
+          correlationId: input.correlationId,
+          allowDispatch: true,
+        }),
       // Task B3: the send-time auto path needs the research seams —
       // Trigger transport plus the authenticated readers — so escalated
       // turns enqueue their one bounded run in this same call.
       dispatchSeams: createResearchAutoSeams({
+        resolveProfile: createAgentResearchProfileResolver(context.supabase),
         triggerResearchRun: async (payload) => {
           const handle = await tasks.trigger<typeof agentResearchOnceTask>(
             "agent-chat.research-once",
@@ -79,6 +105,7 @@ export async function POST(
               actorId: payload.actorId,
               threadId: payload.threadId,
               messageDigest: payload.messageDigest,
+              ...(payload.branchId ? { branchId: payload.branchId } : {}),
               profileVersionId: payload.profileVersionId,
               profileDigest: payload.profileDigest,
               correlationId: payload.correlationId,

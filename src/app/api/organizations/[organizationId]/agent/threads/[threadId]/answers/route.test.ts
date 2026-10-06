@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
@@ -26,6 +26,13 @@ vi.mock("@/modules/agent-router/infrastructure/light-model-provider", () => ({
 }));
 vi.mock("@/modules/agent-chat/application/api", () => ({
   createAgentContextReaders: mocks.createReaders,
+  createAgentQuestionnaireAuthority: () => ({ sign: signQuestionnaire, verify: verifyQuestionnaire }),
+  createAgentResearchProfileResolver: () => (input: unknown) => mocks.createReaders().getMarketProfile?.(input),
+  resolveAgentContextScope: async () => ({ kind: "organization" }),
+  createAgentWatchProjectSeams: (_supabase: unknown, projects: { createProject: (input: unknown) => Promise<unknown> }) => ({
+    createKeyed: (input: unknown) => projects.createProject(input),
+    findCreatedByKey: async () => null,
+  }),
 }));
 vi.mock("@/domain/events/publisher", () => ({
   createEventPublisher: () => ({ publish: mocks.publish }),
@@ -49,6 +56,13 @@ vi.mock("@/lib/env", () => ({
 }));
 
 import { POST } from "@/app/api/organizations/[organizationId]/agent/threads/[threadId]/answers/route";
+import { questionnaireSpecSchema } from "@/domain/agent-router/contracts";
+import { agentIntentSchema } from "@/domain/agent-router/intents";
+import { signQuestionnaire, verifyQuestionnaire } from "@/modules/agent-chat/infrastructure/questionnaire-signature";
+import { bindQuestionnaireToMessage, encodeQuestionnaireState, parseQuestionnaireState } from "@/modules/agent-chat/application/questionnaire-state";
+import type { ThreadRepository, ThreadMessageView } from "@/modules/agent-chat/infrastructure/thread-repository";
+import { IdempotencyConflictError } from "@/domain/agent-chat/errors";
+import { parseAnswerBody } from "@/modules/agent-chat/application/answer-writer";
 
 const ORGANIZATION = "10000000-0000-4000-8000-000000000001";
 const USER = "70000000-0000-4000-8000-000000000007";
@@ -83,7 +97,7 @@ const ANSWERS_MESSAGE = {
 const SPEC = {
   kind: "missing_fields",
   title: "One more detail",
-  resumeKey: "router:watch:overview:abcdef1234567890",
+  resumeKey: "router:answer_memory:overview:abcdef1234567890",
   items: [
     {
       key: "frequency",
@@ -108,6 +122,31 @@ function operatorContext() {
 }
 
 function request(url: string, init?: RequestInit) {
+  // These isolated route fixtures begin after a prior routing response.
+  // Include its persisted server card; provenance rejection has dedicated
+  // real-signature service tests rather than a permissive verifier mock.
+  if (init?.method === "POST" && typeof init.body === "string" && url.includes("/answers")) {
+    const submitted = JSON.parse(init.body) as { spec?: unknown };
+    const spec = questionnaireSpecSchema.safeParse(submitted.spec);
+    const repository = mocks.createRepo.getMockImplementation()?.() as Partial<ThreadRepository> | undefined;
+    if (spec.success && repository) {
+      const originalList = repository.listMessages;
+      repository.listMessages = vi.fn(async (input) => {
+        const original = originalList ? await originalList(input) : { messages: [], nextCursor: null };
+        const preceding = original.messages.filter((entry) => !entry.body?.startsWith("[answers ") && entry.role !== "system_note");
+        const existingSource = [...preceding].reverse().find((entry) => entry.role === "user");
+        const source: ThreadMessageView = existingSource ?? { ...ANSWERS_MESSAGE, role: "user",
+          id: "a0000000-0000-4000-8000-000000000000", body: "Keep monitoring local competitors" };
+        if (!existingSource) preceding.unshift(source);
+        const intent = agentIntentSchema.parse(spec.data.resumeKey.split(":")[1]);
+        return { ...original, messages: [...preceding, {
+          ...source, id: "b0000000-0000-4000-8000-000000000000", role: "system_note" as const,
+          body: encodeQuestionnaireState(signQuestionnaire({ organizationId: ORGANIZATION,
+            threadId: THREAD, sourceMessageId: source.id, intent, issuedAt: new Date().toISOString(), spec: spec.data })),
+        }] };
+      });
+    }
+  }
   return new Request(url, {
     ...init,
     headers: { "x-correlation-id": CORRELATION, ...(init?.headers ?? {}) },
@@ -117,13 +156,57 @@ function request(url: string, init?: RequestInit) {
 const params = { params: Promise.resolve({ organizationId: ORGANIZATION, threadId: THREAD }) };
 
 beforeEach(() => {
+  vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "server-test-secret");
   vi.clearAllMocks();
   mocks.getOrganizationContext.mockResolvedValue(operatorContext());
   mocks.createReaders.mockReturnValue({});
   mocks.createCompetitors.mockReturnValue({ listCompetitors: async () => [] });
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("agent thread answers route", () => {
+  it("refuses a top-level resume key that differs from the signed campaign card before any write", async () => {
+    const ideasSpec = {
+      kind: "campaign_ideas",
+      title: "Campaign ideas",
+      resumeKey: "router:campaign_advice:overview:abcdef1234567890",
+      items: [{
+        key: "idea", label: "Which idea should become a draft?", kind: "single_select", required: true,
+        options: ["a", "b", "c"].map((value, index) => ({
+          value: `idea-${value}`, label: `Idea ${value}`, description: `A grounded campaign idea ${value}.`,
+          recommended: index === 1,
+        })),
+      }],
+    };
+    const appendMessageKeyed = vi.fn(async () => ({
+      messageId: ANSWERS_MESSAGE.id, threadId: THREAD, replayed: false,
+    }));
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    mocks.createRepo.mockReturnValue({
+      getThread: vi.fn(async () => THREAD_ROW), appendMessageKeyed,
+      getMessage: vi.fn(async () => ANSWERS_MESSAGE), latestUserMessage: vi.fn(async () => ANSWERS_MESSAGE),
+    });
+    mocks.getOrganizationContext.mockResolvedValue({
+      ...operatorContext(), supabase: {
+        rpc,
+        from: () => ({ select: () => ({ eq: async () => ({ data: [], error: null }) }) }),
+      },
+    });
+    const response = await POST(request(
+      `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+      { method: "POST", body: JSON.stringify({
+        idempotencyKey: "mismatched-card-key-0001",
+        resumeKey: `${ideasSpec.resumeKey}:forged-retry`, spec: ideasSpec, answers: { idea: "idea-b" },
+      }) },
+    ), params);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: "VALIDATION_ERROR" } });
+    expect(appendMessageKeyed).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+    expect(mocks.createReaders).not.toHaveBeenCalled();
+    expect(mocks.trigger).not.toHaveBeenCalled();
+  });
+
   it("persists answers and re-routes with 201, replaying with 200", async () => {
     mocks.createRepo.mockReturnValue({
       getThread: vi.fn(async () => THREAD_ROW),
@@ -764,6 +847,94 @@ describe("agent thread answers route", () => {
     expect(setThreadLinks).not.toHaveBeenCalled();
   });
 
+  it("saves the editable idea brief once and retains its historical bytes while retry checks current eligibility", async () => {
+    const source: ThreadMessageView = { ...ANSWERS_MESSAGE, id: crypto.randomUUID(), role: "user",
+      body: "Suggest campaign ideas for lunchtime customers", createdAt: new Date().toISOString() };
+    const spec = bindQuestionnaireToMessage({ kind: "campaign_ideas", title: "Campaign ideas",
+      resumeKey: "router:campaign_advice:overview:abcdef1234567890", items: [{
+        key: "idea", label: "Which idea?", kind: "single_select", required: true,
+        options: [
+          { value: "idea-a", label: "Lunch rush bundle", description: "Noon combo for nearby offices.", recommended: true },
+          { value: "idea-b", label: "Weekend family table", description: "Saturday set menu for families.", recommended: false },
+          { value: "idea-c", label: "Late-night dessert", description: "After-9pm dessert counter.", recommended: false },
+        ],
+      }] }, source.id);
+    const messages: ThreadMessageView[] = [source, { ...source, id: crypto.randomUUID(), role: "system_note",
+      body: encodeQuestionnaireState(signQuestionnaire({ organizationId: ORGANIZATION, threadId: THREAD,
+        sourceMessageId: source.id, intent: "campaign_advice", issuedAt: source.createdAt, spec })) }];
+    const keys = new Map<string, string>();
+    const repository = {
+      getThread: vi.fn(async () => THREAD_ROW),
+      listMessages: vi.fn(async () => ({ messages: [...messages], nextCursor: null })),
+      getMessage: vi.fn(async ({ messageId }: { messageId: string }) => messages.find((entry) => entry.id === messageId) ?? null),
+      latestUserMessage: vi.fn(async () => [...messages].reverse().find((entry) => entry.role === "user") ?? null),
+      appendMessageKeyed: vi.fn(async (input: { role: ThreadMessageView["role"]; body: string; idempotencyKey: string }) => {
+        const keptId = keys.get(input.idempotencyKey);
+        if (keptId) {
+          if (messages.find((entry) => entry.id === keptId)?.body !== input.body) {
+            throw new IdempotencyConflictError("A different message is already saved.");
+          }
+          return { messageId: keptId, threadId: THREAD, replayed: true };
+        }
+        const id = crypto.randomUUID();
+        keys.set(input.idempotencyKey, id);
+        messages.push({ ...source, id, role: input.role, body: input.body });
+        return { messageId: id, threadId: THREAD, replayed: false };
+      }),
+      setThreadLinks: vi.fn(),
+    };
+    let opportunities: unknown[] = [];
+    const rpc = vi.fn(async () => ({ data: null, error: null }));
+    mocks.createRepo.mockReturnValue(repository);
+    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(), supabase: {
+      rpc, from: () => ({ select: () => ({ eq: async () => ({ data: opportunities, error: null }) }) }),
+    } });
+    const submit = (clientKey: string) => POST(new Request(
+      `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`, {
+        method: "POST", headers: { "x-correlation-id": CORRELATION },
+        body: JSON.stringify({ idempotencyKey: clientKey, resumeKey: spec.resumeKey, spec, answers: { idea: "idea-a" } }),
+      }), params);
+
+    const created = await submit("idea-history-first-0000001");
+    expect(created.status).toBe(201);
+    const first = await created.json();
+    const saved = messages.filter((entry) => entry.role === "assistant");
+    expect(saved).toHaveLength(1);
+    const answer = parseAnswerBody(saved[0]!.body!);
+    expect(answer.body).toContain("Lunch rush bundle");
+    expect(answer.body).toMatch(/editable campaign brief/i);
+    expect(answer.body).toMatch(/no eligible opportunity/i);
+    expect(answer.body).not.toMatch(/draft (created|ready)|approved/i);
+    expect(answer.links).toEqual([{ label: "Open editable campaign brief", href: first.ideaDraft.briefUrl }]);
+    expect(first.ideaDraft.reasonCodes).toEqual(["ADVICE_NO_OPPORTUNITY"]);
+
+    const replay = await submit("idea-history-different-client-key-0000002");
+    expect(replay.status).toBe(200);
+    expect((await replay.json()).replayed).toBe(true);
+    expect(messages.filter((entry) => entry.role === "assistant")).toEqual(saved);
+
+    opportunities = ["33333333-3333-4333-8333-333333333333", "55555555-5555-4555-8555-555555555555"].map((id) => ({
+      id, organization_id: ORGANIZATION, version: 2, status: "proposed", action_key: "campaign.governed_draft_v1",
+      expires_at: "2026-12-31T00:00:00.000Z", assertions: [{ key: "demand_window", expectedOutcome: "pass" }],
+    }));
+    const refreshed = await submit("idea-history-current-eligibility-0000003");
+    expect(refreshed.status).toBe(200);
+    expect((await refreshed.json()).ideaDraft.reasonCodes).toEqual(["ADVICE_OPPORTUNITY_AMBIGUOUS"]);
+    expect(messages.filter((entry) => entry.role === "assistant")).toEqual(saved);
+    expect(messages.filter((entry) => entry.role === "user")).toHaveLength(2);
+    const append = repository.appendMessageKeyed.getMockImplementation()!;
+    repository.appendMessageKeyed.mockImplementation(async (input) => {
+      if (input.role === "assistant") throw new Error("Message persistence is unavailable.");
+      return append(input);
+    });
+    const unavailable = await submit("idea-history-persistence-unavailable-0000004");
+    expect(unavailable.status).toBe(500);
+    expect(messages.filter((entry) => entry.role === "assistant")).toEqual(saved);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(repository.setThreadLinks).not.toHaveBeenCalled();
+    expect(mocks.trigger).not.toHaveBeenCalled();
+  });
+
   it("refuses campaign-ideas picks for viewers before persistence", async () => {
     const ideasSpec = {
       kind: "campaign_ideas",
@@ -1129,6 +1300,127 @@ describe("agent thread answers route watch one-tap (B4)", () => {
     );
   }
 
+  function persistedWatchScopeJourney(question: string) {
+    const source: ThreadMessageView = { ...ANSWERS_MESSAGE, role: "user", id: crypto.randomUUID(),
+      body: question, createdAt: new Date().toISOString() };
+    const initialSpec = bindQuestionnaireToMessage({
+      kind: "missing_fields", title: "Keep monitoring", resumeKey: "router:watch:overview:scope123",
+      items: [
+        { key: "frequency", label: "How often?", kind: "single_select", required: true,
+          options: [{ value: "daily", label: "Daily" }] },
+        { key: "end_date", label: "Stop date", kind: "date", required: false },
+        { key: "confirm_watch", label: "Create this watch?", kind: "confirm", required: true },
+      ],
+    }, source.id);
+    const messages: ThreadMessageView[] = [source, { ...source, id: crypto.randomUUID(), role: "system_note",
+      body: encodeQuestionnaireState(signQuestionnaire({ organizationId: ORGANIZATION, threadId: THREAD,
+        sourceMessageId: source.id, intent: "watch", issuedAt: source.createdAt, spec: initialSpec })) }];
+    const keys = new Map<string, string>();
+    const repository = {
+      getThread: vi.fn(async () => THREAD_ROW),
+      listMessages: vi.fn(async () => ({ messages: [...messages], nextCursor: null })),
+      latestUserMessage: vi.fn(async () => [...messages].reverse().find((entry) => entry.role === "user") ?? null),
+      getMessage: vi.fn(async ({ messageId }: { messageId: string }) => messages.find((entry) => entry.id === messageId) ?? null),
+      appendMessageKeyed: vi.fn(async (input: { role: ThreadMessageView["role"]; body: string; idempotencyKey: string }) => {
+        const kept = keys.get(input.idempotencyKey);
+        if (kept) return { messageId: kept, threadId: THREAD, replayed: true };
+        const id = crypto.randomUUID();
+        keys.set(input.idempotencyKey, id);
+        messages.push({ ...source, id, role: input.role, body: input.body });
+        return { messageId: id, threadId: THREAD, replayed: false };
+      }),
+      setThreadLinks: vi.fn(async () => ({ threadId: THREAD, projectId: CREATED, requestId: null,
+        draftRequestId: null, campaignId: null })),
+    };
+    mocks.createRepo.mockReturnValue(repository);
+    const projects = watchRepo({ listActiveProjects: async () => [] });
+    mocks.createProjects.mockReturnValue(projects);
+    mocks.getOrganizationContext.mockResolvedValue({ ...operatorContext(),
+      supabase: { rpc: vi.fn(), from: watchFrom({ branches: [
+        { id: BRANCH, name: "Jumeirah" },
+        { id: "66666666-6666-4666-8666-666666666667", name: "Deira" },
+      ] }) } });
+    // Use the actual stored envelopes rather than the legacy isolated fixture injector.
+    const submit = (spec: unknown, answers: Record<string, unknown>) => POST(new Request(
+      `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/answers`,
+      { method: "POST", headers: { "x-correlation-id": CORRELATION },
+        body: JSON.stringify({ spec, answers, resumeKey: questionnaireSpecSchema.parse(spec).resumeKey,
+          idempotencyKey: "watch-scope-journey-0000001" }) }), params);
+    return { source, initialSpec, messages, projects, repository, submit };
+  }
+
+  it("persists the missing branch and area card, then retains validated cadence and stop date on confirmation", async () => {
+    const h = persistedWatchScopeJourney("Verification watch for local lunch offers");
+    const endDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10);
+    const first = await h.submit(h.initialSpec, { frequency: "daily", end_date: endDate, confirm_watch: true });
+    expect(first.status).toBe(201);
+    const needed = await first.json();
+    expect(needed.watchChoice.outcome).toBe("needs_input");
+    expect(needed.questionnaire).toMatchObject({ kind: "missing_fields", title: "Complete this watch" });
+    expect(needed.questionnaire.items.map((item: { key: string }) => item.key)).toEqual(["branch", "research_area", "confirm_watch"]);
+    expect(h.projects.createProject).not.toHaveBeenCalled();
+    const saved = parseQuestionnaireState(h.messages.at(-1)?.body ?? null);
+    expect(saved?.sourceMessageId).toBe(needed.message.id);
+    expect(saved?.spec).toEqual(needed.questionnaire);
+    expect(verifyQuestionnaire(saved, ORGANIZATION, THREAD)).toBe(true);
+
+    const created = await h.submit(needed.questionnaire, { branch: BRANCH,
+      research_area: "Jumeirah lunch offers", confirm_watch: true });
+    expect(created.status).toBe(201);
+    const receipt = await created.json();
+    expect(receipt.watchChoice.outcome).toBe("created");
+    expect(receipt.answers).toEqual({ branch: BRANCH, research_area: "Jumeirah lunch offers", confirm_watch: "yes" });
+    expect(h.projects.createProject).toHaveBeenCalledWith(expect.objectContaining({
+      branchId: BRANCH, question: h.source.body, schedule: expect.objectContaining({ cadence: "daily", endDate }),
+    }));
+  });
+
+  it("uses an explicit unique branch in the verified original question and asks only for its missing area", async () => {
+    const h = persistedWatchScopeJourney("Verification watch of lunch offers near Jumeirah");
+    const first = await h.submit(h.initialSpec, { frequency: "daily", confirm_watch: true });
+    expect(first.status).toBe(201);
+    const needed = await first.json();
+    expect(needed.watchChoice.missing).toEqual(["researchArea"]);
+    expect(needed.questionnaire.items.map((item: { key: string }) => item.key)).toEqual(["research_area", "end_date", "confirm_watch"]);
+    const created = await h.submit(needed.questionnaire, { research_area: "Jumeirah lunch offers", confirm_watch: true });
+    expect((await created.json()).watchChoice.outcome).toBe("created");
+    expect(h.projects.createProject).toHaveBeenCalledWith(expect.objectContaining({ branchId: BRANCH }));
+  });
+
+  it("offers an optional stop date on a replacement scope card and binds a selected date to the source schedule", async () => {
+    const h = persistedWatchScopeJourney("Verification watch of lunch offers near Jumeirah");
+    const first = await h.submit(h.initialSpec, { frequency: "daily", confirm_watch: true });
+    const needed = await first.json();
+    expect(needed.questionnaire.items.filter((item: { key: string }) => item.key === "end_date"))
+      .toEqual([expect.objectContaining({ kind: "date", required: false })]);
+    const endDate = new Date().toISOString().slice(0, 10);
+    const created = await h.submit(needed.questionnaire, {
+      research_area: "Jumeirah lunch offers", end_date: endDate, confirm_watch: true,
+    });
+    expect(created.status).toBe(201);
+    expect((await created.json()).watchChoice.outcome).toBe("created");
+    expect(h.projects.createProject).toHaveBeenCalledWith(expect.objectContaining({
+      schedule: expect.objectContaining({ cadence: "daily", endDate }),
+    }));
+  });
+
+  it("rejects modified persisted continuation values and fresh confirmation decline before appending or creating", async () => {
+    const h = persistedWatchScopeJourney("Verification watch of lunch offers near Jumeirah");
+    const first = await h.submit(h.initialSpec, { frequency: "daily", confirm_watch: true });
+    const needed = await first.json();
+    const count = h.messages.length;
+    const declined = await h.submit(needed.questionnaire, { research_area: "Jumeirah lunch offers", confirm_watch: false });
+    expect(declined.status).toBe(400);
+    expect(h.messages).toHaveLength(count);
+    const note = h.messages.at(-1)!;
+    const saved = parseQuestionnaireState(note.body)!;
+    note.body = encodeQuestionnaireState({ ...saved, continuationAnswers: { ...saved.continuationAnswers, frequency: "monthly" } });
+    const tampered = await h.submit(needed.questionnaire, { research_area: "Jumeirah lunch offers", confirm_watch: true });
+    expect(tampered.status).toBe(400);
+    expect(h.messages).toHaveLength(count);
+    expect(h.projects.createProject).not.toHaveBeenCalled();
+  });
+
   it("creates a second watch behind start_fresh with pre-filled payload, link, and audit event", async () => {
     const projects = watchRepo({ listActiveProjects: async () => [] });
     mocks.createProjects.mockReturnValue(projects);
@@ -1328,7 +1620,7 @@ describe("agent thread answers route watch one-tap (B4)", () => {
     );
   });
 
-  it("creates behind a missing-fields submit only when the re-route stays watch", async () => {
+  it("keeps the saved watch intent when the classifier changes its mind about encoded answers", async () => {
     const projects = watchRepo({ listActiveProjects: async () => [] });
     mocks.createProjects.mockReturnValue(projects);
     mocks.getOrganizationContext.mockResolvedValue({
@@ -1350,8 +1642,8 @@ describe("agent thread answers route watch one-tap (B4)", () => {
     expect(createdBody.watchChoice.outcome).toBe("created");
     expect(projects.createProject).toHaveBeenCalledTimes(1);
 
-    // A research re-route answers the same card shape without creating —
-    // the watch lane never fires off-intent.
+    // A saved watch card never turns encoded answers into a new research
+    // request. The current grants and source RPC still govern creation.
     projects.createProject.mockClear();
     mocks.propose.mockResolvedValue({ intent: "research_once", confidence: "high", missing: [] });
     const researched = await postAnswers({
@@ -1362,8 +1654,9 @@ describe("agent thread answers route watch one-tap (B4)", () => {
     });
     expect(researched.status).toBe(201);
     const researchedBody = await researched.json();
-    expect(researchedBody.watchChoice).toBeUndefined();
-    expect(projects.createProject).not.toHaveBeenCalled();
+    expect(researchedBody.intent).toBe("watch");
+    expect(researchedBody.watchChoice.outcome).toBe("created");
+    expect(projects.createProject).toHaveBeenCalledTimes(1);
   });
 
   it("converges to the duplicate card when a twin exists on the missing-fields path", async () => {

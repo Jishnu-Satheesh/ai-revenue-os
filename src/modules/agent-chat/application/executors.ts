@@ -12,6 +12,7 @@ import {
   RESEARCH_PROJECT_CADENCES,
   researchProjectScheduleSchema,
 } from "@/domain/growth-intelligence/project";
+import { marketProfileDocumentSchema } from "@/domain/growth-intelligence/schemas";
 import { DomainError } from "@/lib/errors";
 import {
   buildAgentContextPack,
@@ -218,21 +219,6 @@ export const profileScopePointerSchema = z
 
 export type ProfileScopePointer = z.infer<typeof profileScopePointerSchema>;
 
-const profileScopeQuerySourceSchema = z
-  .object({
-    publicBusinessName: z.string().trim().min(1).max(160),
-    approvedDomains: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
-    niches: z.array(z.string().trim().min(1).max(120)).min(1).max(12),
-    city: z.string().trim().min(1).max(160),
-    countryCode: z.string().trim().min(1).max(8),
-    topics: z.array(z.string().trim().min(1).max(160)).min(1).max(20),
-    competitors: z
-      .array(z.object({ name: z.string().trim().min(1).max(160) }).passthrough())
-      .max(20)
-      .default([]),
-  })
-  .strict();
-
 /** Hard bound on executor-built candidate queries per dispatch. */
 export const MAX_PROFILE_SCOPE_QUERIES = 8;
 
@@ -245,22 +231,27 @@ export const MAX_PROFILE_SCOPE_QUERIES = 8;
  * de-duplicated; an empty scope yields zero queries, never a guess.
  */
 export function buildProfileScopeQueries(document: unknown): string[] {
-  const parsed = profileScopeQuerySourceSchema.safeParse(document);
+  const parsed = marketProfileDocumentSchema.safeParse(document);
   if (!parsed.success) return [];
   const scope = parsed.data;
+  const city = scope.geographies.find((geography) => geography.layer === "city");
+  if (!city || city.layer !== "city") return [];
+  const excludedCompetitors = new Set(scope.sourcePolicy.excludedCompetitorKeys);
   const candidates: string[] = [];
   const push = (query: string) => {
     const clean = query.trim().replace(/\s+/g, " ").slice(0, 160);
     if (clean.length > 0 && !candidates.includes(clean)) candidates.push(clean);
   };
   for (const topic of scope.topics.slice(0, 5)) {
-    push(`${scope.publicBusinessName} ${scope.city} ${topic}`);
+    push(`${scope.publicIdentity.approvedName} ${city.name} ${topic.label}`);
   }
-  for (const competitor of scope.competitors.slice(0, 5)) {
-    push(`${competitor.name} ${scope.city} ${scope.niches[0] ?? ""}`);
+  for (const competitor of scope.competitors
+    .filter((competitor) => !excludedCompetitors.has(competitor.key))
+    .slice(0, 5)) {
+    push(`${competitor.name} ${city.name} ${scope.nicheDescriptors[0] ?? ""}`);
   }
-  if (scope.niches[0]) {
-    push(`${scope.niches[0]} ${scope.city} ${scope.countryCode} market`);
+  if (scope.nicheDescriptors[0]) {
+    push(`${scope.nicheDescriptors[0]} ${city.name} ${city.countryCode} market`);
   }
   return candidates.slice(0, MAX_PROFILE_SCOPE_QUERIES);
 }
@@ -722,23 +713,21 @@ export type WatchCandidate = {
   scopeFingerprint: string | null;
 };
 
+export type WatchKeyedCreateInput = Omit<ExecuteWatchInput, "title" | "businessContextSnapshotId"> & {
+  title: string;
+  businessContextSnapshotId: string;
+  scopeFingerprint: string;
+};
+
 export type WatchProjectSeams = {
   listActive(input: {
     organizationId: string;
     branchId: string;
     limit: number;
   }): Promise<WatchCandidate[]>;
-  createKeyed(input: {
-    organizationId: string;
-    branchId: string;
-    title: string;
-    question: string;
-    mode: "one-time" | "recurring";
-    schedule?: z.infer<typeof researchProjectScheduleSchema>;
-    actorId: string;
-    idempotencyKey: string;
-    scopeFingerprint: string;
-  }): Promise<{ projectId: string; replayed: boolean }>;
+  /** Exact tenant/key source record only; a new key never inherits a prior choice. */
+  findCreatedByKey?(input: WatchKeyedCreateInput): Promise<string | null>;
+  createKeyed(input: WatchKeyedCreateInput): Promise<{ projectId: string; replayed: boolean }>;
 };
 
 function frequencyForWatchMode(mode: "one-time" | "recurring", cadence?: string): string {
@@ -796,7 +785,24 @@ export async function executeWatchCreate(
     frequency,
   });
 
-  const siblings = await seams.listActive({
+  const createInput: WatchKeyedCreateInput = {
+    organizationId: parsed.organizationId,
+    branchId: parsed.branchId,
+    title,
+    question: parsed.question,
+    mode: parsed.mode,
+    ...(parsed.schedule ? { schedule: parsed.schedule } : {}),
+    actorId: parsed.actorId,
+    idempotencyKey: parsed.idempotencyKey,
+    scopeFingerprint,
+    researchArea: parsed.researchArea,
+    competitors: parsed.competitors,
+    investigationAreas: parsed.investigationAreas,
+    businessContextSnapshotId:
+      parsed.businessContextSnapshotId ?? "00000000-0000-0000-0000-000000000000",
+  };
+  const recordedProjectId = await seams.findCreatedByKey?.(createInput);
+  const siblings = recordedProjectId ? [] : await seams.listActive({
     organizationId: parsed.organizationId,
     branchId: parsed.branchId,
     limit: 50,
@@ -826,17 +832,10 @@ export async function executeWatchCreate(
     };
   }
 
-  const created = await seams.createKeyed({
-    organizationId: parsed.organizationId,
-    branchId: parsed.branchId,
-    title,
-    question: parsed.question,
-    mode: parsed.mode,
-    ...(parsed.schedule ? { schedule: parsed.schedule } : {}),
-    actorId: parsed.actorId,
-    idempotencyKey: parsed.idempotencyKey,
-    scopeFingerprint,
-  });
+  const created = await seams.createKeyed(createInput);
+  if (recordedProjectId && created.projectId !== recordedProjectId) {
+    throw new DomainError("INTEGRATION_ERROR", "The saved watch could not be resumed safely.");
+  }
   return {
     outcome: created.replayed ? "replayed" : "created",
     projectId: created.projectId,
@@ -1579,6 +1578,7 @@ export type WatchChoiceSeams = {
   watchProjects?: {
     listActive?: WatchProjectSeams["listActive"];
     createKeyed?: WatchProjectSeams["createKeyed"];
+    findCreatedByKey?: WatchProjectSeams["findCreatedByKey"];
     readProject?: (input: {
       organizationId: string;
       projectId: string;
@@ -1708,7 +1708,7 @@ export async function requestWatchFromChoice(
           investigationAreas: parsed.prepared.investigationAreas,
           idempotencyKey: parsed.idempotencyKey,
         },
-        { listActive, createKeyed },
+        { listActive, createKeyed, findCreatedByKey: seams.watchProjects?.findCreatedByKey },
       );
       if (created.outcome === "duplicate") {
         return created;
@@ -1840,7 +1840,7 @@ const createPreparedWatchInputSchema = z
 export type CreatePreparedWatchInput = z.input<typeof createPreparedWatchInputSchema>;
 
 export type CreatePreparedWatchSeams = {
-  watchProjects: Pick<NonNullable<WatchChoiceSeams["watchProjects"]>, "listActive" | "createKeyed">;
+  watchProjects: Pick<NonNullable<WatchChoiceSeams["watchProjects"]>, "listActive" | "createKeyed" | "findCreatedByKey">;
   links?: WatchChoiceSeams["links"];
 };
 
@@ -1901,7 +1901,7 @@ export async function createPreparedWatch(
       investigationAreas: parsed.prepared.investigationAreas,
       idempotencyKey: parsed.idempotencyKey,
     },
-    { listActive, createKeyed },
+    { listActive, createKeyed, findCreatedByKey: seams.watchProjects.findCreatedByKey },
   );
   if (created.outcome === "duplicate") {
     return created;

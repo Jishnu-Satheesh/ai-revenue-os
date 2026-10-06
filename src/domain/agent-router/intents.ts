@@ -9,6 +9,9 @@ import { z } from "zod";
  */
 export const agentIntentSchema = z.enum([
   "answer_memory",
+  "business_advice",
+  "channel_assessment",
+  "report_intake",
   "research_once",
   "watch",
   "campaign_advice",
@@ -45,6 +48,9 @@ export const ROUTER_MESSAGE_MAX_CHARS = 20_000;
  */
 export const INTENT_EXECUTOR = {
   answer_memory: "memory_answer",
+  business_advice: "advice_lane",
+  channel_assessment: "analysis_lane",
+  report_intake: "report_lane",
   research_once: "research_lane",
   watch: "watch_lane",
   campaign_advice: "campaign_lane",
@@ -59,6 +65,9 @@ export type IntentExecutor = (typeof INTENT_EXECUTOR)[AgentIntent];
  * `answer_memory` with a safe reason code.
  */
 export const INTENT_REQUIRED_PERMISSION = {
+  business_advice: "channel.read",
+  channel_assessment: "channel.read",
+  report_intake: "report.upload",
   research_once: "growth_intelligence.manage",
   watch: "growth_intelligence.manage",
   campaign_advice: "campaign.create",
@@ -67,6 +76,9 @@ export const INTENT_REQUIRED_PERMISSION = {
 
 /** Safe reason code emitted when the gate above denies an intent. */
 export const INTENT_DENIED_REASON = {
+  business_advice: "ADVICE_REQUIRES_READ",
+  channel_assessment: "ANALYSIS_REQUIRES_READ",
+  report_intake: "REPORT_REQUIRES_UPLOAD",
   research_once: "RESEARCH_REQUIRES_MANAGE",
   watch: "WATCH_REQUIRES_MANAGE",
   campaign_advice: "CAMPAIGN_REQUIRES_CREATE",

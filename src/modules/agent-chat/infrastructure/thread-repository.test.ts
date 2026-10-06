@@ -53,6 +53,23 @@ function fakeQuery(rows: unknown[]) {
 }
 
 describe("thread repo replay", () => {
+  it("uses the last returned message as the next cursor so no row is skipped", async () => {
+    const first = { ...MESSAGE_ROW, id: "m1" };
+    const second = { ...MESSAGE_ROW, id: "m2", created_at: "2026-09-25T10:02:00.000Z" };
+    const third = { ...MESSAGE_ROW, id: "m3", created_at: "2026-09-25T10:03:00.000Z" };
+    const query = fakeQuery([first, second, third]);
+    const repo = createThreadRepository({
+      rpc: vi.fn(),
+      from: () => query.builder,
+    });
+    const page = await repo.listMessages({ organizationId: "o", threadId: "t1", limit: 2 });
+    expect(page.messages.map((message) => message.id)).toEqual(["m1", "m2"]);
+    expect(JSON.parse(atob(page.nextCursor!.replace(/-/g, "+").replace(/_/g, "/")))).toEqual({
+      createdAt: second.created_at,
+      id: "m2",
+    });
+  });
+
   it("returns kept thread on same key+body", async () => {
     const rpc = vi.fn(async () => ({ data: { id: "t1", replayed: true }, error: null }));
     const repo = createThreadRepository({ rpc });

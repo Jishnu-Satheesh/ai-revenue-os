@@ -284,3 +284,42 @@
     }
   }
 }
+
+/* Universal agent shell: circulating glow ring around the text area.
+   A conic-gradient arc orbits the panel via a registered angle custom
+   property; under prefers-reduced-motion the ring renders once as a
+   static glow. Prototype hue language: warm orange into violet/cyan. */
+@property --agent-glow-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes agent-glow-orbit {
+  to {
+    --agent-glow-angle: 360deg;
+  }
+}
+
+.agent-glow-ring {
+  background: conic-gradient(
+    from var(--agent-glow-angle),
+    rgb(249 115 22 / 0) 0deg,
+    rgb(249 115 22 / 0.95) 35deg,
+    rgb(217 70 239 / 0.9) 110deg,
+    rgb(139 92 246 / 0.95) 160deg,
+    rgb(56 189 248 / 0.85) 230deg,
+    rgb(249 115 22 / 0) 300deg,
+    rgb(249 115 22 / 0) 360deg
+  );
+  box-shadow:
+    0 0 18px 0 rgb(139 92 246 / 0.5),
+    0 0 52px -6px rgb(249 115 22 / 0.4),
+    0 18px 48px -18px rgb(0 0 0 / 0.55);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .agent-glow-ring-animated {
+    animation: agent-glow-orbit 5s linear infinite;
+  }
+}

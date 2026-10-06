@@ -502,14 +502,11 @@ export function createThreadRepository(persistence: ThreadPersistence) {
         if (!validated.success) readFailure();
         threads.push(mapThreadRow(validated.data as z.infer<typeof threadRowSchema>));
       }
-      const extra = rows[limit];
-      const extraParsed = extra ? threadRowSchema.safeParse(extra) : null;
+      const hasMore = rows.length > limit;
+      const last = threads.at(-1);
       return {
         threads,
-        nextCursor:
-          extraParsed && extraParsed.success
-            ? encodeCursor({ updatedAt: extraParsed.data.updated_at, id: extraParsed.data.id })
-            : null,
+        nextCursor: hasMore && last ? encodeCursor({ updatedAt: last.updatedAt, id: last.id }) : null,
       };
     },
 
@@ -574,14 +571,11 @@ export function createThreadRepository(persistence: ThreadPersistence) {
         if (!validated.success) readFailure();
         messages.push(mapMessageRow(validated.data as z.infer<typeof messageRowSchema>));
       }
-      const extra = rows[limit];
-      const extraParsed = extra ? messageRowSchema.safeParse(extra) : null;
+      const hasMore = rows.length > limit;
+      const last = messages.at(-1);
       return {
         messages,
-        nextCursor:
-          extraParsed && extraParsed.success
-            ? encodeCursor({ createdAt: extraParsed.data.created_at, id: extraParsed.data.id })
-            : null,
+        nextCursor: hasMore && last ? encodeCursor({ createdAt: last.createdAt, id: last.id }) : null,
       };
     },
 

@@ -146,7 +146,7 @@ select extensions.is(
 
 set local request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000003';
 
-select extensions.throws_ok(
+select extensions.lives_ok(
   $_$select public.create_agent_thread_keyed(
     'e8000000-0000-4000-8000-000000000201'::uuid,
     'e8000000-0000-4000-8000-000000000003'::uuid,
@@ -154,8 +154,7 @@ select extensions.throws_ok(
     'Viewer thread',
     'quick'
   )$_$,
-  '42501', null,
-  'a viewer cannot create a thread: read-only means read'
+  'a viewer may create its own quick chat for read-only advice'
 );
 
 -- 4. Viewer cannot append ----------------------------------------------------------------
@@ -170,7 +169,7 @@ select extensions.throws_ok(
     'viewer-msg-1'
   )$_$,
   '42501', null,
-  'a viewer cannot append a message: read-only means read'
+  'a viewer cannot append messages to another member thread'
 );
 
 -- 5. Viewer cannot relink ------------------------------------------------------------------
@@ -193,7 +192,7 @@ set local request.jwt.claim.sub = 'e8000000-0000-4000-8000-000000000002';
 select extensions.ok(
   (select (s.r ->> 'threadId') = (select t.r ->> 'threadId' from t_thread_a t)
      and (s.r ->> 'replayed')::boolean
-     and (select count(*)::integer from public.agent_threads) = 2
+     and (select count(*)::integer from public.agent_threads) = 3
    from (select public.create_agent_thread_keyed(
      'e8000000-0000-4000-8000-000000000201'::uuid,
      'e8000000-0000-4000-8000-000000000002'::uuid,

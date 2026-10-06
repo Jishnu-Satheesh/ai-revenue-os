@@ -7,6 +7,8 @@ import { logger } from "@/lib/logger";
 import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { routeAgentMessage } from "@/modules/agent-router/application/router-service";
 import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
+import { loadAgentAdviceContext } from "@/modules/agent-chat/application/advice-context-reader";
+import type { AgentAdviceContext } from "@/modules/agent-chat/application/advice-context";
 import { threadRouteParamsSchema } from "@/modules/agent-chat/application/api-schemas";
 import {
   agentApiErrorResponse,
@@ -17,6 +19,8 @@ import {
   ANSWER_MODEL_MAX_OUTPUT_TOKENS,
   ANSWER_MODEL_TEMPERATURE,
   answerDraftSchema,
+  answerContextDigest,
+  auditLinksFromAdvice,
   buildAnswerIdempotencyKey,
   buildFallbackAnswer,
   buildSynthesisPrompt,
@@ -435,16 +439,17 @@ const STREAM_FALLBACK_TEXT = {
 function disposeStreamCandidate(
   raw: unknown,
   pack: ContextPack | null,
+  advice?: AgentAdviceContext,
 ): AnswerDraft | null {
   const candidate = synthesisCandidateSchema.safeParse(raw);
   if (!candidate.success) return null;
   try {
-    const allowed = new Set(pack?.sources ?? []);
+    const allowed = new Set([...(pack?.sources ?? []), ...(advice?.entries.map((entry) => entry.sourceId) ?? [])]);
     const citations: AnswerDraft["citations"] = [];
     const dropped: string[] = [];
     for (const citation of candidate.data.citations) {
       if (allowed.has(citation.sourceId)) {
-        citations.push({ ...citation, digest: pack?.digest ?? "unbound-context" });
+        citations.push({ ...citation, digest: answerContextDigest(pack, advice) });
       } else {
         dropped.push(citation.sourceId);
       }
@@ -473,6 +478,8 @@ function disposeStreamCandidate(
       citations,
       limitations: limitations.slice(0, 60),
       estimates: candidate.data.estimates,
+      periodSwitch: advice?.periodSwitch ?? null,
+      links: auditLinksFromAdvice(advice),
     });
   } catch {
     return null;
@@ -601,6 +608,8 @@ function logInvalidCandidate(logContext: StreamLogContext): void {
  */
 async function runStreamingSynthesis(input: {
   pack: ContextPack | null;
+  question: string;
+  advice?: AgentAdviceContext;
   routingNote: string;
   mode: ThreadMode;
   correlationId: string;
@@ -631,13 +640,13 @@ async function runStreamingSynthesis(input: {
   };
 
   if (!override && input.pack === null) {
-    const draft = buildFallbackAnswer(null, "No context pack was bound to this answer.");
+    const draft = buildFallbackAnswer(null, "No context pack was bound to this answer.", input);
     return readyFallback(draft, "not_configured");
   }
   const built = input.pack
-    ? buildSynthesisPrompt(input.pack, input.routingNote, input.mode)
+    ? buildSynthesisPrompt(input.pack, input.routingNote, input.mode, input)
     : { system: "unbound-context", prompt: input.routingNote };
-  const sourceIds = input.pack?.sources ?? [];
+  const sourceIds = [...new Set([...(input.pack?.sources ?? []), ...(input.advice?.entries.map((entry) => entry.sourceId) ?? [])])];
 
   try {
     const live = override
@@ -688,12 +697,13 @@ async function runStreamingSynthesis(input: {
       input.timeoutMs,
       input.requestSignal,
     );
-    const draft = disposeStreamCandidate(consumed.raw, input.pack);
+    const draft = disposeStreamCandidate(consumed.raw, input.pack, input.advice);
     if (!draft) {
       logInvalidCandidate(input.logContext);
       const fallback = buildFallbackAnswer(
         input.pack,
         STREAM_FALLBACK_TEXT.invalid_candidate,
+        input,
       );
       logStreamFallback(input.logContext, "invalid_candidate");
       return {
@@ -707,6 +717,7 @@ async function runStreamingSynthesis(input: {
       const fallback = buildFallbackAnswer(
         input.pack,
         STREAM_FALLBACK_TEXT.invalid_candidate,
+        input,
       );
       logStreamFallback(input.logContext, "invalid_candidate");
       return {
@@ -729,6 +740,7 @@ async function runStreamingSynthesis(input: {
       const draft = buildFallbackAnswer(
         input.pack,
         STREAM_FALLBACK_TEXT.not_configured,
+        input,
       );
       return readyFallback(draft, "not_configured");
     }
@@ -750,7 +762,7 @@ async function runStreamingSynthesis(input: {
         ...(failure.finishReason ? { errorCode: failure.finishReason } : {}),
       });
     }
-    const fallback = buildFallbackAnswer(input.pack, STREAM_FALLBACK_TEXT[reason]);
+    const fallback = buildFallbackAnswer(input.pack, STREAM_FALLBACK_TEXT[reason], input);
     logStreamFallback(input.logContext, reason);
     return {
       draft: fallback,
@@ -852,6 +864,27 @@ export async function GET(
       routingNote = `stream answer (page=${page})`;
     }
 
+    let advice: AgentAdviceContext | undefined;
+    try {
+      advice = await loadAgentAdviceContext({
+        supabase: context.supabase,
+        organizationId,
+        actorId: context.user.id,
+        role: context.membership.role,
+        question: userMessageBody,
+        correlationId,
+      });
+    } catch {
+      // A failed optional reader cannot erase the user's question or the
+      // already-authorized context pack. The answer states its limitations.
+      logger.warn("agent_stream.advice_read_degraded", {
+        organizationId,
+        threadId: thread.id,
+        correlationId,
+        errorCode: "ADVICE_READ_FAILED",
+      });
+    }
+
     const timeoutMs = testSeams?.timeoutMs ?? STREAM_SYNTHESIS_TIMEOUT_MS;
 
     // Capture server-owned values for the stream closure.
@@ -881,6 +914,8 @@ export async function GET(
         try {
           outcome = await runStreamingSynthesis({
             pack,
+            question: userMessageBody,
+            ...(advice ? { advice } : {}),
             routingNote,
             mode: thread.mode,
             correlationId: endCorrelationId,
@@ -905,7 +940,10 @@ export async function GET(
               errorCode: toPublicError(error).code,
             });
             outcome = {
-              draft: buildFallbackAnswer(pack, STREAM_FALLBACK_TEXT.synthesis_failed),
+              draft: buildFallbackAnswer(pack, STREAM_FALLBACK_TEXT.synthesis_failed, {
+                question: userMessageBody,
+                ...(advice ? { advice } : {}),
+              }),
               fallback: true,
               reason: "synthesis_failed",
             };
@@ -1012,10 +1050,10 @@ export async function GET(
           // Last resort: never leave the drawer hanging on a half-open
           // stream — close with an honest fallback end payload.
           try {
-            const fallback = buildFallbackAnswer(
-              pack,
-              STREAM_FALLBACK_TEXT.synthesis_failed,
-            );
+            const fallback = buildFallbackAnswer(pack, STREAM_FALLBACK_TEXT.synthesis_failed, {
+              question: userMessageBody,
+              ...(advice ? { advice } : {}),
+            });
             const endPayload = streamEndPayloadSchema.parse({
               messageId: null,
               replayed: false,

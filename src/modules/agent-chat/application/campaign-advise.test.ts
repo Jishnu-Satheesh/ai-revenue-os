@@ -21,6 +21,12 @@ import {
 } from "@/modules/agent-chat/application/campaign-advise";
 import { buildAgentContextPack } from "@/modules/agent-chat/application/context-pack";
 
+const providerCalls = vi.hoisted(() => ({ generateObject: vi.fn() }));
+vi.mock("ai", () => ({ generateObject: providerCalls.generateObject }));
+vi.mock("@ai-sdk/google", () => ({
+  createGoogleGenerativeAI: () => (modelId: string) => ({ modelId }),
+}));
+
 const ORGANIZATION = "00000000-0000-4000-8000-000000000000";
 const ACTOR = "11111111-1111-4111-8111-111111111111";
 const THREAD = "22222222-2222-4222-8222-222222222222";
@@ -443,6 +449,36 @@ describe("campaign ideas producer (Task 6 binding)", () => {
 });
 
 describe("campaign ideas generation (strong tier, pack-cited)", () => {
+  it("uses the ideas schema on the configured live provider path", async () => {
+    vi.stubEnv("GOOGLE_GENERATIVE_AI_API_KEY", "test-key");
+    vi.stubEnv("AI_ANSWER_STRONG_MODEL", "test-strong-model");
+    const pack = await testPack();
+    const candidate = {
+      ideas: [
+        { title: "Lunch rush bundle", description: "Noon combo.", sourceIds: ["f1"] },
+        { title: "Weekend family table", description: "Saturday set menu.", sourceIds: ["f1"] },
+        { title: "Late-night dessert", description: "Dessert counter.", sourceIds: ["f1"] },
+      ],
+      recommendedIndex: 1,
+    };
+    // Simulate the SDK's schema disposal rather than returning an object
+    // that the real requested schema could never produce.
+    providerCalls.generateObject.mockImplementationOnce(async (request) => ({
+      object: request.schema.parse(candidate),
+    }));
+    const card = await generateCampaignIdeas({
+      pack,
+      routingNote: "intent=campaign_advice",
+      page: "overview",
+      contextDigest: "abcdef1234567890",
+    });
+    expect(card?.kind).toBe("campaign_ideas");
+    expect(card?.items[0]?.options?.map((option) => option.label)).toEqual([
+      "Lunch rush bundle", "Weekend family table", "Late-night dessert",
+    ]);
+    expect(card?.items[0]?.options?.filter((option) => option.recommended)).toHaveLength(1);
+  });
+
   it("generates the card through the strong-tier synthesizer with pack-cited inputs", async () => {
     const pack = await testPack();
     const sourceId = pack.sources[0];

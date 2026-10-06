@@ -1,3 +1,4 @@
+import { signQuestionnaire, verifyQuestionnaire } from "@/modules/agent-chat/infrastructure/questionnaire-signature";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -25,6 +26,8 @@ vi.mock("@/modules/agent-router/infrastructure/light-model-provider", () => ({
 }));
 vi.mock("@/modules/agent-chat/application/api", () => ({
   createAgentContextReaders: mocks.createReaders,
+  createAgentQuestionnaireAuthority: () => ({ sign: signQuestionnaire, verify: verifyQuestionnaire }),
+  createAgentResearchProfileResolver: () => (input: unknown) => mocks.createReaders().getMarketProfile?.(input),
 }));
 vi.mock("@trigger.dev/sdk", () => ({
   tasks: { trigger: mocks.trigger },

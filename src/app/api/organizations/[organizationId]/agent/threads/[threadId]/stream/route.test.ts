@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   getOrganizationContext: vi.fn(),
   createRepo: vi.fn(),
   createReaders: vi.fn(),
+  loadAdvice: vi.fn(),
 }));
 
 vi.mock("@/lib/api/organization-context", () => ({
@@ -18,6 +19,9 @@ vi.mock("@/modules/agent-chat/infrastructure/thread-repository", async (importOr
 });
 vi.mock("@/modules/agent-chat/application/api", () => ({
   createAgentContextReaders: mocks.createReaders,
+}));
+vi.mock("@/modules/agent-chat/application/advice-context-reader", () => ({
+  loadAgentAdviceContext: mocks.loadAdvice,
 }));
 vi.mock("@/lib/logger", () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
@@ -138,10 +142,22 @@ beforeEach(() => {
   clearStreamRouteTestSeams();
   mocks.getOrganizationContext.mockResolvedValue(operatorContext());
   mocks.createReaders.mockReturnValue({});
+  mocks.loadAdvice.mockResolvedValue({ entries: [], limitations: [], periodSwitch: null });
   mocks.createRepo.mockReturnValue(repoFake());
 });
 
 describe("agent thread stream route", () => {
+  it("gives streaming synthesis the current user question", async () => {
+    const source = vi.fn<AgentStreamSource>(async () => ({
+      deltas: ["Use a measured first-week baseline."],
+      candidate: { ...CANDIDATE, body: "Use a measured first-week baseline." },
+    }));
+    setStreamRouteTestSeams({ source });
+    const response = await GET(request(streamUrl()), params);
+    expect(response.status).toBe(200);
+    await response.text();
+    expect(source.mock.calls[0]?.[0].prompt).toContain(USER_MESSAGE_ROW.body);
+  });
   it("streams token frames, the done marker, and a validated end payload with durable persist", async () => {
     const source: AgentStreamSource = async () => ({
       deltas: ["Hello ", "world, here is what the stored context supports."],

@@ -728,7 +728,7 @@ export type GenerateCampaignIdeasInput = {
 export type GenerateCampaignIdeasSeams = {
   /**
    * Injected strong-tier model call. `undefined` (the default) uses the
-   * env-gated `createAnswerSynthesizer({ mode: "deepthink" })` — null
+   * env-gated campaign-ideas provider on the DeepThink tier — null
    * without an explicit strong-tier model, so unconfigured environments
    * get no card with zero provider calls. Pass `null` to force no card.
    */
@@ -816,7 +816,7 @@ export async function generateCampaignIdeas(
   const synthesize =
     "synthesize" in seams && seams.synthesize !== undefined
       ? seams.synthesize
-      : createAnswerSynthesizer({ mode: "deepthink" });
+      : createAnswerSynthesizer({ mode: "deepthink", candidateSchema: campaignIdeasCandidateSchema });
   if (synthesize === null) return null;
   let raw: unknown;
   try {

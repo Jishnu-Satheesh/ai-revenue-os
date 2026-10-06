@@ -136,7 +136,7 @@ describe("agent threads route", () => {
     expect(await replayed.json()).toMatchObject({ replayed: true });
   });
 
-  it("refuses thread creation for viewers without touching persistence", async () => {
+  it("allows viewers to create a quick advice thread through the fenced RPC", async () => {
     mocks.getOrganizationContext.mockResolvedValue({
       ...operatorContext(),
       membership: { role: "viewer" },
@@ -148,8 +148,8 @@ describe("agent threads route", () => {
       }),
       { params: Promise.resolve({ organizationId: ORGANIZATION }) },
     );
-    expect(response.status).toBe(403);
-    expect(mocks.createRepo).not.toHaveBeenCalled();
+    expect(response.status).toBe(200);
+    expect(mocks.createRepo).toHaveBeenCalled();
   });
 
   it("rejects a missing idempotency key and an over-200 title", async () => {

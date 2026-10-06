@@ -50,7 +50,15 @@ type LogContext = {
    * The agent router's classified intent. Bounded vocabulary, never the
    * user message or any model text.
    */
-  intent?: "answer_memory" | "research_once" | "watch" | "campaign_advice" | "profile_scope_change";
+  intent?:
+    | "answer_memory"
+    | "business_advice"
+    | "channel_assessment"
+    | "report_intake"
+    | "research_once"
+    | "watch"
+    | "campaign_advice"
+    | "profile_scope_change";
   /** The router's confidence. Bounded vocabulary. */
   confidence?: "high" | "medium" | "low";
   /**

@@ -72,6 +72,8 @@ function mockAgentFetch(
   return vi.fn(async (url: unknown, init?: RequestInit) => {
     const target = String(url);
     const method = init?.method ?? "GET";
+    if (target.endsWith("/turns") && method === "POST") return Response.json({ handled: false });
+    if (target.endsWith("/turns") && method === "GET") return Response.json({ turns: [] });
     if (target.endsWith("/agent/threads") && method === "POST") {
       return Response.json({ thread: THREAD, replayed: false, correlationId: "c1" });
     }
@@ -135,6 +137,33 @@ async function openModeMenu(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("shell", () => {
+  it("allows viewer advice and keeps report upload permission gated", async () => {
+    const user = userEvent.setup();
+    renderShell({ role: "viewer" });
+    await user.type(
+      screen.getByRole("textbox", { name: "Ask anything" }),
+      "How can we improve next month?",
+    );
+    expect(screen.getByRole("button", { name: "Send message" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: /Report attachments require upload permission/ }),
+    ).toBeDisabled();
+    expect(screen.getByText(/Ask for advice/)).toBeInTheDocument();
+  });
+
+  it("selects and removes one CSV or XLSX report through the accessible picker", async () => {
+    const user = userEvent.setup();
+    renderShell({ role: "operator" });
+    await expandShell(user);
+    expect(screen.getByRole("button", { name: "Add report attachment" })).toBeEnabled();
+    await user.upload(
+      screen.getByLabelText("Choose report attachment"),
+      new File(["report"], "talabat.csv", { type: "text/csv" }),
+    );
+    expect(screen.getByText("talabat.csv")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove report attachment" }));
+    expect(screen.queryByText("talabat.csv")).not.toBeInTheDocument();
+  });
   it("shows Quick default with inert voice and attach", () => {
     renderShell();
     expect(screen.getByPlaceholderText(/ask anything/i)).toBeDefined();
@@ -159,14 +188,18 @@ describe("shell", () => {
     await expandShell(user);
     expect(screen.getByRole("button", { name: /what do we know/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /voice.*coming soon/i })).toBeDisabled();
-    expect(screen.getByRole("button", { name: /attachments.*coming soon/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /attachments require upload permission/i }),
+    ).toBeDisabled();
   });
 
   it("defaults to Quick answer with voice and attach inert", async () => {
     const user = userEvent.setup();
     renderShell();
     await expandShell(user);
-    expect(screen.getByRole("button", { name: /attachments.*coming soon/i })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: /attachments require upload permission/i }),
+    ).toBeDisabled();
     expect(screen.getByRole("button", { name: /voice.*coming soon/i })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: /answer mode/i }));
     expect(await screen.findByRole("menuitemradio", { name: /quick/i })).toHaveAttribute(
@@ -214,7 +247,7 @@ describe("shell", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it("sends on Enter, opens the drawer, routes through the three Task 3 calls, and keeps controls", async () => {
+  it("sends on Enter, checks durable handling before legacy routing, and keeps controls", async () => {
     const user = userEvent.setup();
     renderShell({ role: "operator", permissions: [] });
     await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
@@ -229,14 +262,15 @@ describe("shell", () => {
       const posts = fetchMock.mock.calls.filter(
         (call) => (call[1] as RequestInit | undefined)?.method === "POST",
       );
-      expect(posts).toHaveLength(3);
+      expect(posts).toHaveLength(4);
     });
-    const calls = fetchMock.mock.calls.map(
-      ([url, init]) => `${(init as RequestInit)?.method} ${url}`,
-    );
+    const calls = fetchMock.mock.calls
+      .filter(([, init]) => (init as RequestInit)?.method === "POST")
+      .map(([url, init]) => `${(init as RequestInit)?.method} ${url}`);
     expect(calls[0]).toMatch(/\/agent\/threads$/);
     expect(calls[1]).toMatch(/\/messages$/);
-    expect(calls[2]).toMatch(/\/route\?page=overview$/);
+    expect(calls[2]).toMatch(/\/turns$/);
+    expect(calls[3]).toMatch(/\/route\?page=overview$/);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
     // Steps stay always visible inline: the narrated intent renders with no
@@ -288,9 +322,7 @@ describe("shell", () => {
     // Still in-flow after the drag: only the shared container owns a transform.
     expect(section.className).not.toMatch(/(^|\s)fixed(\s|$)/);
     expect(section.style.transform).toBe("");
-    const unit = screen
-      .getByPlaceholderText(/ask anything/i)
-      .closest("div.fixed") as HTMLElement;
+    const unit = screen.getByPlaceholderText(/ask anything/i).closest("div.fixed") as HTMLElement;
     expect(unit.style.transform).toBe("translate3d(50px, -30px, 0)");
   });
 
@@ -313,9 +345,7 @@ describe("shell", () => {
     // Single source of truth: the shell container owns the unit transform
     // (bar + drawer move as one); the drawer section applies size only, so
     // the offset never stacks 2x on the transformed-ancestor block.
-    const unit = screen
-      .getByPlaceholderText(/ask anything/i)
-      .closest("div.fixed") as HTMLElement;
+    const unit = screen.getByPlaceholderText(/ask anything/i).closest("div.fixed") as HTMLElement;
     expect(unit.style.transform).toBe("translate3d(50px, -30px, 0)");
     expect(section.style.transform).toBe("");
 

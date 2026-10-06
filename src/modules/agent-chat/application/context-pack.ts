@@ -111,9 +111,13 @@ const marketProfileSchema = z.union([
       versionId: z.string().trim().min(1).max(200),
       digest: z.string().trim().min(1).max(256),
       niche: z.string().trim().max(280).optional(),
+      branchId: z.string().uuid().optional(),
     })
     .strict(),
-  z.object({ status: z.literal("missing") }).strict(),
+  z.object({
+    status: z.literal("missing"),
+    reasonCode: z.enum(["PROFILE_NOT_CONFIRMED", "PROFILE_SCOPE_MISMATCH"]).optional(),
+  }).strict(),
 ]);
 
 const memoryHitSchema = z
@@ -228,7 +232,7 @@ export type ContextPackReaders = {
     endUtc: string;
     windowDays: ContextPackWindowDays;
   }) => Promise<unknown>;
-  getMarketProfile?: (scope: { organizationId: string }) => Promise<unknown>;
+  getMarketProfile?: (scope: { organizationId: string; branchId?: string }) => Promise<unknown>;
   searchMemory?: (scope: { organizationId: string; userId: string }) => Promise<unknown>;
   getEconomicsReadiness?: (scope: { organizationId: string }) => Promise<unknown>;
   getTimeline?: (scope: {
@@ -688,7 +692,10 @@ export async function buildAgentContextPack(
   if (readers.getMarketProfile) {
     const getMarketProfile = readers.getMarketProfile;
     const { value } = await settle(() =>
-      getMarketProfile({ organizationId: scope.organizationId }),
+      getMarketProfile({
+        organizationId: scope.organizationId,
+        ...(scope.branchId ? { branchId: scope.branchId } : {}),
+      }),
     );
     if (value === null) {
       limitations.push("Market Profile unavailable; scoped research cannot bind a version.");
@@ -703,7 +710,11 @@ export async function buildAgentContextPack(
           cite(parsed.data.versionId);
         } else {
           limitations.push(
-            "No current Market Profile version; scoped research cannot bind a version.",
+            parsed.data.reasonCode === "PROFILE_NOT_CONFIRMED"
+              ? "The current Market Profile is not confirmed; scoped research cannot bind a version."
+              : parsed.data.reasonCode === "PROFILE_SCOPE_MISMATCH"
+                ? "The Market Profile does not match the requested branch; scoped research cannot bind a version."
+                : "No current Market Profile version; scoped research cannot bind a version.",
           );
         }
       }

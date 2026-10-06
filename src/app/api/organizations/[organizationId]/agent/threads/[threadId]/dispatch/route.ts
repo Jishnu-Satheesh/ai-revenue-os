@@ -7,7 +7,7 @@ import { logger } from "@/lib/logger";
 import { createEventPublisher } from "@/domain/events/publisher";
 import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
 import { createThreadRepository } from "@/modules/agent-chat/infrastructure/thread-repository";
-import { createAgentContextReaders } from "@/modules/agent-chat/application/api";
+import { createAgentResearchProfileResolver } from "@/modules/agent-chat/application/api";
 import { createThreadService } from "@/modules/agent-chat/application/thread-service";
 import {
   dispatchBodySchema,
@@ -57,6 +57,7 @@ const profilePointerSchema = z
     status: z.literal("current"),
     versionId: z.string().trim().min(1).max(200),
     digest: z.string().trim().min(1).max(256),
+    branchId: z.string().uuid().optional(),
   })
   .passthrough();
 
@@ -103,6 +104,7 @@ export async function POST(
               actorId: payload.actorId as string,
               threadId: payload.threadId as string,
               messageDigest: payload["messageDigest"] as string,
+              ...(typeof payload["branchId"] === "string" ? { branchId: payload["branchId"] } : {}),
               profileVersionId: payload["profileVersionId"] as string,
               profileDigest: payload["profileDigest"] as string,
               correlationId: payload.correlationId,
@@ -157,14 +159,15 @@ export async function POST(
         // Market Profile pointer through the authenticated readers (the
         // same lane the context pack uses). A client can never widen
         // scope, and the worker re-validates the digest before spending.
-        resolveProfilePointer: async ({ organizationId: scopeOrganizationId }) => {
-          const readers = createAgentContextReaders(context.supabase);
-          const pointer = await readers.getMarketProfile?.({
+        resolveProfilePointer: async ({ organizationId: scopeOrganizationId, question }) => {
+          const pointer = await createAgentResearchProfileResolver(context.supabase)({
             organizationId: scopeOrganizationId,
+            question,
           });
           const parsed = profilePointerSchema.safeParse(pointer);
           return parsed.success
-            ? { versionId: parsed.data.versionId, digest: parsed.data.digest }
+            ? { versionId: parsed.data.versionId, digest: parsed.data.digest,
+                ...(parsed.data.branchId ? { branchId: parsed.data.branchId } : {}) }
             : null;
         },
         // Opportunity resolver: the bound row read in-org through the

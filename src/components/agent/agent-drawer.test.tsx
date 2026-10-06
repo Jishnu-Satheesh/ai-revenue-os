@@ -18,6 +18,9 @@ import { AgentQuestionnaireCard } from "@/components/agent/agent-questionnaire-c
 import { AgentResponseMessage } from "@/components/agent/agent-response-message";
 import { encodeAnswerBody } from "@/modules/agent-chat/application/answer-writer";
 import type { QuestionnaireSpec } from "@/domain/agent-router/contracts";
+import type { AgentTurnView } from "@/modules/agent-chat/infrastructure/turn-repository";
+import * as agentUpload from "@/components/agent/agent-attachment-upload";
+import { encodeQuestionnaireState } from "@/modules/agent-chat/application/questionnaire-state";
 import type {
   ThreadMessageView,
   ThreadSummary,
@@ -62,12 +65,17 @@ const ANSWERS_MESSAGE: ThreadMessageView = {
 };
 
 type FetchPlan = {
+  turnsStart?: unknown;
+  turns?: unknown[];
+  challengeAnswers?: unknown;
   route?: unknown | "hang" | { status: number; message: string };
   answers?: unknown | "hang" | { status: number; message: string };
   threads?: ThreadSummary[];
   /** Single-thread GET row (Slice C M9 poll endpoint). */
   thread?: ThreadSummary | null;
   messages?: ThreadMessageView[];
+  /** Oldest-first pages served by cursor for reopen pagination coverage. */
+  messagePages?: { messages: ThreadMessageView[]; nextCursor: string | null }[];
   /** Echo body for the POSTed user message (defaults to the fixed fixture). */
   userMessageBody?: string;
   /** Leave the GET messages read hanging (reopen skeleton coverage). */
@@ -100,6 +108,21 @@ function mockAgentFetch(plan: FetchPlan = {}) {
   return vi.fn(async (url: unknown, init?: RequestInit) => {
     const target = String(url);
     const method = init?.method ?? "GET";
+    if (target.endsWith("/turns") && method === "POST") {
+      const failure = asRouteFailure(plan.turnsStart);
+      if (failure)
+        return Response.json({ error: { message: failure.message } }, { status: failure.status });
+      return Response.json(plan.turnsStart ?? { handled: false });
+    }
+    if (target.endsWith("/turns") && method === "GET")
+      return Response.json({ turns: plan.turns ?? [] });
+    if (target.endsWith("/challenge-answers") && method === "POST")
+      return Response.json(
+        plan.challengeAnswers ?? {
+          turnId: "55555555-5555-4555-8555-555555555555",
+          status: "queued",
+        },
+      );
     if (target.endsWith("/agent/threads") && method === "POST") {
       return Response.json({ thread: THREAD, replayed: false, correlationId: "c1" });
     }
@@ -160,6 +183,12 @@ function mockAgentFetch(plan: FetchPlan = {}) {
           { error: { message: plan.messagesError.message, correlationId: "cerr" } },
           { status: plan.messagesError.status },
         );
+      }
+      if (plan.messagePages) {
+        const cursor = new URL(target, "http://agent.test").searchParams.get("cursor");
+        const index = cursor ? Number(cursor.replace("page-", "")) : 0;
+        const page = plan.messagePages[index] ?? { messages: [], nextCursor: null };
+        return Response.json({ ...page, correlationId: "c5" });
       }
       return Response.json({
         messages: plan.messages ?? [USER_MESSAGE],
@@ -371,9 +400,7 @@ describe("send pipeline", () => {
     // One thing at a time: the single in-progress row owns role="status" +
     // Spinner, so no second exploring row ever renders beside it.
     const steps = screen.getByLabelText("Agent run steps");
-    expect(
-      steps.querySelectorAll('[data-slot="marker"][role="status"]'),
-    ).toHaveLength(1);
+    expect(steps.querySelectorAll('[data-slot="marker"][role="status"]')).toHaveLength(1);
     expect(within(steps).queryByText(/exploring/i)).toBeNull();
     expect(screen.queryByText(/this run/i)).toBeNull();
     // The send pipeline posts thread + message + route; the
@@ -384,7 +411,7 @@ describe("send pipeline", () => {
       const posts = fetchMock.mock.calls.filter(
         (call) => (call[1] as RequestInit | undefined)?.method === "POST",
       );
-      expect(posts).toHaveLength(3);
+      expect(posts).toHaveLength(4);
     });
   });
 
@@ -399,7 +426,7 @@ describe("send pipeline", () => {
     // Steps stay always visible inline: the narrated intent renders in the
     // icon-led Marker list with no Steps collapse trigger anywhere.
     expect(within(thread).getByText("Understood: Memory answer")).toBeInTheDocument();
-    expect(within(thread).getByText("Checked organization memory")).toBeInTheDocument();
+    expect(within(thread).getByText("Reviewed available business context")).toBeInTheDocument();
     expect(within(thread).queryByRole("button", { name: /^steps$/i })).toBeNull();
     expect(within(thread).queryByText(/this run/i)).toBeNull();
     // The narrated intent shows only inside the icon-led Marker list — the
@@ -460,6 +487,58 @@ describe("send pipeline", () => {
 });
 
 describe("history", () => {
+  it("restores a saved editable campaign brief and its exact prefill link without claiming a draft", async () => {
+    const briefUrl = `/organizations/${ORGANIZATION}/campaigns/new?objective=Lunch+rush+bundle&audience=Noon+combo+for+nearby+offices.&reason=ADVICE_NO_OPPORTUNITY`;
+    const saved: ThreadMessageView = { ...USER_MESSAGE, id: "33333333-3333-4333-8333-333333333333", role: "assistant",
+      body: encodeAnswerBody({
+        body: "Lunch rush bundle is available as an editable campaign brief. There is no eligible opportunity for a governed draft.",
+        citations: [], limitations: [], estimates: [],
+        links: [{ label: "Open editable campaign brief", href: briefUrl }],
+      }),
+    };
+    globalThis.fetch = mockAgentFetch({ threads: [THREAD], messages: [USER_MESSAGE, saved] }) as never;
+    const user = userEvent.setup();
+    render(<Harness view="history" />);
+    await user.click(await screen.findByRole("button", { name: /open new chat/i }));
+    const log = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(log).findByText(/lunch rush bundle is available as an editable campaign brief/i)).toBeInTheDocument();
+    expect(within(log).getByRole("link", { name: "Open editable campaign brief" })).toHaveAttribute("href", briefUrl);
+    expect(within(log).queryByText(/draft created|draft ready|approved/i)).toBeNull();
+    expect(within(log).queryByRole("button", { name: /approve/i })).toBeNull();
+  });
+
+  it("restores linked watch and draft markers on reopen without claiming completion", async () => {
+    const linked: ThreadSummary = { ...THREAD,
+      linkedResearchProjectId: "55555555-5555-4555-8555-555555555555",
+      linkedDraftRequestId: "66666666-6666-4666-8666-666666666666",
+    };
+    globalThis.fetch = mockAgentFetch({ threads: [linked], thread: linked, messages: [USER_MESSAGE] }) as never;
+    const user = userEvent.setup();
+    render(<Harness view="history" />);
+    await user.click(await screen.findByRole("button", { name: /open new chat/i }));
+    const log = await screen.findByRole("log", { name: "Conversation thread" });
+    expect(await within(log).findByRole("link", { name: /linked research project/i }))
+      .toHaveAttribute("href", `/organizations/${ORGANIZATION}/growth-intelligence`);
+    expect(within(log).getByRole("link", { name: /linked draft request/i }))
+      .toHaveAttribute("href", `/organizations/${ORGANIZATION}/campaigns`);
+    expect(within(log).queryByText(/research complete|draft ready/i)).toBeNull();
+  });
+
+  it("restores the saved watch card on reopen and hides its internal envelope", async () => {
+    const user = userEvent.setup();
+    const spec: QuestionnaireSpec = { kind: "missing_fields", title: "Keep monitoring",
+      resumeKey: "router:watch:overview:abc123",
+      items: [{ key: "confirm_watch", label: "Create this recurring watch?", kind: "confirm", required: true }] };
+    const note = { ...USER_MESSAGE, id: "card-a", role: "system_note" as const,
+      body: encodeQuestionnaireState({ organizationId: ORGANIZATION, threadId: THREAD.id,
+        sourceMessageId: USER_MESSAGE.id, intent: "watch", issuedAt: new Date().toISOString(),
+        spec, signature: "a".repeat(64) }) };
+    vi.stubGlobal("fetch", mockAgentFetch({ threads: [THREAD], messages: [USER_MESSAGE, note] }));
+    render(<Harness view="history" />);
+    await user.click(await screen.findByRole("button", { name: /open new chat/i }));
+    expect(await screen.findByText("Create this recurring watch?")).toBeInTheDocument();
+    expect(screen.queryByText(/agent questionnaire v1/)).toBeNull();
+  });
   it("lists threads and opens the thread on arrow click", async () => {
     const savedMessage: ThreadMessageView = {
       ...USER_MESSAGE,
@@ -477,9 +556,7 @@ describe("history", () => {
     await user.click(await screen.findByRole("button", { name: /open new chat/i }));
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
-    expect(
-      within(thread).getByText(/you clarified: evidence_window: 60d/i),
-    ).toBeInTheDocument();
+    expect(within(thread).getByText(/you clarified: evidence_window: 60d/i)).toBeInTheDocument();
     // One Marker receipt, never the raw body or an empty-message card.
     expect(within(thread).queryByText(/\[answers/)).toBeNull();
     expect(within(thread).queryByText("(empty message)")).toBeNull();
@@ -969,7 +1046,7 @@ describe("questionnaire submit wiring", () => {
       const posts = fetchMock.mock.calls.filter(
         (call) => (call[1] as RequestInit | undefined)?.method === "POST",
       );
-      expect(posts).toHaveLength(3);
+      expect(posts).toHaveLength(4);
     });
     // Viewers may route (read-only answers), but no answers POST ever fires.
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/answers"))).toBe(false);
@@ -1102,19 +1179,19 @@ describe("thread checkpoint polling", () => {
     // The polled thread row carries the research link: steps stay always
     // visible inline, so the link renders with no new message sent and no
     // Steps trigger in the DOM.
-    const link = await screen.findByRole("link", { name: /research complete/i });
+    const link = await screen.findByRole("link", { name: /linked research project/i });
     expect(link).toBeInTheDocument();
     expect(link.getAttribute("href")).toContain("/growth-intelligence");
     expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
     // A Quick thread never switched modes, so no mode-flip row appears.
-    expect(screen.queryByText(/switched to deepthink/i)).toBeNull();
+    expect(screen.queryByText(/deepthink mode/i)).toBeNull();
   });
 
   it("names the mode switch for a DeepThink thread", async () => {
     const deepthink: ThreadSummary = { ...THREAD, mode: "deepthink" };
     globalThis.fetch = mockAgentFetch({ thread: deepthink }) as never;
     render(<Harness view="thread" threadId={THREAD.id} />);
-    expect(await screen.findByText(/switched to deepthink/i)).toBeInTheDocument();
+    expect(await screen.findByText(/deepthink mode/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^steps$/i })).toBeNull();
   });
 
@@ -1136,7 +1213,7 @@ describe("thread checkpoint polling", () => {
       thread: THREAD,
     }) as never;
     render(<Harness pendingPrompt={sendPrompt("research the downtown lunch crowd")} />);
-    expect(await screen.findByText(/switched to deepthink/i)).toBeInTheDocument();
+    expect(await screen.findByText(/deepthink mode/i)).toBeInTheDocument();
     // The marker must survive the poll landing, not just the send moment.
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     await waitFor(() => {
@@ -1148,7 +1225,7 @@ describe("thread checkpoint polling", () => {
         ),
       ).toBe(true);
     });
-    expect(screen.getByText(/switched to deepthink/i)).toBeInTheDocument();
+    expect(screen.getByText(/deepthink mode/i)).toBeInTheDocument();
   });
 
   it("keeps one narrating row for a reopened running thread with no answer yet", async () => {
@@ -1354,9 +1431,7 @@ describe("opportunity-bound handoff", () => {
     // reviewable version yet: the approve action is pending (never a dead
     // link) while the Studio tracking link stays available.
     expect(await screen.findByText(/draft in progress/i)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /review and approve this version/i }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: /review and approve this version/i })).toBeDisabled();
     expect(screen.getByRole("link", { name: /open in studio/i })).toHaveAttribute(
       "href",
       `/organizations/${ORGANIZATION}/campaigns`,
@@ -1464,9 +1539,7 @@ describe("opportunity-bound handoff", () => {
       "href",
       expect.stringContaining("/campaigns/new"),
     );
-    expect(
-      screen.queryByRole("link", { name: /review and approve this version/i }),
-    ).toBeNull();
+    expect(screen.queryByRole("link", { name: /review and approve this version/i })).toBeNull();
     // No binding invented: the pick travels without an opportunity block.
     expect(answersCall()).not.toHaveProperty("opportunity");
   });
@@ -1699,10 +1772,7 @@ describe("watch one-tap (B4)", () => {
     const fetchMock = globalThis.fetch as unknown as ReturnType<typeof vi.fn>;
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dispatch"))).toBe(false);
     const receipt = await screen.findByText("Open Market Intelligence");
-    expect(receipt).toHaveAttribute(
-      "href",
-      `/organizations/${ORGANIZATION}/growth-intelligence`,
-    );
+    expect(receipt).toHaveAttribute("href", `/organizations/${ORGANIZATION}/growth-intelligence`);
   });
 
   it("renders the created receipt with the stated assumptions", async () => {
@@ -1739,10 +1809,7 @@ describe("watch one-tap (B4)", () => {
           projectId: PROJECT,
           replayed: false,
           scopeFingerprint: "0".repeat(64),
-          assumptions: [
-            "Weekly cadence (default).",
-            "Evidence window: last 30 days (default).",
-          ],
+          assumptions: ["Weekly cadence (default).", "Evidence window: last 30 days (default)."],
           evidenceWindowDays: 30,
           link: {
             href: `/organizations/${ORGANIZATION}/growth-intelligence`,
@@ -1815,7 +1882,9 @@ describe("watch one-tap (B4)", () => {
     // The one-tap region's own note (the card above carries its own gate
     // reason for the Update/Second choices).
     expect(
-      screen.getByText("Needs the growth_intelligence.manage grant — enforcement stays server-side."),
+      screen.getByText(
+        "Needs the growth_intelligence.manage grant — enforcement stays server-side.",
+      ),
     ).toBeInTheDocument();
   });
 
@@ -1823,9 +1892,7 @@ describe("watch one-tap (B4)", () => {
     globalThis.fetch = mockAgentFetch({
       route: { ...watchRoute, questionnaire: null },
     }) as never;
-    render(
-      <Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />,
-    );
+    render(<Harness pendingPrompt={sendPrompt()} role="operator" permissions={MANAGE} />);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
 
@@ -1937,7 +2004,12 @@ describe("live answer stream", () => {
             replayed: true,
             fallback: false,
             reason: null,
-            draft: { body: "Stream-only draft words.", citations: [], limitations: [], estimates: [] },
+            draft: {
+              body: "Stream-only draft words.",
+              citations: [],
+              limitations: [],
+              estimates: [],
+            },
           }),
         ),
       ],
@@ -2028,7 +2100,7 @@ describe("live answer stream", () => {
 
   it("treats an invalid end payload as a drop", async () => {
     globalThis.fetch = mockAgentFetch({
-      stream: [tokenFrame("Almost."), DONE_FRAME, "event: end\ndata: {\"nope\":true}\n\n"],
+      stream: [tokenFrame("Almost."), DONE_FRAME, 'event: end\ndata: {"nope":true}\n\n'],
     }) as never;
     render(<Harness pendingPrompt={sendPrompt()} />);
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
@@ -2378,7 +2450,7 @@ describe("research auto-run (B3)", () => {
     globalThis.fetch = fetchMock as never;
     render(<Harness pendingPrompt={sendPrompt("research the downtown lunch crowd")} />);
     // The escalated turn renders (marker proves the route landed)…
-    expect(await screen.findByText(/switched to deepthink/i)).toBeInTheDocument();
+    expect(await screen.findByText(/deepthink mode/i)).toBeInTheDocument();
     // …with no manual Run control and no client dispatch POST: research
     // auto-enqueues from the route response on the server.
     expect(screen.queryByRole("button", { name: /run research once/i })).toBeNull();
@@ -2428,7 +2500,11 @@ describe("watch manual fallback (FINAL fix for I-1)", () => {
     reasonCodes: [],
     link: {
       href: `/organizations/${ORGANIZATION}/growth-intelligence`,
-      ref: { requestId: "66666666-6666-4666-8666-666666666666", projectId: PROJECT, reportId: null },
+      ref: {
+        requestId: "66666666-6666-4666-8666-666666666666",
+        projectId: PROJECT,
+        reportId: null,
+      },
     },
   };
 
@@ -2857,7 +2933,10 @@ describe("movable drawer (F5)", () => {
   it("ignores desktop geometry on mobile — no unit transform, no panel size", () => {
     stubMobile(true);
     render(
-      <Harness geometry={{ x: 100, y: -80, width: 600, height: 500 }} onGeometryChange={() => {}} />,
+      <Harness
+        geometry={{ x: 100, y: -80, width: 600, height: 500 }}
+        onGeometryChange={() => {}}
+      />,
     );
     const section = screen.getByLabelText("AI agent conversation");
     expect(section.style.transform).toBe("");
@@ -3146,7 +3225,7 @@ describe("settle guarantee (end-received)", () => {
     expect(steps.querySelector('[data-slot="spinner"]')).toBeNull();
     expect(within(steps).queryByText(/checking organization memory/i)).toBeNull();
     expect(within(steps).queryByText(/thinking/i)).toBeNull();
-    expect(within(steps).getByText("Checked organization memory")).toBeInTheDocument();
+    expect(within(steps).getByText("Reviewed available business context")).toBeInTheDocument();
   });
 
   it("merges the durable read with no duplicates on end", async () => {
@@ -3314,5 +3393,213 @@ describe("settle guarantee (end-received)", () => {
     await user.click(await screen.findByRole("button", { name: "New chat" }));
     expect(screen.getByText(/ask anything to initiate the conversation/i)).toBeInTheDocument();
     expect(screen.queryByText("What do we know?")).not.toBeInTheDocument();
+  });
+});
+
+describe("reopen pagination", () => {
+  it("follows message cursors so newer turns are not stranded past the first page", async () => {
+    const older: ThreadMessageView = {
+      ...USER_MESSAGE,
+      id: "11111111-1111-4111-8111-111111111111",
+      // Ten words: the eight-word thread title can never equal the body.
+      body: "First question from last month about delivery fees menu margins.",
+    };
+    const newer: ThreadMessageView = {
+      ...USER_MESSAGE,
+      id: "99999999-9999-4999-8999-999999999999",
+      body: "Follow-up from today.",
+    };
+    globalThis.fetch = mockAgentFetch({
+      messagePages: [
+        { messages: [older], nextCursor: "page-1" },
+        { messages: [newer], nextCursor: null },
+      ],
+    }) as never;
+    const localUser = userEvent.setup();
+    render(<Harness view="history" />);
+    await localUser.click(await screen.findByRole("button", { name: `Open ${THREAD.title}` }));
+    expect(
+      await screen.findByText("First question from last month about delivery fees menu margins."),
+    ).toBeInTheDocument();
+    expect(await screen.findByText("Follow-up from today.")).toBeInTheDocument();
+  });
+});
+
+const GOVERNED_TURN: AgentTurnView = {
+  id: "55555555-5555-4555-8555-555555555555",
+  threadId: THREAD.id,
+  userMessageId: USER_MESSAGE.id,
+  requestedBy: "66666666-6666-4666-8666-666666666666",
+  objective: "business_advice",
+  status: "running",
+  pendingChallenge: null,
+  pendingApproval: null,
+  challengeAnswers: null,
+  answeredChallengeKind: null,
+  finalMessageId: null,
+  failureCode: null,
+  createdAt: "2026-10-04T00:00:00Z",
+  updatedAt: "2026-10-04T00:00:00Z",
+};
+const PERIOD_EVENT = {
+  id: "77777777-7777-4777-8777-777777777777",
+  turnId: GOVERNED_TURN.id,
+  seq: 1,
+  type: "period_switched",
+  payload: {
+    requestedStart: "2026-09-01",
+    requestedEnd: "2026-09-30",
+    selectedStart: "2026-08-01",
+    selectedEnd: "2026-08-31",
+    reason: "No usable report.",
+  },
+  occurredAt: "2026-10-04T00:00:01Z",
+};
+
+describe("governed turn UI", () => {
+  it("retains the selected file for progress and retry without dispatching legacy routes", async () => {
+    const turn = { ...GOVERNED_TURN, objective: "report_intake" };
+    const upload = vi.spyOn(agentUpload, "uploadAgentReport");
+    upload.mockImplementationOnce(async (input) => {
+      input.onProgress(50);
+      throw new Error("Report upload stopped. Retry to continue.");
+    });
+    upload.mockImplementationOnce(async (input) => {
+      input.onProgress(100);
+      return "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    });
+    const fetchMock = mockAgentFetch({
+      turnsStart: { handled: true, turn, thread: THREAD },
+      turns: [{ turn, events: [], attachments: [] }],
+    });
+    globalThis.fetch = fetchMock as never;
+    const file = new File(["report"], "talabat.csv", { type: "text/csv" });
+    const user = userEvent.setup();
+    render(<Harness pendingPrompt={{ ...sendPrompt(), file }} />);
+    expect(
+      await screen.findByText("Report upload stopped. Retry to continue."),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry report upload" }));
+    await waitFor(() => expect(upload).toHaveBeenCalledTimes(2));
+    expect(upload.mock.calls[0][0].file).toBe(file);
+    expect(upload.mock.calls[1][0].file).toBe(file);
+    expect(upload.mock.calls[0][0].idempotencyKey).toBe(`agent-attachment-intent:${turn.id}`);
+    const admission = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/turns") && init?.method === "POST",
+    );
+    expect(JSON.parse(String(admission?.[1]?.body)).hasAttachment).toBe(true);
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => String(url).includes("/route") || String(url).includes("/stream"),
+      ),
+    ).toBe(false);
+    upload.mockRestore();
+  });
+  it("bypasses legacy routing and SSE once the server handles a turn", async () => {
+    const fetchMock = mockAgentFetch({
+      turnsStart: { handled: true, turn: GOVERNED_TURN, thread: THREAD },
+      turns: [{ turn: GOVERNED_TURN, events: [PERIOD_EVENT], attachments: [] }],
+    });
+    globalThis.fetch = fetchMock as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(
+      await screen.findByText(/Switched from Sep 1–30, 2026 to Aug 1–31, 2026/),
+    ).toBeInTheDocument();
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => String(url).includes("/route") || String(url).includes("/stream"),
+      ),
+    ).toBe(false);
+    expect(screen.queryByLabelText("Agent run steps")).not.toBeInTheDocument();
+    const admission = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/turns") && init?.method === "POST",
+    );
+    expect(JSON.parse(String(admission?.[1]?.body))).toEqual({
+      messageId: USER_MESSAGE.id,
+      idempotencyKey: expect.any(String),
+    });
+  });
+
+  it("shows durable admission errors without silently routing the stored message", async () => {
+    const fetchMock = mockAgentFetch({
+      turnsStart: { status: 503, message: "Durable worker unavailable" },
+    });
+    globalThis.fetch = fetchMock as never;
+    render(<Harness pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Durable worker unavailable");
+    expect(
+      fetchMock.mock.calls.some(
+        ([url]) => String(url).includes("/route") || String(url).includes("/stream"),
+      ),
+    ).toBe(false);
+    expect(within(screen.getByRole("log")).getAllByText(USER_MESSAGE.body!)).toHaveLength(1);
+  });
+
+  it("restores ordered period markers and one final answer on reopen", async () => {
+    const answer: ThreadMessageView = {
+      ...USER_MESSAGE,
+      id: "88888888-8888-4888-8888-888888888888",
+      role: "assistant",
+      body: "Focus on profitable repeat customers.",
+      createdAt: "2026-10-04T00:00:03Z",
+    };
+    const turn = { ...GOVERNED_TURN, status: "completed", finalMessageId: answer.id };
+    globalThis.fetch = mockAgentFetch({
+      messages: [USER_MESSAGE, answer],
+      turns: [{ turn, events: [PERIOD_EVENT], attachments: [] }],
+    }) as never;
+    render(<Harness threadId={THREAD.id} />);
+    expect(await screen.findByText(/Switched from Sep/)).toBeInTheDocument();
+    expect(await screen.findByText("Focus on profitable repeat customers.")).toBeInTheDocument();
+    expect(screen.getAllByText("Focus on profitable repeat customers.")).toHaveLength(1);
+  });
+
+  it("restores a server-owned typed scope question and sends only its id and answers", async () => {
+    const challengeId = "99999999-9999-4999-8999-999999999999";
+    const turn = {
+      ...GOVERNED_TURN,
+      status: "awaiting_user",
+      pendingChallenge: {
+        id: challengeId,
+        kind: "scope",
+        fields: [
+          {
+            key: "channelId",
+            label: "Which channel?",
+            kind: "single_select",
+            required: true,
+            options: [{ value: "talabat", label: "Talabat" }],
+          },
+        ],
+      },
+    };
+    const fetchMock = mockAgentFetch({ turns: [{ turn, events: [], attachments: [] }] });
+    globalThis.fetch = fetchMock as never;
+    const user = userEvent.setup();
+    render(<Harness threadId={THREAD.id} />);
+    await user.click(await screen.findByRole("radio", { name: /Talabat/ }));
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/challenge-answers"))).toBe(
+        true,
+      ),
+    );
+    const call = fetchMock.mock.calls.find(([url]) => String(url).endsWith("/challenge-answers"));
+    expect(JSON.parse(String(call?.[1]?.body))).toEqual({
+      challengeId,
+      answers: { channelId: "talabat" },
+      idempotencyKey: `agent-challenge:${challengeId}`,
+    });
+  });
+
+  it("lets viewers send governed advice without granting action controls", async () => {
+    const fetchMock = mockAgentFetch({
+      turnsStart: { handled: true, turn: GOVERNED_TURN, thread: THREAD },
+      turns: [{ turn: GOVERNED_TURN, events: [], attachments: [] }],
+    });
+    globalThis.fetch = fetchMock as never;
+    render(<Harness role="viewer" pendingPrompt={sendPrompt()} />);
+    expect(await screen.findByText("Working on your request")).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/dispatch"))).toBe(false);
   });
 });

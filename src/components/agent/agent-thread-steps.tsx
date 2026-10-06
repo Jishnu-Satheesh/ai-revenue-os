@@ -33,6 +33,9 @@ export type AgentThreadStepsProps = {
 
 const INTENT_LABEL: Record<AgentIntent, string> = {
   answer_memory: "Memory answer",
+  business_advice: "Business advice",
+  channel_assessment: "Channel assessment",
+  report_intake: "Report intake",
   research_once: "One-time research",
   watch: "Keep monitoring",
   campaign_advice: "Campaign advice",
@@ -51,9 +54,9 @@ const DONE_ROW_CLASS = "border-l-2 border-emerald-500/40 pl-2";
  * moment the phase turns done every row is terminal — done rows carry the
  * side-line style with a CheckIcon and plain copy, never a spinner. The
  * narration resolves honestly: Thinking becomes `Understood: <plain
- * intent>`, the memory check becomes `Checked organization memory`, a
- * finished research run becomes `Research complete` with the Growth
- * Intelligence link, and a finished draft becomes `Draft ready`. No research
+ * intent>`, the context step becomes `Reviewed available business context`, and
+ * saved source references become `Linked research project`, `Linked draft
+ * request`, or `Linked campaign`. Intent and mode never prove source completion. No research
  * area is ever named — the thread carries none, so the active row reads the
  * plain `Researching…` rather than inventing one. A genuine clarify card
  * (model-judged low-confidence ambiguous only) leaves the turn settled and
@@ -83,13 +86,12 @@ export function AgentThreadSteps({
     thread?.linkedDraftRequestId != null ||
     thread?.linkedCampaignId != null;
   // A bare `running` status never names a lane: the active row stays honest
-  // (`Thinking…`) until a real lane signal arrives (intent, DeepThink mode,
+  // (`Thinking…`) until a real lane signal arrives (intent or
   // or a linked project). It also never claims a finished research row on
   // its own — done rows need the same real research signal.
   const researchLane =
     intent === "research_once" ||
     intent === "watch" ||
-    thread?.mode === "deepthink" ||
     thread?.linkedResearchProjectId != null;
 
   // One thing at a time: the single in-progress row names the lane that
@@ -137,48 +139,52 @@ export function AgentThreadSteps({
 
       {phase === "done" ? (
         <Marker className={DONE_ROW_CLASS}>
-          <MarkerIcon aria-label="Memory checked">
+          <MarkerIcon aria-label="Context reviewed">
             <CheckIcon aria-hidden="true" />
           </MarkerIcon>
-          <MarkerContent>Checked organization memory</MarkerContent>
+          <MarkerContent>Reviewed available business context</MarkerContent>
         </Marker>
       ) : null}
 
-      {phase === "done" && researchLane ? (
-        giHref ? (
-          <Marker asChild className={DONE_ROW_CLASS}>
-            <a href={giHref}>
-              <MarkerIcon>
-                <ArrowUpRightIcon aria-hidden="true" />
-              </MarkerIcon>
-              <MarkerContent>Research complete — open the Growth Intelligence research tab</MarkerContent>
-            </a>
-          </Marker>
-        ) : (
-          <Marker className={DONE_ROW_CLASS}>
-            <MarkerIcon aria-label="Research complete">
-              <CheckIcon aria-hidden="true" />
+      {phase === "done" && thread?.linkedResearchProjectId && giHref ? (
+        <Marker asChild className={DONE_ROW_CLASS} data-source-id={thread.linkedResearchProjectId}>
+          <a href={giHref}>
+            <MarkerIcon>
+              <ArrowUpRightIcon aria-hidden="true" />
             </MarkerIcon>
-            <MarkerContent>Research complete</MarkerContent>
-          </Marker>
-        )
+            <MarkerContent>Linked research project · Open Market Intelligence</MarkerContent>
+          </a>
+        </Marker>
       ) : null}
 
-      {phase === "done" && draftSignals ? (
-        <Marker className={DONE_ROW_CLASS}>
-          <MarkerIcon aria-label="Draft ready">
-            <CheckIcon aria-hidden="true" />
-          </MarkerIcon>
-          <MarkerContent>Draft ready</MarkerContent>
+      {phase === "done" && thread?.linkedDraftRequestId ? (
+        <Marker asChild className={DONE_ROW_CLASS} data-source-id={thread.linkedDraftRequestId}>
+          <a href={`/organizations/${thread.organizationId}/campaigns`}>
+            <MarkerIcon>
+              <ArrowUpRightIcon aria-hidden="true" />
+            </MarkerIcon>
+            <MarkerContent>Linked draft request · Open campaigns</MarkerContent>
+          </a>
+        </Marker>
+      ) : null}
+
+      {phase === "done" && thread?.linkedCampaignId ? (
+        <Marker asChild className={DONE_ROW_CLASS} data-source-id={thread.linkedCampaignId}>
+          <a href={`/organizations/${thread.organizationId}/campaigns/${thread.linkedCampaignId}`}>
+            <MarkerIcon>
+              <ArrowUpRightIcon aria-hidden="true" />
+            </MarkerIcon>
+            <MarkerContent>Linked campaign · Open campaign</MarkerContent>
+          </a>
         </Marker>
       ) : null}
 
       {thread && thread.mode === "deepthink" ? (
         <Marker>
-          <MarkerIcon aria-label="Mode switched">
+          <MarkerIcon aria-label="DeepThink mode">
             <BrainIcon aria-hidden="true" />
           </MarkerIcon>
-          <MarkerContent>Switched to DeepThink</MarkerContent>
+          <MarkerContent>DeepThink mode</MarkerContent>
         </Marker>
       ) : null}
 

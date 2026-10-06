@@ -1,5 +1,5 @@
 import { getOrganizationContext } from "@/lib/api/organization-context";
-import { DomainError, toPublicError } from "@/lib/errors";
+import { toPublicError } from "@/lib/errors";
 import { logger } from "@/lib/logger";
 import { createEventPublisher } from "@/domain/events/publisher";
 import { assertAgentChatEnabled } from "@/modules/integrations/application/feature-access";
@@ -85,9 +85,6 @@ export async function POST(
     );
     organizationId = context.organizationId;
     assertAgentChatEnabled(organizationId);
-    if (context.membership.role === "viewer") {
-      throw new DomainError("AUTHORIZATION_ERROR", "Viewers cannot change this chat.");
-    }
     correlationId = correlation.parseAfterAuthorization();
 
     const body = createThreadBodySchema.parse(await request.json().catch(() => ({})));

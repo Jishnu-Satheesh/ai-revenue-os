@@ -225,13 +225,30 @@ describe("executeResearchOnce open lane", () => {
 
 describe("profile-scope queries", () => {
   const document = {
-    publicBusinessName: "Cedar Bakery",
-    approvedDomains: ["cedar-bakery.example"],
-    niches: ["artisan bakery"],
-    city: "Springfield",
-    countryCode: "US",
-    topics: ["sourdough pricing", "morning footfall"],
-    competitors: [{ name: "Rival Loaf" }],
+    schemaVersion: 1,
+    publicIdentity: {
+      approvedName: "Cedar Bakery",
+      domains: ["cedar-bakery.example"],
+      publicUrls: ["https://cedar-bakery.example/"],
+    },
+    nicheDescriptors: ["artisan bakery"],
+    geographies: [
+      { layer: "city", locationRef: "city:springfield", name: "Springfield", countryCode: "US" },
+      { layer: "country", locationRef: "country:us", name: "United States", countryCode: "US" },
+    ],
+    topics: [
+      { key: "sourdough-pricing", label: "sourdough pricing", provenance: "operator" },
+      { key: "morning-footfall", label: "morning footfall", provenance: "operator" },
+    ],
+    competitors: [],
+    sourcePolicy: {
+      excludedDomains: [], excludedPublishers: [], excludedCompetitorKeys: [],
+      allowBoundedQuotes: false, maxQuotationCharacters: 0,
+    },
+    cadence: {
+      timeZone: "America/New_York", dailyLocalTime: "06:00",
+      weeklyDay: "monday", weeklyLocalTime: "07:00",
+    },
   };
 
   it("builds bounded queries from profile scope only", () => {
@@ -250,6 +267,30 @@ describe("profile-scope queries", () => {
     expect(joined).not.toContain("branch");
     expect(buildProfileScopeQueries({ nope: true })).toEqual([]);
     expect(buildProfileScopeQueries(null)).toEqual([]);
+  });
+
+  it("uses confirmed branch profile public fields without transporting branch identifiers or excluded competitors", () => {
+    const branchId = "20000000-0000-4000-8000-000000000002";
+    const queries = buildProfileScopeQueries({
+      ...document,
+      schemaVersion: 2,
+      branchId,
+      geographies: [
+        ...document.geographies,
+        { layer: "trade_area", locationRef: "trade:cedar", name: "Cedar district", branchId },
+      ],
+      competitors: [
+        { key: "rival-loaf", name: "Rival Loaf", geographyRefs: ["city:springfield"],
+          provenance: "operator_lead", suggestedBy: "operator", relevanceEvidenceUrls: [] },
+        { key: "excluded-loaf", name: "Excluded Loaf", geographyRefs: ["city:springfield"],
+          provenance: "operator_lead", suggestedBy: "operator", relevanceEvidenceUrls: [] },
+      ],
+      sourcePolicy: { ...document.sourcePolicy, excludedCompetitorKeys: ["excluded-loaf"] },
+    });
+    expect(queries).toContain("Cedar Bakery Springfield sourdough pricing");
+    expect(queries).toContain("Rival Loaf Springfield artisan bakery");
+    expect(queries.join(" ")).not.toContain(branchId);
+    expect(queries.join(" ")).not.toContain("Excluded Loaf");
   });
 });
 
@@ -335,6 +376,42 @@ const WATCH = {
 };
 
 describe("executeWatchCreate", () => {
+  it("forwards the validated research scope so a created watch can be scheduled", async () => {
+    let retained: Record<string, unknown> | null = null;
+    const out = await executeWatchCreate(WATCH, {
+      listActive: async () => [],
+      createKeyed: async (input) => {
+        retained = input;
+        return { projectId: "p1", replayed: false };
+      },
+    });
+    expect(out.outcome).toBe("created");
+    expect(retained).toMatchObject({
+      researchArea: WATCH.researchArea,
+      competitors: WATCH.competitors,
+      investigationAreas: WATCH.investigationAreas,
+      businessContextSnapshotId: "00000000-0000-0000-0000-000000000000",
+    });
+  });
+
+  it("resumes only its recorded creation key after a project was created without a brief", async () => {
+    const twin = { projectId: "p1", title: WATCH.question, question: WATCH.question,
+      mode: WATCH.mode, scopeFingerprint: null };
+    const out = await executeWatchCreate(WATCH, {
+      listActive: async () => [twin],
+      findCreatedByKey: async (input) => input.idempotencyKey === WATCH.idempotencyKey ? "p1" : null,
+      createKeyed: async () => ({ projectId: "p1", replayed: true }),
+    });
+    expect(out.outcome).toBe("replayed");
+    expect(out).toMatchObject({ projectId: "p1", replayed: true });
+    const newRequest = await executeWatchCreate({ ...WATCH, idempotencyKey: "watch-new-press-key-000000000001" }, {
+      listActive: async () => [twin],
+      findCreatedByKey: async (input) => input.idempotencyKey === WATCH.idempotencyKey ? "p1" : null,
+      createKeyed: async () => { throw new Error("A new duplicate must ask for a choice."); },
+    });
+    expect(newRequest.outcome).toBe("duplicate");
+  });
+
   it("creates when no similar active scope exists", async () => {
     const seams = {
       listActive: async () => [],

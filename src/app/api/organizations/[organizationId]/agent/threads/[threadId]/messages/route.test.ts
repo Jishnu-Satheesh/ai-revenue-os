@@ -123,12 +123,12 @@ describe("agent thread messages route", () => {
     );
   });
 
-  it("refuses appends for viewers and empty bodies", async () => {
+  it("permits viewer advice messages through the fenced RPC and rejects empty bodies", async () => {
     mocks.getOrganizationContext.mockResolvedValue({
       ...operatorContext(),
       membership: { role: "viewer" },
     });
-    const forbidden = await POST(
+    const allowed = await POST(
       request(
         `http://localhost/api/organizations/${ORGANIZATION}/agent/threads/${THREAD}/messages`,
         {
@@ -138,8 +138,8 @@ describe("agent thread messages route", () => {
       ),
       params,
     );
-    expect(forbidden.status).toBe(403);
-    expect(mocks.createRepo).not.toHaveBeenCalled();
+    expect(allowed.status).toBe(201);
+    expect(mocks.createRepo).toHaveBeenCalled();
 
     mocks.getOrganizationContext.mockResolvedValue(operatorContext());
     const invalid = await POST(
