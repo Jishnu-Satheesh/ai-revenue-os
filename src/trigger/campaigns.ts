@@ -48,6 +48,10 @@ import { createCampaignMetricIngest } from "@/modules/campaigns/infrastructure/m
 import { sweepResearchLeases } from "@/modules/campaigns/application/research-lease-sweep";
 import { runResearchScheduleSweep } from "@/modules/campaigns/application/research-scheduler";
 import { createResearchDueReader } from "@/modules/campaigns/infrastructure/research-due-reader";
+import {
+  createResearchManifestReader,
+  type ManifestTableClient,
+} from "@/modules/campaigns/infrastructure/research-manifest-reader";
 import { dispatchResearchWorker } from "@/modules/campaigns/infrastructure/research-worker-dispatch";
 import { evaluateCampaign } from "@/modules/campaigns/application/allocation-service";
 import { settleCampaign } from "@/modules/campaigns/application/measurement-service";
@@ -1561,26 +1565,11 @@ export const researchScheduleSweepTask = schedules.task({
     // explicit-predicate tenancy the research worker's own readers use.
     // Identifiers only: the digest the tick compares and the revision it
     // records. Entry bytes stay behind their own access rules.
-    const readManifestDigest = async ({ organizationId }: { organizationId: string }) => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const db = supabase as unknown as { from(table: string): any };
-      const listed = await db
-        .from("memory_context_manifests")
-        .select("id,context_digest,created_at")
-        .eq("organization_id", organizationId)
-        .order("created_at", { ascending: false })
-        .limit(1);
-      if (listed.error) throw new Error("The memory manifest could not be read.");
-      const row = (listed.data ?? [])[0] as
-        | { id: string; context_digest: string }
-        | undefined;
-      if (!row) return null;
-      return { digest: row.context_digest, revision: row.id };
-    };
-
     const result = await runResearchScheduleSweep({
       due: createResearchDueReader({ rpc }),
-      memory: { readManifestDigest },
+      memory: createResearchManifestReader(
+        supabase as unknown as ManifestTableClient,
+      ),
       dispatch: dispatchResearchWorker,
       now: () => new Date(),
       newCorrelationId: () => randomUUID(),
