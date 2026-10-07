@@ -7,6 +7,20 @@ vi.hoisted(() => {
 
 vi.mock("server-only", () => ({}));
 
+const testEnv = vi.hoisted(() => ({
+  INTEGRATION_HUB_V1_ORGANIZATION_IDS: undefined as string | undefined,
+  AGENT_CHAT_V1_ORGANIZATION_IDS: undefined as string | undefined,
+  GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS: undefined as string | undefined,
+  GOVERNED_REPORT_PROJECTION_ORGANIZATION_IDS: undefined as string | undefined,
+  GOVERNED_ECONOMICS_READINESS_ORGANIZATION_IDS: undefined as string | undefined,
+  GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS: undefined as string | undefined,
+}));
+vi.mock("@/lib/env", () => ({ env: testEnv }));
+vi.mock("@/lib/logger", () => ({
+  logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+}));
+
+import { logger } from "@/lib/logger";
 import {
   assertAgentChatEnabled,
   assertGovernedEconomicsReadinessEnabled,
@@ -124,5 +138,21 @@ describe("agent chat rollout access", () => {
     expect(() => assertAgentChatEnabled(organizationA)).toThrowError(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
+  });
+
+  it("fails closed with a named log when the ambient allowlist is typoed", () => {
+    testEnv.INTEGRATION_HUB_V1_ORGANIZATION_IDS = "*";
+    try {
+      expect(isIntegrationHubEnabled(organizationA)).toBe(false);
+      expect(isIntegrationHubEnabled(organizationB)).toBe(false);
+      expect(logger.error).toHaveBeenCalledWith(
+        "rollout_allowlist.invalid_config",
+        expect.objectContaining({
+          errorCode: expect.stringContaining("INTEGRATION_HUB_V1_ORGANIZATION_IDS"),
+        }),
+      );
+    } finally {
+      testEnv.INTEGRATION_HUB_V1_ORGANIZATION_IDS = undefined;
+    }
   });
 });

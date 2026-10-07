@@ -1,9 +1,8 @@
 import "server-only";
 
-import { z } from "zod";
-
 import { DomainError } from "@/lib/errors";
 import { env } from "@/lib/env";
+import { parseOrganizationAllowlist, resolveOrganizationAllowlist } from "@/lib/rollout-allowlist";
 
 /**
  * The production rollout gate for the Overview actual-versus-fixed-projection
@@ -22,37 +21,21 @@ import { env } from "@/lib/env";
 /** Bounded explicit lookup alongside the legacy 500-org worker scan. */
 export const OVERVIEW_GROWTH_PROGRESS_MAX_ORGANIZATIONS = 100;
 
-const organizationIdSchema = z.string().uuid();
+const OVERVIEW_GROWTH_ALLOWLIST = {
+  variableName: "OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS",
+  label: "Overview growth progress organization IDs",
+  maxEntries: OVERVIEW_GROWTH_PROGRESS_MAX_ORGANIZATIONS,
+} as const;
 
 export function parseOverviewGrowthProgressOrganizationIds(value: string | undefined): Set<string> {
-  if (value === undefined || value.trim() === "") return new Set();
-
-  const organizationIds = value.split(",").map((organizationId) => organizationId.trim());
-
-  if (organizationIds.some((organizationId) => organizationId.length === 0)) {
-    throw new Error("Overview growth progress organization IDs must not contain empty values.");
-  }
-
-  const enabled = new Set<string>();
-  for (const organizationId of organizationIds) {
-    enabled.add(organizationIdSchema.parse(organizationId).toLowerCase());
-  }
-
-  if (enabled.size !== organizationIds.length) {
-    throw new Error("Overview growth progress organization IDs must not contain duplicates.");
-  }
-
-  if (enabled.size > OVERVIEW_GROWTH_PROGRESS_MAX_ORGANIZATIONS) {
-    throw new Error("Overview growth progress organization IDs must not exceed 100 entries.");
-  }
-
-  return enabled;
+  return parseOrganizationAllowlist(value, OVERVIEW_GROWTH_ALLOWLIST);
 }
 
 export function isOverviewGrowthProgressEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseOverviewGrowthProgressOrganizationIds(
+  enabledOrganizationIds = resolveOrganizationAllowlist(
     env.OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS,
+    OVERVIEW_GROWTH_ALLOWLIST,
   ),
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
@@ -60,8 +43,9 @@ export function isOverviewGrowthProgressEnabled(
 
 export function assertOverviewGrowthProgressEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseOverviewGrowthProgressOrganizationIds(
+  enabledOrganizationIds = resolveOrganizationAllowlist(
     env.OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS,
+    OVERVIEW_GROWTH_ALLOWLIST,
   ),
 ): void {
   if (!isOverviewGrowthProgressEnabled(organizationId, enabledOrganizationIds)) {
