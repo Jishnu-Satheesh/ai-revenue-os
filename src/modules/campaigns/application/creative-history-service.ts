@@ -439,6 +439,7 @@ export type CreativeHistoryCompletionOutcome =
         | "declared_type_mismatch"
         | "corrupt_image"
         | "dimensions_out_of_range"
+        | "processor_unavailable"
         | "storage_failed"
         /**
          * A batch member's own lookup failed rather than its bytes: the design

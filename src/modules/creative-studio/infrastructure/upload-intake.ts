@@ -125,6 +125,7 @@ export type StudioUploadCompletion =
         | "declared_type_mismatch"
         | "corrupt_image"
         | "dimensions_out_of_range"
+        | "processor_unavailable"
         | "storage_failed"
         | "already_rejected";
       message: string;

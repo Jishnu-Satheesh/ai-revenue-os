@@ -2,7 +2,6 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
-import sharp from "sharp";
 import type { Sharp } from "sharp";
 
 /**
@@ -45,9 +44,29 @@ export type AssetIntakeRejection = {
     | "unsupported_format"
     | "declared_type_mismatch"
     | "corrupt_image"
-    | "dimensions_out_of_range";
+    | "dimensions_out_of_range"
+    | "processor_unavailable";
   message: string;
 };
+
+/**
+ * Loaded lazily so routes that never touch image bytes (reserve, list) never
+ * load the native module. A top-level `import sharp` crashes the whole route
+ * on serverless when libvips is missing, even for requests that need no image
+ * work at all.
+ */
+type SharpFactory = (bytes: Buffer, options?: { failOn: "error" }) => Sharp;
+
+async function loadSharp(): Promise<SharpFactory | null> {
+  try {
+    const mod = (await import("sharp")) as unknown as {
+      default?: SharpFactory;
+    } & SharpFactory;
+    return mod.default ?? mod;
+  } catch {
+    return null;
+  }
+}
 
 export type AssetIntakeAcceptance = {
   outcome: "accepted";
@@ -130,6 +149,15 @@ export async function ingestCampaignImage(input: {
       outcome: "rejected",
       reason: "declared_type_mismatch",
       message: "The file contents do not match the type the upload declared.",
+    };
+  }
+
+  const sharp = await loadSharp();
+  if (!sharp) {
+    return {
+      outcome: "rejected",
+      reason: "processor_unavailable",
+      message: "The image could not be processed right now. Try uploading again.",
     };
   }
 
