@@ -183,16 +183,41 @@ function failureDigest(code: string): string {
   return createHash("sha256").update(`channel-analysis-failure:${code}`).digest("hex");
 }
 
+/**
+ * A ratio part rounded to the twelve decimals the findings ledger accepts.
+ *
+ * Detectors divide summed series in floating point, so a share can arrive
+ * with fourteen decimals of dust (`245.51666666666665`) that the `complete`
+ * guard refuses with the whole run. Twelve decimals keep every displayed
+ * figure exact while fitting the record. Integers pass through untouched.
+ */
+function roundRatioPart(value: number): number {
+  if (!Number.isFinite(value) || Number.isInteger(value)) return value;
+  const rounded = Number(Math.abs(value).toFixed(12));
+  return value < 0 ? -rounded : rounded;
+}
+
 function toFindingPayload(window: AnalysisWindow, attributed: AttributedOutcome): FindingPayload {
   const { detector, outcome } = attributed;
-  const measurement = outcome.kind === "needs_data" ? undefined : outcome.measurement;
+  const rawMeasurement = outcome.kind === "needs_data" ? undefined : outcome.measurement;
+  const measurement =
+    rawMeasurement?.valueKind === "ratio"
+      ? {
+          ...rawMeasurement,
+          numerator: roundRatioPart(rawMeasurement.numerator),
+          denominator:
+            rawMeasurement.denominator === undefined
+              ? undefined
+              : roundRatioPart(rawMeasurement.denominator),
+        }
+      : rawMeasurement;
 
   // A figure that has stopped being exact must not be recorded behind a digest
   // that claims it is reproducible. Money and counts are held to safe integers;
-  // a ratio's two parts may carry exactly the decimals the ledger holds, because
-  // the provider measured closed minutes as `34216.93` and rounding them here
-  // would fabricate time nobody lost (ADR 0036). Anything non-finite, or beyond
-  // the exact integer range, is refused in either shape.
+  // a ratio's two parts may carry up to the twelve decimals the ledger holds,
+  // because the provider measured closed minutes as `34216.93` and rounding
+  // them coarser here would fabricate time nobody lost (ADR 0036). Anything
+  // non-finite, or beyond the exact integer range, is refused in either shape.
   const isRatio = measurement?.valueKind === "ratio";
   for (const [value, fractionAllowed] of [
     [measurement?.numerator, isRatio],

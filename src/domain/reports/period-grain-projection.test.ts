@@ -321,6 +321,96 @@ describe("what the declaration refuses to express", () => {
   });
 });
 
+describe("a provider that measures minutes in fractions", () => {
+  // Talabat's September export writes scheduled time as `1139.9833333333333`
+  // minutes and closed time with the same fractional precision. Counts are
+  // recorded as whole units, so each emitted figure rounds to the nearest
+  // minute rather than refusing the import. See ADR 0078.
+  const minutesContract = {
+    ...contract,
+    sheets: [
+      {
+        ...contract.sheets[0],
+        fields: [
+          ...contract.sheets[0].fields,
+          {
+            canonicalField: "unavailable_minutes",
+            sourceHeader: "unavailable_minutes",
+            parser: "decimal",
+            required: false,
+          },
+        ],
+      },
+    ],
+  } as unknown as ReportContractDocument;
+  const minutesHeader = ["Date", "Gross Sales", "Successful Orders", "Unavailable Minutes"];
+  function projectMinutes(rows: unknown[][], grain = "day") {
+    return projectPeriodGrainMetrics({
+      contract: minutesContract,
+      document: declaration({
+        grain,
+        outputs: [
+          {
+            key: "closed_minutes",
+            normalizedSheetName: "sheet1",
+            canonicalField: "unavailable_minutes",
+            metricKey: "operations.closed_minutes",
+            valueKind: "count",
+            aggregation: "sum",
+          },
+        ],
+      }) as Extract<ReportProjectionDocument, { outputKind: "period_grain" }>,
+      declaredCurrency: "AED",
+      sheets: [{ normalizedSheetName: "sheet1", rows: [minutesHeader, ...rows] }],
+    });
+  }
+
+  it("rounds fractional minutes to the nearest whole minute", () => {
+    const result = projectMinutes([
+      ["2026-09-06", 68, 2, 6.4],
+      ["2026-09-11", 0, 0, 279.71666666666664],
+      ["2026-09-28", 0, 0, 1139.9833333333333],
+    ]);
+    const minutes = result.observations.filter((row) => row.key === "closed_minutes");
+
+    expect(minutes.map((row) => `${row.periodStart}:${row.valueNumerator}`)).toEqual([
+      "2026-09-06:6",
+      "2026-09-11:280",
+      "2026-09-28:1140",
+    ]);
+  });
+
+  it("rounds halves up", () => {
+    const result = projectMinutes([["2026-09-01", 50, 3, 2.5]]);
+    const minutes = result.observations.find((row) => row.key === "closed_minutes");
+
+    expect(minutes?.valueNumerator).toBe("3");
+  });
+
+  it("sums the day first and rounds the total, not the parts", () => {
+    // Two rows on one day of 0.4 each are 0.8 of a minute together: rounding
+    // the parts would record nothing while the day carries almost a minute.
+    const result = projectMinutes(
+      [
+        ["2026-09-01", 50, 3, 0.4],
+        ["2026-09-01", 40, 1, 0.4],
+      ],
+      "month",
+    );
+    const minutes = result.observations.find((row) => row.key === "closed_minutes");
+
+    expect(minutes?.valueNumerator).toBe("1");
+    expect(minutes?.contributorCount).toBe(2);
+  });
+
+  it("leaves whole-minute days exactly as reported", () => {
+    const result = projectMinutes([["2026-09-22", 126, 6, 0]]);
+    const minutes = result.observations.find((row) => row.key === "closed_minutes");
+
+    expect(minutes?.valueNumerator).toBe("0");
+  });
+});
+
 describe("determinism", () => {
   it("orders observations by period then key, whatever order the rows arrive in", () => {
     const rows = [

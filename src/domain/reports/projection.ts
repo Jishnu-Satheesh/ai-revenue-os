@@ -808,6 +808,28 @@ function addDecimals(left: string, right: string): string {
   return negative && joined !== "0" ? `-${joined}` : joined;
 }
 
+/**
+ * A canonical decimal quantity rounded to whole units, halves away from zero.
+ *
+ * The ledger records counts as whole units, but providers measure continuous
+ * quantities in fractions -- Talabat reports scheduled time as `1139.98`
+ * minutes. Rounding happens here, once, on the emitted figure, so adding then
+ * rounding and rounding then adding cannot disagree. String arithmetic only:
+ * the value never passes through floating point. See ADR 0078.
+ */
+function roundDecimalToInteger(value: string): string {
+  const negative = value.startsWith("-");
+  const unsigned = negative ? value.slice(1) : value;
+  const [rawWhole = "", rawFraction = ""] = unsigned.split(".");
+  const whole = rawWhole.replace(/^0+(?=\d)/, "") || "0";
+  if (rawFraction === "" || /^0+$/.test(rawFraction)) {
+    return negative && whole !== "0" ? `-${whole}` : whole;
+  }
+  const roundsUp = rawFraction >= "5".padEnd(rawFraction.length, "0");
+  const rounded = roundsUp ? addIntegerStrings(whole, "1") : whole;
+  return negative && rounded !== "0" ? `-${rounded}` : rounded;
+}
+
 function negateIntegerString(value: string): string {
   if (value === "0") return "0";
   return value.startsWith("-") ? value.slice(1) : `-${value}`;
@@ -1485,7 +1507,11 @@ export function projectPeriodGrainMetrics(input: {
         valueKind: output.valueKind,
         periodStart,
         periodEnd: periodEndFor(periodStart, grain),
-        valueNumerator: running.total,
+        // Counts are whole units by the time they are recorded. A total that
+        // arrived through a decimal column is rounded here, once, rather than
+        // refused downstream. See ADR 0078.
+        valueNumerator:
+          output.valueKind === "count" ? roundDecimalToInteger(running.total) : running.total,
         currency: output.valueKind === "money" ? input.declaredCurrency : null,
         normalizedSheetName: output.normalizedSheetName,
         canonicalField: output.canonicalField,
@@ -1507,8 +1533,8 @@ export function projectPeriodGrainMetrics(input: {
 
   const projectedByOutputKey = new Map<string, string>();
   for (const observation of observations) {
-    // Decimal quantities are legal numerators on a period-grain series, so
-    // the rollup adds exactly across both shapes.
+    // Count numerators arrive here already rounded to whole units; money
+    // arrives in minor units. The rollup adds exactly across both shapes.
     projectedByOutputKey.set(
       observation.key,
       addDecimals(projectedByOutputKey.get(observation.key) ?? "0", observation.valueNumerator),
