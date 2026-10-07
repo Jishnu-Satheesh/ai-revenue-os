@@ -4,6 +4,7 @@ import { Toaster } from "@/components/ui/sonner";
 import "./globals.css";
 import { Manrope } from "next/font/google";
 import { cn } from "@/lib/utils";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           {/* Sonner is the project's mutation acknowledgement surface; it must be
               mounted once at the root for any feature toast to appear. */}
           <Toaster />
+          <SpeedInsights />
         </QueryProvider>
       </body>
     </html>
