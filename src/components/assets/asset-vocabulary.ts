@@ -235,7 +235,6 @@ const CREATIVE_HISTORY_REFUSAL_LABELS: Readonly<Record<string, string>> = {
   declared_type_mismatch: "The file's contents do not match what it claimed to be.",
   corrupt_image: "The image could not be read. It may be incomplete or corrupted.",
   dimensions_out_of_range: "That image's dimensions are outside the allowed range.",
-  processor_unavailable: "The image could not be processed right now. Try uploading it again.",
   storage_failed: "The checked image could not be stored. Try uploading it again.",
   item_unavailable: "That design is no longer available.",
   forbidden: "You no longer have permission to finish this upload.",

@@ -148,6 +148,74 @@ describe("ingestCampaignImage", () => {
 
     expect(first.contentHash).toBe(second.contentHash);
   });
+
+  it("reads non-square dimensions without transposing them", async () => {
+    const wide = await sharp({
+      create: { width: 300, height: 200, channels: 3, background: { r: 9, g: 9, b: 9 } },
+    })
+      .jpeg()
+      .toBuffer();
+
+    const result = accepted(await ingestCampaignImage({ bytes: wide }));
+
+    expect(result.widthPx).toBe(300);
+    expect(result.heightPx).toBe(200);
+  });
+
+  it("drops PNG text chunks, so a comment stops travelling with the file", async () => {
+    const keyword = Buffer.from("Comment\0", "ascii");
+    const text = Buffer.from("SECRET-LOCATION-MARKER", "utf8");
+    const data = Buffer.concat([keyword, text]);
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(data.length);
+    const textChunk = Buffer.concat([length, Buffer.from("tEXt", "ascii"), data, Buffer.alloc(4)]);
+    // A viewer reads up to IEND; the new chunk goes just before it.
+    const withText = Buffer.concat([
+      png.subarray(0, png.length - 12),
+      textChunk,
+      png.subarray(-12),
+    ]);
+
+    const result = accepted(await ingestCampaignImage({ bytes: withText }));
+
+    expect(result.widthPx).toBe(512);
+    expect(result.bytes.includes(Buffer.from("SECRET-LOCATION-MARKER"))).toBe(false);
+  });
+
+  it("refuses a PNG whose header checksum does not match its bytes", async () => {
+    const tampered = Buffer.from(png);
+    tampered[16] ^= 0x01;
+
+    const result = await ingestCampaignImage({ bytes: tampered });
+
+    expect(result).toMatchObject({ outcome: "rejected", reason: "corrupt_image" });
+  });
+
+  it("refuses a JPEG cut short of its end marker", async () => {
+    const result = await ingestCampaignImage({ bytes: jpeg.subarray(0, jpeg.length - 100) });
+
+    expect(result).toMatchObject({ outcome: "rejected", reason: "corrupt_image" });
+  });
+
+  it("strips WebP metadata and reads extended-container dimensions", async () => {
+    const withExif = await sharp({
+      create: { width: 512, height: 256, channels: 3, background: { r: 1, g: 2, b: 3 } },
+    })
+      .withMetadata({ exif: { IFD0: { Copyright: "SECRET-LOCATION-MARKER" } } })
+      .webp()
+      .toBuffer();
+
+    const before = await sharp(withExif).metadata();
+    expect(before.exif).toBeDefined();
+
+    const result = accepted(await ingestCampaignImage({ bytes: withExif }));
+    const after = await sharp(result.bytes).metadata();
+
+    expect(result.widthPx).toBe(512);
+    expect(result.heightPx).toBe(256);
+    expect(after.exif).toBeUndefined();
+    expect(result.bytes.includes(Buffer.from("SECRET-LOCATION-MARKER"))).toBe(false);
+  });
 });
 
 describe("storage paths", () => {
