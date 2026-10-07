@@ -5,6 +5,7 @@ import "./globals.css";
 import { Manrope } from "next/font/google";
 import { cn } from "@/lib/utils";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { Analytics } from "@vercel/analytics/next";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -28,6 +29,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <Toaster />
           <SpeedInsights />
         </QueryProvider>
+        <Analytics />
       </body>
     </html>
   );
