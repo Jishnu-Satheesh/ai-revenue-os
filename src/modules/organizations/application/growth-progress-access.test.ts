@@ -6,7 +6,11 @@ const testEnv = vi.hoisted(() => ({
   OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS: undefined as string | undefined,
 }));
 vi.mock("@/lib/env", () => ({ env: testEnv }));
+vi.mock("@/lib/logger", () => ({
+  logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+}));
 
+import { logger } from "@/lib/logger";
 import {
   OVERVIEW_GROWTH_PROGRESS_MAX_ORGANIZATIONS,
   assertOverviewGrowthProgressEnabled,
@@ -73,5 +77,21 @@ describe("isOverviewGrowthProgressEnabled", () => {
     expect(() => assertOverviewGrowthProgressEnabled(ORG_B, enabled)).toThrowError(
       expect.objectContaining({ code: "FEATURE_NOT_AVAILABLE" }),
     );
+  });
+
+  it("fails closed with a named log when the ambient allowlist is typoed", () => {
+    testEnv.OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS = "*";
+    try {
+      expect(isOverviewGrowthProgressEnabled(ORG_A)).toBe(false);
+      expect(isOverviewGrowthProgressEnabled(ORG_B)).toBe(false);
+      expect(logger.error).toHaveBeenCalledWith(
+        "rollout_allowlist.invalid_config",
+        expect.objectContaining({
+          errorCode: expect.stringContaining("OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS"),
+        }),
+      );
+    } finally {
+      testEnv.OVERVIEW_GROWTH_PROGRESS_ORGANIZATION_IDS = undefined;
+    }
   });
 });

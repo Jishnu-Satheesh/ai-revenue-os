@@ -1,7 +1,6 @@
-import { z } from "zod";
-
 import { DomainError } from "@/lib/errors";
 import { env } from "@/lib/env";
+import { parseOrganizationAllowlist, resolveOrganizationAllowlist } from "@/lib/rollout-allowlist";
 
 /**
  * The production rollout gate for Campaigns.
@@ -15,39 +14,31 @@ import { env } from "@/lib/env";
  * an outsider tell the two apart and enumerate which organizations exist.
  */
 
-const organizationIdSchema = z.string().uuid();
+const CAMPAIGNS_ALLOWLIST = {
+  variableName: "CAMPAIGNS_V1_ORGANIZATION_IDS",
+  label: "Campaign rollout organization IDs",
+} as const;
 
 export function parseCampaignOrganizationIds(value: string | undefined): Set<string> {
-  if (!value) return new Set();
-
-  const organizationIds = value.split(",").map((organizationId) => organizationId.trim());
-
-  if (organizationIds.some((organizationId) => organizationId.length === 0)) {
-    throw new Error("Campaign rollout organization IDs must not contain empty values.");
-  }
-
-  const enabled = new Set<string>();
-  for (const organizationId of organizationIds) {
-    enabled.add(organizationIdSchema.parse(organizationId).toLowerCase());
-  }
-
-  if (enabled.size !== organizationIds.length) {
-    throw new Error("Campaign rollout organization IDs must not contain duplicates.");
-  }
-
-  return enabled;
+  return parseOrganizationAllowlist(value, CAMPAIGNS_ALLOWLIST);
 }
 
 export function isCampaignsEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseCampaignOrganizationIds(env.CAMPAIGNS_V1_ORGANIZATION_IDS),
+  enabledOrganizationIds = resolveOrganizationAllowlist(
+    env.CAMPAIGNS_V1_ORGANIZATION_IDS,
+    CAMPAIGNS_ALLOWLIST,
+  ),
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
 }
 
 export function assertCampaignsEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseCampaignOrganizationIds(env.CAMPAIGNS_V1_ORGANIZATION_IDS),
+  enabledOrganizationIds = resolveOrganizationAllowlist(
+    env.CAMPAIGNS_V1_ORGANIZATION_IDS,
+    CAMPAIGNS_ALLOWLIST,
+  ),
 ): void {
   if (!isCampaignsEnabled(organizationId, enabledOrganizationIds)) {
     throw new DomainError(

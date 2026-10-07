@@ -1,37 +1,30 @@
-import { z } from "zod";
-
 import { DomainError } from "@/lib/errors";
 import { env } from "@/lib/env";
+import { parseOrganizationAllowlist, resolveOrganizationAllowlist } from "@/lib/rollout-allowlist";
 
-const organizationIdSchema = z.string().uuid();
+export function parseIntegrationOrganizationIds(
+  value: string | undefined,
+  variableName = "INTEGRATION_HUB_V1_ORGANIZATION_IDS",
+): Set<string> {
+  return parseOrganizationAllowlist(value, {
+    variableName,
+    label: "Integration Hub rollout organization IDs",
+  });
+}
 
-export function parseIntegrationOrganizationIds(value: string | undefined): Set<string> {
-  if (!value) {
-    return new Set();
-  }
-
-  const organizationIds = value.split(",").map((organizationId) => organizationId.trim());
-
-  if (organizationIds.some((organizationId) => organizationId.length === 0)) {
-    throw new Error("Integration Hub rollout organization IDs must not contain empty values.");
-  }
-
-  const enabledOrganizationIds = new Set<string>();
-
-  for (const organizationId of organizationIds) {
-    enabledOrganizationIds.add(organizationIdSchema.parse(organizationId).toLowerCase());
-  }
-
-  if (enabledOrganizationIds.size !== organizationIds.length) {
-    throw new Error("Integration Hub rollout organization IDs must not contain duplicates.");
-  }
-
-  return enabledOrganizationIds;
+function resolveIntegrationOrganizationIds(value: string | undefined, variableName: string) {
+  return resolveOrganizationAllowlist(value, {
+    variableName,
+    label: "Integration Hub rollout organization IDs",
+  });
 }
 
 export function assertIntegrationHubEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseIntegrationOrganizationIds(env.INTEGRATION_HUB_V1_ORGANIZATION_IDS),
+  enabledOrganizationIds = resolveIntegrationOrganizationIds(
+    env.INTEGRATION_HUB_V1_ORGANIZATION_IDS,
+    "INTEGRATION_HUB_V1_ORGANIZATION_IDS",
+  ),
 ): void {
   if (!isIntegrationHubEnabled(organizationId, enabledOrganizationIds)) {
     throw new DomainError(
@@ -43,33 +36,19 @@ export function assertIntegrationHubEnabled(
 
 export function isIntegrationHubEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseIntegrationOrganizationIds(env.INTEGRATION_HUB_V1_ORGANIZATION_IDS),
+  enabledOrganizationIds = resolveIntegrationOrganizationIds(
+    env.INTEGRATION_HUB_V1_ORGANIZATION_IDS,
+    "INTEGRATION_HUB_V1_ORGANIZATION_IDS",
+  ),
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
 }
 
 export function parseAgentChatOrganizationIds(value: string | undefined): Set<string> {
-  if (!value) {
-    return new Set();
-  }
-
-  const organizationIds = value.split(",").map((organizationId) => organizationId.trim());
-
-  if (organizationIds.some((organizationId) => organizationId.length === 0)) {
-    throw new Error("Agent chat rollout organization IDs must not contain empty values.");
-  }
-
-  const enabledOrganizationIds = new Set<string>();
-
-  for (const organizationId of organizationIds) {
-    enabledOrganizationIds.add(organizationIdSchema.parse(organizationId).toLowerCase());
-  }
-
-  if (enabledOrganizationIds.size !== organizationIds.length) {
-    throw new Error("Agent chat rollout organization IDs must not contain duplicates.");
-  }
-
-  return enabledOrganizationIds;
+  return parseOrganizationAllowlist(value, {
+    variableName: "AGENT_CHAT_V1_ORGANIZATION_IDS",
+    label: "Agent chat rollout organization IDs",
+  });
 }
 
 /**
@@ -83,7 +62,10 @@ export function parseAgentChatOrganizationIds(value: string | undefined): Set<st
  */
 export function isAgentChatEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseAgentChatOrganizationIds(env.AGENT_CHAT_V1_ORGANIZATION_IDS),
+  enabledOrganizationIds = resolveOrganizationAllowlist(env.AGENT_CHAT_V1_ORGANIZATION_IDS, {
+    variableName: "AGENT_CHAT_V1_ORGANIZATION_IDS",
+    label: "Agent chat rollout organization IDs",
+  }),
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
 }
@@ -99,8 +81,9 @@ export function assertAgentChatEnabled(organizationId: string): void {
 
 export function isGovernedReportValidationEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseIntegrationOrganizationIds(
+  enabledOrganizationIds = resolveIntegrationOrganizationIds(
     env.GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS,
+    "GOVERNED_REPORT_VALIDATION_ORGANIZATION_IDS",
   ),
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
@@ -108,8 +91,9 @@ export function isGovernedReportValidationEnabled(
 
 export function isGovernedReportProjectionEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseIntegrationOrganizationIds(
+  enabledOrganizationIds = resolveIntegrationOrganizationIds(
     env.GOVERNED_REPORT_PROJECTION_ORGANIZATION_IDS,
+    "GOVERNED_REPORT_PROJECTION_ORGANIZATION_IDS",
   ),
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
@@ -133,8 +117,9 @@ export function assertGovernedReportProjectionEnabled(organizationId: string): v
  */
 export function isGovernedEconomicsReadinessEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseIntegrationOrganizationIds(
+  enabledOrganizationIds = resolveIntegrationOrganizationIds(
     env.GOVERNED_ECONOMICS_READINESS_ORGANIZATION_IDS,
+    "GOVERNED_ECONOMICS_READINESS_ORGANIZATION_IDS",
   ),
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());
@@ -149,8 +134,9 @@ export function isGovernedEconomicsReadinessEnabled(
  */
 export function isGovernedChannelAnalysisEnabled(
   organizationId: string,
-  enabledOrganizationIds = parseIntegrationOrganizationIds(
+  enabledOrganizationIds = resolveIntegrationOrganizationIds(
     env.GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS,
+    "GOVERNED_CHANNEL_ANALYSIS_ORGANIZATION_IDS",
   ),
 ): boolean {
   return enabledOrganizationIds.has(organizationId.toLowerCase());

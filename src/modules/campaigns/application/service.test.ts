@@ -1,12 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+
+const testEnv = vi.hoisted(() => ({
+  CAMPAIGNS_V1_ORGANIZATION_IDS: undefined as string | undefined,
+}));
 // The gate is exercised with explicit allowlists below, so the ambient value is
 // deliberately absent: a test must not pass because the environment enabled it.
-vi.mock("@/lib/env", () => ({ env: { CAMPAIGNS_V1_ORGANIZATION_IDS: undefined } }));
+vi.mock("@/lib/env", () => ({ env: testEnv }));
+vi.mock("@/lib/logger", () => ({
+  logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
+}));
 
 import { bundleDigest } from "@/domain/campaigns/digest";
 import { validManifest } from "@/domain/campaigns/test-manifest";
+import { logger } from "@/lib/logger";
 import {
   assertCampaignsEnabled,
   isCampaignsEnabled,
@@ -136,6 +144,21 @@ describe("campaign rollout gate", () => {
     expect(() => parseCampaignOrganizationIds("not-a-uuid")).toThrow();
     expect(() => parseCampaignOrganizationIds(`${ORGANIZATION_ID},`)).toThrow();
     expect(() => parseCampaignOrganizationIds(`${ORGANIZATION_ID},${ORGANIZATION_ID}`)).toThrow();
+  });
+
+  it("fails closed with a named log when the ambient allowlist is typoed", () => {
+    testEnv.CAMPAIGNS_V1_ORGANIZATION_IDS = "*";
+    try {
+      expect(isCampaignsEnabled(ORGANIZATION_ID)).toBe(false);
+      expect(logger.error).toHaveBeenCalledWith(
+        "rollout_allowlist.invalid_config",
+        expect.objectContaining({
+          errorCode: expect.stringContaining("CAMPAIGNS_V1_ORGANIZATION_IDS"),
+        }),
+      );
+    } finally {
+      testEnv.CAMPAIGNS_V1_ORGANIZATION_IDS = undefined;
+    }
   });
 
   it("throws a feature error a route maps away from a membership error", () => {
