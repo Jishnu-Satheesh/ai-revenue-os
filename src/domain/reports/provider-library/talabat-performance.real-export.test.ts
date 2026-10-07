@@ -96,13 +96,22 @@ describe.skipIf(!hasRealExport)("talabat performance projection over the real ex
 
   it("counts closed minutes against scheduled minutes", async () => {
     const result = await projectFixture();
-    // The export reports fractional minutes per day, so window totals carry
-    // the provider's own per-day rounding -- close to the round figures the
-    // report reads as, never silently rounded again here.
+    // ADR 0078: counts are whole units, so each day's fractional minutes round
+    // to the nearest minute on emission. The window total stays within half a
+    // minute per contributing day of the provider's exact sum.
+    const closedRows = result.observations.filter(
+      (observation) => observation.metricKey === "operations.closed_minutes",
+    );
+    const scheduledRows = result.observations.filter(
+      (observation) => observation.metricKey === "operations.scheduled_minutes",
+    );
+    for (const row of [...closedRows, ...scheduledRows]) {
+      expect(row.valueNumerator).toMatch(/^-?[0-9]+$/);
+    }
     const closed = sumByMetric(result.observations, "operations.closed_minutes");
     const scheduled = sumByMetric(result.observations, "operations.scheduled_minutes");
-    expect(Math.abs(closed - 34_217)).toBeLessThan(1);
-    expect(Math.abs(scheduled - 70_799)).toBeLessThan(1);
+    expect(Math.abs(closed - 34_217)).toBeLessThanOrEqual(closedRows.length / 2);
+    expect(Math.abs(scheduled - 70_799)).toBeLessThanOrEqual(scheduledRows.length / 2);
     expect(closed / scheduled).toBeGreaterThan(0.482);
     expect(closed / scheduled).toBeLessThan(0.484);
   });
