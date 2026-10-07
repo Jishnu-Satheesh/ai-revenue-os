@@ -1,7 +1,6 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Upload } from "tus-js-client";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Calculator,
@@ -64,6 +63,7 @@ import type {
   ReportPackageRow,
   ReportProjectionReconciliationGroup,
 } from "@/modules/reports/application/ports";
+import { uploadReportPackageBytes } from "@/components/integrations/report-package-upload-transport";
 
 type UploadIntentResponse = {
   reportPackage: ReportPackageRow;
@@ -994,33 +994,18 @@ export function ReportPackageUpload({
           }),
         },
       );
-      await new Promise<void>((resolve, reject) => {
-        const tus = new Upload(file, {
+      await uploadReportPackageBytes({
+        file,
+        intent: {
           endpoint: intent.upload.endpoint,
+          token: intent.upload.token,
+          apiKey: intent.upload.apiKey,
           chunkSize: intent.upload.chunkSize,
-          uploadSize: file.size,
-          metadata: {
-            bucketName: "governed-report-packages",
-            objectName: intent.reportPackage.storage_path,
-            contentType,
-          },
-          headers: {
-            apikey: intent.upload.apiKey,
-            "x-signature": intent.upload.token,
-          },
-          retryDelays: [0, 1_000, 3_000, 5_000],
-          removeFingerprintOnSuccess: true,
-          fingerprint: () =>
-            Promise.resolve(`report-package:${intent.reportPackage.id}:${file.name}:${file.size}`),
-          onError: reject,
-          onProgress: (uploaded, total) =>
-            setProgress(total ? Math.round((uploaded / total) * 100) : 0),
-          onSuccess: () => resolve(),
-        });
-        void tus.findPreviousUploads().then((previous) => {
-          if (previous[0]) tus.resumeFromPreviousUpload(previous[0]);
-          tus.start();
-        }, reject);
+          storagePath: intent.reportPackage.storage_path,
+        },
+        contentType,
+        packageId: intent.reportPackage.id,
+        onProgress: (percent) => setProgress(percent),
       });
       return requestJson<UploadCompleteResponse>(
         `${reportPackagesPath(organizationId)}/${intent.reportPackage.id}/complete`,
