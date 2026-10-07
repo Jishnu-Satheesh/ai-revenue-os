@@ -190,6 +190,39 @@ describe("runChannelAnalysis", () => {
     expect(movement?.priority).toBeUndefined();
   });
 
+  it("records a float-dusty minute sum within the twelve decimals the ledger accepts", async () => {
+    // Staging Oct 1-7 window: closed minutes summed to 245.51666666666665,
+    // whose fourteen decimals refused the whole run at save time. The finding
+    // keeps twelve; the evidence underneath stays exact.
+    const minutePoint = (metricKey: string, periodStart: string, numerator: number) =>
+      point(periodStart, numerator, { metricKey, valueKind: "count", currency: null });
+    const deps = dependencies({
+      loadEvidence: vi.fn(async () => ({
+        points: [
+          minutePoint("operations.closed_minutes", "2026-01-01", 211.91666666666666),
+          minutePoint("operations.closed_minutes", "2026-01-03", 33.6),
+          minutePoint("operations.scheduled_minutes", "2026-01-01", 1021.8833333333333),
+          minutePoint("operations.scheduled_minutes", "2026-01-03", 779.9833333333333),
+        ],
+        exactRangePoints: [],
+        incomparablePointCount: 0,
+        projectionRuns: [{ projectionRunId: PROJECTION_RUN, absentRowCount: 0 }],
+        heldEvidence: [],
+      })),
+    });
+
+    const result = await runChannelAnalysis(payload(), deps);
+
+    expect(result.outcome).toBe("completed");
+    const share = vi
+      .mocked(deps.complete)
+      .mock.calls[0][0].findings.find(
+        (finding) => finding.detectorKey === "operations.closed_share",
+      );
+    expect(share?.valueNumerator).toBe("245.516666666667");
+    expect(share?.valueDenominator).toMatch(/^-?[0-9]+(\.[0-9]{1,12})?$/);
+  });
+
   it("binds the cross-channel detector, and only that one, when no channel is named", async () => {
     const deps = dependencies();
     await runChannelAnalysis(payload({ channelId: null }), deps);
