@@ -125,9 +125,14 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-async function expandShell(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByPlaceholderText(/ask anything/i));
+async function openPanel(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: /open ai assistant/i }));
+  expect(await screen.findByPlaceholderText(/ask anything/i)).toBeInTheDocument();
   expect(await screen.findByRole("button", { name: /answer mode/i })).toBeInTheDocument();
+}
+
+async function expandShell(user: ReturnType<typeof userEvent.setup>) {
+  await openPanel(user);
 }
 
 async function openModeMenu(user: ReturnType<typeof userEvent.setup>) {
@@ -140,6 +145,7 @@ describe("shell", () => {
   it("allows viewer advice and keeps report upload permission gated", async () => {
     const user = userEvent.setup();
     renderShell({ role: "viewer" });
+    await openPanel(user);
     await user.type(
       screen.getByRole("textbox", { name: "Ask anything" }),
       "How can we improve next month?",
@@ -164,25 +170,41 @@ describe("shell", () => {
     await user.click(screen.getByRole("button", { name: "Remove report attachment" }));
     expect(screen.queryByText("talabat.csv")).not.toBeInTheDocument();
   });
-  it("shows Quick default with inert voice and attach", () => {
+  it("rests as a robo button with the panel hidden", () => {
     renderShell();
-    expect(screen.getByPlaceholderText(/ask anything/i)).toBeDefined();
+    expect(screen.getByRole("button", { name: /open ai assistant/i })).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/ask anything/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /answer mode/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the full chatbot.png on the robo button with the glow ring", () => {
+    renderShell();
+    const launcher = screen.getByRole("button", { name: /open ai assistant/i });
+    const image = launcher.querySelector("img");
+    expect(image?.getAttribute("src")).toMatch(/chatbot\.png/);
+    // Full figure: contain, never cropped by a cover mask.
+    expect(image?.className).toMatch(/object-contain/);
+    expect(image?.className).not.toMatch(/object-cover/);
+    // Same glow language as the chat panel, so the button feels alive.
+    expect(launcher.closest("div.agent-glow-ring")).not.toBeNull();
   });
 
   it("renders nothing outside the 5 allowed pages", () => {
     renderShell({ page: "onboarding" });
+    expect(screen.queryByRole("button", { name: /open ai assistant/i })).toBeNull();
     expect(screen.queryByPlaceholderText(/ask anything/i)).toBeNull();
     expect(screen.queryByLabelText("AI agent conversation")).toBeNull();
   });
 
-  it("rests as a single input line with controls and chips hidden", () => {
+  it("opens the full panel with controls and chips at once", async () => {
+    const user = userEvent.setup();
     renderShell();
-    expect(screen.getByPlaceholderText(/ask anything/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /answer mode/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /what do we know/i })).not.toBeInTheDocument();
+    await openPanel(user);
+    expect(screen.getByRole("button", { name: /answer mode/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /what do we know/i })).toBeInTheDocument();
   });
 
-  it("expands the control row and reveals chips on input focus", async () => {
+  it("reveals chips with the full control row on open", async () => {
     const user = userEvent.setup();
     renderShell();
     await expandShell(user);
@@ -247,9 +269,36 @@ describe("shell", () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
+  it("closes the panel to the robo button on outside click when no drawer is open", async () => {
+    const user = userEvent.setup();
+    renderShell();
+    await openPanel(user);
+    expect(screen.getByPlaceholderText(/ask anything/i)).toBeInTheDocument();
+    await user.click(document.body);
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText(/ask anything/i)).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: /open ai assistant/i })).toBeInTheDocument();
+  });
+
+  it("closes everything to the robo button on drawer close", async () => {
+    const user = userEvent.setup();
+    renderShell({ role: "operator", permissions: [] });
+    await openPanel(user);
+    await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
+    expect(await screen.findByLabelText("AI agent conversation")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /close conversation/i }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("AI agent conversation")).toBeNull();
+    });
+    expect(screen.queryByPlaceholderText(/ask anything/i)).toBeNull();
+    expect(screen.getByRole("button", { name: /open ai assistant/i })).toBeInTheDocument();
+  });
+
   it("sends on Enter, checks durable handling before legacy routing, and keeps controls", async () => {
     const user = userEvent.setup();
     renderShell({ role: "operator", permissions: [] });
+    await openPanel(user);
     await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
 
     // The drawer opens on send (the transient routing Marker is covered
@@ -274,8 +323,8 @@ describe("shell", () => {
     const thread = await screen.findByRole("log", { name: "Conversation thread" });
     expect(within(thread).getByText("What do we know?")).toBeInTheDocument();
     // Steps stay always visible inline: the narrated intent renders with no
-    // Steps collapse trigger anywhere.
-    expect(within(thread).getByText("Understood: Memory answer")).toBeInTheDocument();
+    // Steps collapse trigger anywhere (async route resolves after send).
+    expect(await within(thread).findByText("Understood: Memory answer")).toBeInTheDocument();
     expect(within(thread).queryByRole("button", { name: /^steps$/i })).toBeNull();
     // Send keeps the control row open while the drawer is up so the user
     // can keep chatting without refocusing; chips stay hidden.
@@ -302,6 +351,7 @@ describe("shell", () => {
   it("mounts the shell-owned drawer in-flow with the bar so one drag moves both with zero offset", async () => {
     const user = userEvent.setup();
     renderShell({ role: "operator", permissions: [] });
+    await openPanel(user);
     await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
     const section = await screen.findByLabelText("AI agent conversation");
 
@@ -319,16 +369,17 @@ describe("shell", () => {
     fireEvent.pointerDown(handle, { button: 0, clientX: 500, clientY: 500 });
     fireEvent.pointerMove(window, { clientX: 550, clientY: 470 });
     fireEvent.pointerUp(window);
-    // Still in-flow after the drag: only the shared container owns a transform.
+    // Still in-flow after the drag: only the shared unit owns a transform.
     expect(section.className).not.toMatch(/(^|\s)fixed(\s|$)/);
     expect(section.style.transform).toBe("");
-    const unit = screen.getByPlaceholderText(/ask anything/i).closest("div.fixed") as HTMLElement;
+    const unit = screen.getByTestId("agent-shell-unit") as HTMLElement;
     expect(unit.style.transform).toBe("translate3d(50px, -30px, 0)");
   });
 
   it("keeps drawer size and position in shell session memory across close and reopen", async () => {
     const user = userEvent.setup();
     renderShell({ role: "operator", permissions: [] });
+    await openPanel(user);
     await user.type(screen.getByPlaceholderText(/ask anything/i), "What do we know?{enter}");
     const section = await screen.findByLabelText("AI agent conversation");
 
@@ -342,25 +393,29 @@ describe("shell", () => {
     fireEvent.pointerDown(handle, { button: 0, clientX: 500, clientY: 500 });
     fireEvent.pointerMove(window, { clientX: 550, clientY: 470 });
     fireEvent.pointerUp(window);
-    // Single source of truth: the shell container owns the unit transform
-    // (bar + drawer move as one); the drawer section applies size only, so
-    // the offset never stacks 2x on the transformed-ancestor block.
-    const unit = screen.getByPlaceholderText(/ask anything/i).closest("div.fixed") as HTMLElement;
+    // Single source of truth: the shell unit owns the translate3d (bar +
+    // drawer move as one); the drawer section applies size only, so the
+    // offset never stacks 2x on the transformed-ancestor block.
+    const unit = screen.getByTestId("agent-shell-unit") as HTMLElement;
     expect(unit.style.transform).toBe("translate3d(50px, -30px, 0)");
     expect(section.style.transform).toBe("");
 
-    // Close unmounts the drawer; a fresh send remounts it on the same
-    // shell-owned geometry — session memory, reset only on reload.
+    // Close-all unmounts drawer + panel back to the robo button; reopening
+    // remounts on the same shell-owned geometry — session memory only.
+    // The panel exit motion keeps the tree mounted briefly, so wait for it.
     await user.click(screen.getByRole("button", { name: /close conversation/i }));
-    expect(screen.queryByLabelText("AI agent conversation")).toBeNull();
+    await waitFor(() => {
+      expect(screen.queryByLabelText("AI agent conversation")).toBeNull();
+    });
+    expect(screen.getByRole("button", { name: /open ai assistant/i })).toBeInTheDocument();
+    await openPanel(user);
     await user.type(screen.getByPlaceholderText(/ask anything/i), "And then?{enter}");
 
     const reopened = await screen.findByLabelText("AI agent conversation");
     expect((reopened.firstElementChild as HTMLElement).style.width).toBe("804px");
-    expect(
-      (screen.getByPlaceholderText(/ask anything/i).closest("div.fixed") as HTMLElement).style
-        .transform,
-    ).toBe("translate3d(50px, -30px, 0)");
+    expect((screen.getByTestId("agent-shell-unit") as HTMLElement).style.transform).toBe(
+      "translate3d(50px, -30px, 0)",
+    );
     expect(reopened.style.transform).toBe("");
   });
 });
@@ -390,8 +445,15 @@ describe("sidebar-aware placement", () => {
     );
   });
 
-  it("centers the floating bar in the content area", () => {
+  it("parks the robo button in the viewport corner and centers the open panel", async () => {
+    const user = userEvent.setup();
     renderShell();
+    const launcher = screen
+      .getByRole("button", { name: /open ai assistant/i })
+      .closest("div.fixed") as HTMLElement;
+    expect(launcher.className).toMatch(/right-6/);
+    expect(launcher.className).not.toMatch(/left-\(--sidebar-width\)/);
+    await openPanel(user);
     const bar = screen.getByPlaceholderText(/ask anything/i).closest("div.fixed") as HTMLElement;
     expect(bar.className).toMatch(/left-\(--sidebar-width\)/);
   });

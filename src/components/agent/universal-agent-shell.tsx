@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import {
   AudioWaveformIcon,
@@ -132,15 +133,16 @@ const MODE_META: Record<ThreadMode, { label: string }> = {
 };
 
 /**
- * Floating universal agent shell (spec section 5.1). Dark bottom-centered
- * panel with a glow ring that circulates around the text area (static glow
- * under prefers-reduced-motion), Ask anything input, a mode menu with
- * exactly two modes (Quick answer default, DeepThink), inert + / Voice
- * buttons with tooltips, and a gradient send button. The bar rests as a
- * single input line; focusing it expands the control row and reveals the
- * detached suggestion chips above the bar. Sending collapses everything
- * back, opens the drawer, and focuses it. Enter sends, Shift+Enter adds a
- * newline. Renders only on the 5 allowed pages — otherwise null.
+ * Floating universal agent shell (spec section 5.1). A chatbot.png robo
+ * button rests in the bottom-right corner; clicking it opens a dark
+ * bottom-centered panel with a glow ring (static glow under
+ * prefers-reduced-motion), Ask anything input, a mode menu with exactly two
+ * modes (Quick answer default, DeepThink), inert + / Voice buttons with
+ * tooltips, and a gradient send button. The open panel always shows the
+ * full control row plus suggestion chips when empty. Clicking outside with
+ * no drawer open, or closing the drawer, collapses everything back to the
+ * robo button. Enter sends, Shift+Enter adds a newline. Renders only on the
+ * 5 allowed pages — otherwise null.
  */
 export function UniversalAgentShell({
   organizationId,
@@ -163,7 +165,7 @@ export function UniversalAgentShell({
   const [file, setFile] = useState<File | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
   const [mode, setMode] = useState<ThreadMode>("quick");
-  const [expanded, setExpanded] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [view, setView] = useState<AgentDrawerView>("thread");
@@ -176,6 +178,48 @@ export function UniversalAgentShell({
   const [drawerGeometry, setDrawerGeometry] = useState<AgentDrawerGeometry>(
     AGENT_DRAWER_DEFAULT_GEOMETRY,
   );
+  const panelRef = useRef<HTMLDivElement>(null);
+  const launcherRef = useRef<HTMLButtonElement>(null);
+
+  // Focus the input when the panel opens; return focus to the robo button
+  // when it closes so keyboard users never lose their place.
+  useEffect(() => {
+    if (panelOpen && !drawerOpen) {
+      textareaRef.current?.focus();
+    }
+  }, [panelOpen, drawerOpen]);
+
+  // Click-outside + Escape close the panel back to the robo button, but
+  // only when no drawer is open — the drawer owns its own dismissal.
+  // Portaled overlays (mode menu, tooltips) live outside the panel DOM node,
+  // so clicks/keys inside them must not count as outside.
+  useEffect(() => {
+    if (!panelOpen || drawerOpen) return;
+    function inOverlay(target: EventTarget | null) {
+      return (
+        target instanceof HTMLElement &&
+        target.closest(
+          '[data-radix-portal], [data-radix-popper-content-wrapper], [role="menu"], [role="listbox"]',
+        ) !== null
+      );
+    }
+    function onPointerDown(event: PointerEvent) {
+      if (inOverlay(event.target)) return;
+      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
+        setPanelOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape" || inOverlay(event.target)) return;
+      setPanelOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [panelOpen, drawerOpen]);
 
   if (!isAgentShellPage(page)) return null;
 
@@ -183,12 +227,10 @@ export function UniversalAgentShell({
   const isViewer = role === "viewer";
   const canAttach = hasReportPermission(role, "report.upload");
   const canSend = input.trim().length > 0;
-  const chipsVisible = expanded && !drawerOpen && input.trim() === "";
-  // The control row (mode, send, history) stays open whenever the drawer is
-  // open so the user can keep chatting without refocusing; the bare
-  // single-line rest state is only for when the agent is not in use.
-  const controlsOpen = expanded || drawerOpen;
+  const chipsVisible = panelOpen && !drawerOpen && input.trim() === "";
+  const panelVisible = panelOpen || drawerOpen;
   const motionMs = reduceMotion ? 0 : 220;
+  const panelMotionMs = reduceMotion ? 0 : 240;
 
   function handleSend() {
     const body = input.trim();
@@ -199,180 +241,238 @@ export function UniversalAgentShell({
     setInput("");
     setFile(null);
     setFileError(null);
-    setExpanded(false);
     setCollapsed(false);
     setView("thread");
+    setPanelOpen(true);
     setDrawerOpen(true);
   }
 
   function openHistory() {
     setCollapsed(false);
     setView("history");
+    setPanelOpen(true);
     setDrawerOpen(true);
+  }
+
+  function closeAll() {
+    setDrawerOpen(false);
+    setPanelOpen(false);
+    setCollapsed(false);
+    // Return focus on the next tick so the unmount does not swallow it.
+    requestAnimationFrame(() => launcherRef.current?.focus());
   }
 
   return (
     <TooltipProvider>
-      <div
-        className={cn("fixed right-0 bottom-4 flex justify-center px-4", sidebarOffset)}
-        style={
-          drawerGeometry.x !== 0 || drawerGeometry.y !== 0
-            ? {
-                transform: `translate3d(${drawerGeometry.x}px, ${drawerGeometry.y}px, 0)`,
-              }
-            : undefined
-        }
-      >
-        <div className="w-[min(44rem,100%)]">
-          <AnimatePresence initial={false}>
-            {chipsVisible ? (
-              <motion.div
-                key="agent-suggestions"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 8 }}
-                transition={{ duration: motionMs / 1000 }}
-                className="mb-2 flex flex-wrap justify-center gap-2"
-              >
-                {SUGGESTIONS.map((suggestion) => (
-                  <Button
-                    key={suggestion}
-                    type="button"
-                    variant="outline"
-                    size="xs"
-                    onClick={() => {
-                      setInput(suggestion);
-                      textareaRef.current?.focus();
-                    }}
-                    className={cn(
-                      "border-white/10 bg-zinc-950 text-zinc-300 hover:bg-white/10 hover:text-white",
-                    )}
-                  >
-                    {suggestion}
-                  </Button>
-                ))}
-              </motion.div>
-            ) : null}
-          </AnimatePresence>
-          {drawerOpen ? (
-            <AgentDrawer
-              organizationId={organizationId}
-              page={page}
-              threadId={threadId}
-              pendingPrompt={pendingPrompt}
-              mode={isViewer ? "quick" : mode}
-              role={role}
-              permissions={permissions}
-              actorId={actorId}
-              opportunity={opportunity}
-              advice={advice}
-              campaignSeams={campaignSeams}
-              watchUpdateAvailable={watchUpdateAvailable}
-              view={view}
-              onViewChange={setView}
-              collapsed={collapsed}
-              onToggleCollapsed={() => setCollapsed((previous) => !previous)}
-              onClose={() => setDrawerOpen(false)}
-              onThreadChange={setThreadId}
-              onPromptConsumed={() => setPendingPrompt(null)}
-              bottomOffset={controlsOpen ? "bottom-32" : "bottom-22"}
-              geometry={drawerGeometry}
-              onGeometryChange={setDrawerGeometry}
-              // The container above owns the unit translate3d (bar + drawer
-              // move as one); the drawer applies size styles only, so the
-              // offset never stacks 2x on a transformed-ancestor block.
-              disableUnitTransform
-            />
-          ) : null}
-          <div
-            className={cn(
-              "agent-glow-ring rounded-[1.75rem] p-[2px]",
-              reduceMotion ? null : "agent-glow-ring-animated",
-            )}
+      <AnimatePresence initial={false}>
+        {panelVisible ? null : (
+          <motion.div
+            key="agent-launcher"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9 }}
+            transition={{ duration: motionMs / 1000, ease: "easeOut" }}
+            className="fixed right-6 bottom-6 z-50"
           >
-            <div className="rounded-[calc(1.75rem-2px)] bg-zinc-950 text-zinc-50 shadow-2xl">
-              <div className="flex flex-col gap-1 p-2">
-                <Input
-                  ref={fileInputRef}
-                  type="file"
-                  className="sr-only"
-                  accept={AGENT_REPORT_ACCEPT}
-                  aria-label="Choose report attachment"
-                  disabled={!canAttach}
-                  onChange={(event) => {
-                    const selected = event.target.files?.[0];
-                    event.target.value = "";
-                    if (!selected) return;
-                    try {
-                      agentReportMediaType(selected);
-                      setFile(selected);
-                      setFileError(null);
-                    } catch (error) {
-                      setFileError(
-                        error instanceof Error ? error.message : "Choose a CSV or XLSX report.",
-                      );
+            <motion.div
+              animate={reduceMotion ? undefined : { y: [0, -6, 0] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              whileHover={{ scale: 1.08 }}
+              whileTap={{ scale: 0.95 }}
+            >
+              <div
+                className={cn(
+                  "agent-glow-ring rounded-full p-[2px]",
+                  reduceMotion ? null : "agent-glow-ring-animated",
+                )}
+              >
+                <Button
+                  ref={launcherRef}
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setPanelOpen(true)}
+                  aria-label="Open AI assistant"
+                  title="Ask AI assistant"
+                  className="size-16 rounded-full border-0 bg-zinc-950 p-1.5 shadow-2xl hover:bg-zinc-900"
+                >
+                  <Image
+                    src="/chatbot.png"
+                    alt=""
+                    aria-hidden="true"
+                    width={64}
+                    height={64}
+                    className="size-full object-contain"
+                    priority={false}
+                  />
+                </Button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence initial={false}>
+        {panelVisible ? (
+          <motion.div
+            key="agent-panel"
+            initial={{ opacity: 0, y: 16, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 8, scale: 0.98 }}
+            transition={{ duration: panelMotionMs / 1000, ease: "easeOut" }}
+            className={cn("fixed right-0 bottom-4 flex justify-center px-4", sidebarOffset)}
+          >
+            <div
+              data-testid="agent-shell-unit"
+              style={
+                drawerGeometry.x !== 0 || drawerGeometry.y !== 0
+                  ? {
+                      transform: `translate3d(${drawerGeometry.x}px, ${drawerGeometry.y}px, 0)`,
                     }
-                  }}
-                />
-                {file ? (
-                  <Attachment state="idle" size="sm">
-                    <AttachmentMedia>
-                      <FileSpreadsheetIcon aria-hidden="true" />
-                    </AttachmentMedia>
-                    <AttachmentContent>
-                      <AttachmentTitle>{file.name}</AttachmentTitle>
-                      <AttachmentDescription>
-                        CSV/XLSX report · ready to attach
-                      </AttachmentDescription>
-                    </AttachmentContent>
-                    <AttachmentActions>
-                      <AttachmentAction
-                        aria-label="Remove report attachment"
-                        onClick={() => {
-                          setFile(null);
-                          setFileError(null);
-                        }}
-                      >
-                        <XIcon aria-hidden="true" />
-                      </AttachmentAction>
-                    </AttachmentActions>
-                  </Attachment>
-                ) : null}
-                {fileError ? (
-                  <Alert variant="destructive">
-                    <AlertDescription>{fileError}</AlertDescription>
-                  </Alert>
-                ) : null}
-                <label htmlFor={inputId} className="sr-only">
-                  Ask anything
-                </label>
-                <Textarea
-                  ref={textareaRef}
-                  id={inputId}
-                  rows={1}
-                  value={input}
-                  placeholder="Ask anything…"
-                  aria-label="Ask anything"
-                  onFocus={() => setExpanded(true)}
-                  onChange={(event) => setInput(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      handleSend();
-                    }
-                  }}
-                  className="min-h-10 cursor-text resize-none border-0 bg-transparent text-zinc-50 caret-zinc-50 placeholder:text-zinc-500 focus-visible:ring-0"
-                />
+                  : undefined
+              }
+              className="flex w-full justify-center"
+            >
+              <div ref={panelRef} className="w-[min(44rem,100%)]">
                 <AnimatePresence initial={false}>
-                  {controlsOpen ? (
+                  {chipsVisible ? (
                     <motion.div
-                      key="agent-controls"
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: motionMs / 1000, ease: "easeInOut" }}
-                      className="overflow-hidden"
+                      key="agent-suggestions"
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 8 }}
+                      transition={{ duration: motionMs / 1000 }}
+                      className="mb-2 flex flex-wrap justify-center gap-2"
                     >
+                      {SUGGESTIONS.map((suggestion) => (
+                        <Button
+                          key={suggestion}
+                          type="button"
+                          variant="outline"
+                          size="xs"
+                          onClick={() => {
+                            setInput(suggestion);
+                            textareaRef.current?.focus();
+                          }}
+                          className={cn(
+                            "border-white/10 bg-zinc-950 text-zinc-300 hover:bg-white/10 hover:text-white",
+                          )}
+                        >
+                          {suggestion}
+                        </Button>
+                      ))}
+                    </motion.div>
+                  ) : null}
+                </AnimatePresence>
+                {drawerOpen ? (
+                  <AgentDrawer
+                    organizationId={organizationId}
+                    page={page}
+                    threadId={threadId}
+                    pendingPrompt={pendingPrompt}
+                    mode={isViewer ? "quick" : mode}
+                    role={role}
+                    permissions={permissions}
+                    actorId={actorId}
+                    opportunity={opportunity}
+                    advice={advice}
+                    campaignSeams={campaignSeams}
+                    watchUpdateAvailable={watchUpdateAvailable}
+                    view={view}
+                    onViewChange={setView}
+                    collapsed={collapsed}
+                    onToggleCollapsed={() => setCollapsed((previous) => !previous)}
+                    onClose={closeAll}
+                    onThreadChange={setThreadId}
+                    onPromptConsumed={() => setPendingPrompt(null)}
+                    bottomOffset="bottom-32"
+                    geometry={drawerGeometry}
+                    onGeometryChange={setDrawerGeometry}
+                    // The container above owns the unit translate3d (bar + drawer
+                    // move as one); the drawer applies size styles only, so the
+                    // offset never stacks 2x on a transformed-ancestor block.
+                    disableUnitTransform
+                  />
+                ) : null}
+                <div
+                  className={cn(
+                    "agent-glow-ring rounded-[1.75rem] p-[2px]",
+                    reduceMotion ? null : "agent-glow-ring-animated",
+                  )}
+                >
+                  <div className="rounded-[calc(1.75rem-2px)] bg-zinc-950 text-zinc-50 shadow-2xl">
+                    <div className="flex flex-col gap-1 p-2">
+                      <Input
+                        ref={fileInputRef}
+                        type="file"
+                        className="sr-only"
+                        accept={AGENT_REPORT_ACCEPT}
+                        aria-label="Choose report attachment"
+                        disabled={!canAttach}
+                        onChange={(event) => {
+                          const selected = event.target.files?.[0];
+                          event.target.value = "";
+                          if (!selected) return;
+                          try {
+                            agentReportMediaType(selected);
+                            setFile(selected);
+                            setFileError(null);
+                          } catch (error) {
+                            setFileError(
+                              error instanceof Error
+                                ? error.message
+                                : "Choose a CSV or XLSX report.",
+                            );
+                          }
+                        }}
+                      />
+                      {file ? (
+                        <Attachment state="idle" size="sm">
+                          <AttachmentMedia>
+                            <FileSpreadsheetIcon aria-hidden="true" />
+                          </AttachmentMedia>
+                          <AttachmentContent>
+                            <AttachmentTitle>{file.name}</AttachmentTitle>
+                            <AttachmentDescription>
+                              CSV/XLSX report · ready to attach
+                            </AttachmentDescription>
+                          </AttachmentContent>
+                          <AttachmentActions>
+                            <AttachmentAction
+                              aria-label="Remove report attachment"
+                              onClick={() => {
+                                setFile(null);
+                                setFileError(null);
+                              }}
+                            >
+                              <XIcon aria-hidden="true" />
+                            </AttachmentAction>
+                          </AttachmentActions>
+                        </Attachment>
+                      ) : null}
+                      {fileError ? (
+                        <Alert variant="destructive">
+                          <AlertDescription>{fileError}</AlertDescription>
+                        </Alert>
+                      ) : null}
+                      <label htmlFor={inputId} className="sr-only">
+                        Ask anything
+                      </label>
+                      <Textarea
+                        ref={textareaRef}
+                        id={inputId}
+                        rows={1}
+                        value={input}
+                        placeholder="Ask anything…"
+                        aria-label="Ask anything"
+                        onChange={(event) => setInput(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey) {
+                            event.preventDefault();
+                            handleSend();
+                          }
+                        }}
+                        className="min-h-10 cursor-text resize-none border-0 bg-transparent text-zinc-50 caret-zinc-50 placeholder:text-zinc-500 focus-visible:ring-0"
+                      />
                       <div className="flex items-center gap-2">
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -509,19 +609,19 @@ export function UniversalAgentShell({
                           <SendIcon aria-hidden="true" />
                         </Button>
                       </div>
-                    </motion.div>
-                  ) : null}
-                </AnimatePresence>
-                {isViewer ? (
-                  <p className="px-1 text-sm text-zinc-400">
-                    Ask for advice. Reports and business actions require an operator.
-                  </p>
-                ) : null}
+                      {isViewer ? (
+                        <p className="px-1 text-sm text-zinc-400">
+                          Ask for advice. Reports and business actions require an operator.
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
-        </div>
-      </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
     </TooltipProvider>
   );
 }
